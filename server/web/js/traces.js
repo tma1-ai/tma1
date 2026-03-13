@@ -1,6 +1,26 @@
 // traces.js — Traces view: all load* functions
 // Depends on: core.js, chart.js, i18n.js
 
+var tracePage = 0;
+var tracePageSize = 15;
+var traceHasNext = false;
+
+function resetTracePaging() { tracePage = 0; }
+function prevTracePage() { if (tracePage <= 0) return; tracePage--; loadTraces(); }
+function nextTracePage() { if (!traceHasNext) return; tracePage++; loadTraces(); }
+function updateTracePager(resultCount) {
+  var prevBtn = document.getElementById('trace-prev-btn');
+  var nextBtn = document.getElementById('trace-next-btn');
+  var info = document.getElementById('trace-page-info');
+  if (!prevBtn || !nextBtn || !info) return;
+  prevBtn.disabled = tracePage <= 0;
+  nextBtn.disabled = !traceHasNext;
+  if (!resultCount) { info.textContent = 'No results'; return; }
+  var start = tracePage * tracePageSize + 1;
+  var end = start + resultCount - 1;
+  info.textContent = 'Page ' + (tracePage + 1) + ' \u00b7 ' + start + '-' + end;
+}
+
 // ===================================================================
 // Global metrics cards (Traces view)
 // ===================================================================
@@ -8,48 +28,48 @@ async function loadMetrics() {
   try {
     // Today's cost (dynamic pricing from tma1_model_pricing)
     var costRes = await query(
-      "SELECT ROUND(SUM(" + costCaseSQL('model', 'input_tokens', 'output_tokens') +
-      "), 4) AS total FROM tma1_token_usage_1m WHERE time_window > NOW() - INTERVAL '" + intervalSQL() + "'"
+      "SELECT ROUND(SUM(" + costCaseSQL(
+        '"span_attributes.gen_ai.request.model"',
+        '"span_attributes.gen_ai.usage.input_tokens"',
+        '"span_attributes.gen_ai.usage.output_tokens"'
+      ) + "), 4) AS total " +
+      "FROM opentelemetry_traces " +
+      "WHERE \"span_attributes.gen_ai.system\" IS NOT NULL " +
+      "AND timestamp > NOW() - INTERVAL '" + intervalSQL() + "'"
     );
     var costVal = rows(costRes)?.[0]?.[0];
     document.getElementById('val-cost').textContent = fmtCost(costVal);
 
     // Today's tokens
     var tokenRes = await query(
-      "SELECT SUM(input_tokens + output_tokens) AS total FROM tma1_token_usage_1m WHERE time_window > NOW() - INTERVAL '" + intervalSQL() + "'"
+      "SELECT SUM(CAST(\"span_attributes.gen_ai.usage.input_tokens\" AS DOUBLE) + " +
+      "CAST(\"span_attributes.gen_ai.usage.output_tokens\" AS DOUBLE)) AS total " +
+      "FROM opentelemetry_traces " +
+      "WHERE \"span_attributes.gen_ai.system\" IS NOT NULL " +
+      "AND timestamp > NOW() - INTERVAL '" + intervalSQL() + "'"
     );
     var tokenVal = rows(tokenRes)?.[0]?.[0];
     document.getElementById('val-tokens').textContent = fmtNum(tokenVal);
 
     // Request count
     var reqRes = await query(
-      "SELECT SUM(request_count) AS total FROM tma1_status_1m WHERE time_window > NOW() - INTERVAL '" + intervalSQL() + "'"
+      "SELECT COUNT(1) AS total " +
+      "FROM opentelemetry_traces " +
+      "WHERE \"span_attributes.gen_ai.system\" IS NOT NULL " +
+      "AND timestamp > NOW() - INTERVAL '" + intervalSQL() + "'"
     );
     var reqVal = rows(reqRes)?.[0]?.[0];
     document.getElementById('val-requests').textContent = fmtNum(reqVal);
 
-    // p95 latency (primary: uddsketch aggregation, fallback: raw traces)
-    try {
-      var latRes = await query(
-        "SELECT uddsketch_calc(0.95, uddsketch_merge(128, 0.01, duration_sketch)) AS p95 FROM tma1_latency_1m WHERE time_window > NOW() - INTERVAL '" + intervalSQL() + "'"
-      );
-      var latVal = rows(latRes)?.[0]?.[0];
-      if (latVal == null) throw new Error('no data');
-      document.getElementById('val-latency').textContent = fmtMs(latVal);
-    } catch {
-      try {
-        var fbRes = await query(
-          "SELECT APPROX_PERCENTILE_CONT(duration_nano, 0.95) AS p95 " +
-          "FROM opentelemetry_traces " +
-          "WHERE \"span_attributes.gen_ai.system\" IS NOT NULL " +
-          "AND timestamp > NOW() - INTERVAL '" + intervalSQL() + "'"
-        );
-        var fbVal = rows(fbRes)?.[0]?.[0];
-        document.getElementById('val-latency').textContent = fbVal != null ? fmtMs(fbVal) : '\u2014';
-      } catch {
-        document.getElementById('val-latency').textContent = '\u2014';
-      }
-    }
+    // p95 latency (raw trace range query)
+    var latRes = await query(
+      "SELECT APPROX_PERCENTILE_CONT(duration_nano, 0.95) AS p95 " +
+      "FROM opentelemetry_traces " +
+      "WHERE \"span_attributes.gen_ai.system\" IS NOT NULL " +
+      "AND timestamp > NOW() - INTERVAL '" + intervalSQL() + "'"
+    );
+    var latVal = rows(latRes)?.[0]?.[0];
+    document.getElementById('val-latency').textContent = latVal != null ? fmtMs(latVal) : '\u2014';
 
   } catch (err) {
     var banner = document.getElementById('error-banner');
@@ -75,10 +95,12 @@ async function loadOverviewCharts() {
 async function loadTokenChart() {
   try {
     var res = await query(
-      "SELECT date_bin('5 minutes'::INTERVAL, time_window) AS t, " +
-      "SUM(input_tokens) AS inp, SUM(output_tokens) AS outp " +
-      "FROM tma1_token_usage_1m " +
-      "WHERE time_window > NOW() - INTERVAL '" + intervalSQL() + "' " +
+      "SELECT date_bin('5 minutes'::INTERVAL, timestamp) AS t, " +
+      "SUM(CAST(\"span_attributes.gen_ai.usage.input_tokens\" AS DOUBLE)) AS inp, " +
+      "SUM(CAST(\"span_attributes.gen_ai.usage.output_tokens\" AS DOUBLE)) AS outp " +
+      "FROM opentelemetry_traces " +
+      "WHERE \"span_attributes.gen_ai.system\" IS NOT NULL " +
+      "  AND timestamp > NOW() - INTERVAL '" + intervalSQL() + "' " +
       "GROUP BY t ORDER BY t"
     );
     var data = rowsToObjects(res);
@@ -93,10 +115,15 @@ async function loadTokenChart() {
 async function loadCostChart() {
   try {
     var res = await query(
-      "SELECT date_bin('5 minutes'::INTERVAL, time_window) AS t, " +
-      "SUM(" + costCaseSQL('model', 'input_tokens', 'output_tokens') + ") AS cost " +
-      "FROM tma1_token_usage_1m " +
-      "WHERE time_window > NOW() - INTERVAL '" + intervalSQL() + "' " +
+      "SELECT date_bin('5 minutes'::INTERVAL, timestamp) AS t, " +
+      "SUM(" + costCaseSQL(
+        '"span_attributes.gen_ai.request.model"',
+        '"span_attributes.gen_ai.usage.input_tokens"',
+        '"span_attributes.gen_ai.usage.output_tokens"'
+      ) + ") AS cost " +
+      "FROM opentelemetry_traces " +
+      "WHERE \"span_attributes.gen_ai.system\" IS NOT NULL " +
+      "  AND timestamp > NOW() - INTERVAL '" + intervalSQL() + "' " +
       "GROUP BY t ORDER BY t"
     );
     var data = rowsToObjects(res);
@@ -108,49 +135,35 @@ async function loadCostChart() {
 }
 
 async function loadLatencyChart() {
-  var rendered = false;
   try {
     var res = await query(
-      "SELECT date_bin('5 minutes'::INTERVAL, time_window) AS t, " +
-      "uddsketch_calc(0.50, uddsketch_merge(128, 0.01, duration_sketch)) AS p50, " +
-      "uddsketch_calc(0.95, uddsketch_merge(128, 0.01, duration_sketch)) AS p95 " +
-      "FROM tma1_latency_1m " +
-      "WHERE time_window > NOW() - INTERVAL '" + intervalSQL() + "' " +
+      "SELECT date_bin('5 minutes'::INTERVAL, timestamp) AS t, " +
+      "APPROX_PERCENTILE_CONT(duration_nano, 0.50) AS p50, " +
+      "APPROX_PERCENTILE_CONT(duration_nano, 0.95) AS p95 " +
+      "FROM opentelemetry_traces " +
+      "WHERE \"span_attributes.gen_ai.system\" IS NOT NULL " +
+      "AND timestamp > NOW() - INTERVAL '" + intervalSQL() + "' " +
       "GROUP BY t ORDER BY t"
     );
     var data = rowsToObjects(res);
-    if (data.length) { renderChart('chart-latency', data, [
+    if (data.length) {
+      renderChart('chart-latency', data, [
       { label: t('chart.p50'), key: 'p50', color: '#3fb950' },
       { label: t('chart.p95'), key: 'p95', color: '#d2a8ff' },
-    ], function(v) { return fmtMs(v); }); rendered = true; }
-  } catch { /* primary failed */ }
-  if (!rendered) {
-    try {
-      var res2 = await query(
-        "SELECT date_bin('5 minutes'::INTERVAL, timestamp) AS t, " +
-        "APPROX_PERCENTILE_CONT(duration_nano, 0.50) AS p50, " +
-        "APPROX_PERCENTILE_CONT(duration_nano, 0.95) AS p95 " +
-        "FROM opentelemetry_traces " +
-        "WHERE \"span_attributes.gen_ai.system\" IS NOT NULL " +
-        "AND timestamp > NOW() - INTERVAL '" + intervalSQL() + "' " +
-        "GROUP BY t ORDER BY t"
-      );
-      var data2 = rowsToObjects(res2);
-      if (data2.length) renderChart('chart-latency', data2, [
-        { label: t('chart.p50'), key: 'p50', color: '#3fb950' },
-        { label: t('chart.p95'), key: 'p95', color: '#d2a8ff' },
       ], function(v) { return fmtMs(v); });
-    } catch { /* fallback also failed */ }
-  }
+    }
+  } catch { /* no data yet */ }
 }
 
 async function loadErrorChart() {
   try {
     var res = await query(
-      "SELECT date_bin('5 minutes'::INTERVAL, time_window) AS t, " +
-      "SUM(request_count) AS total, SUM(error_count) AS errors " +
-      "FROM tma1_status_1m " +
-      "WHERE time_window > NOW() - INTERVAL '" + intervalSQL() + "' " +
+      "SELECT date_bin('5 minutes'::INTERVAL, timestamp) AS t, " +
+      "COUNT(1) AS total, " +
+      "SUM(CASE WHEN span_status_code = 'STATUS_CODE_ERROR' THEN 1 ELSE 0 END) AS errors " +
+      "FROM opentelemetry_traces " +
+      "WHERE \"span_attributes.gen_ai.system\" IS NOT NULL " +
+      "  AND timestamp > NOW() - INTERVAL '" + intervalSQL() + "' " +
       "GROUP BY t ORDER BY t"
     );
     var data = rowsToObjects(res);
@@ -179,6 +192,9 @@ async function loadTraces() {
   if (modelFilter) where += " AND \"span_attributes.gen_ai.request.model\" = '" + escapeSQLString(modelFilter) + "'";
   if (statusFilter) where += " AND span_status_code = '" + escapeSQLString(statusFilter) + "'";
 
+  var limit = tracePageSize + 1;
+  var offset = tracePage * tracePageSize;
+
   try {
     var res = await query(
       "SELECT timestamp, trace_id, " +
@@ -189,13 +205,17 @@ async function loadTraces() {
       "span_status_code AS status, " +
       "\"span_attributes.gen_ai.response.finish_reasons\" AS finish_reason " +
       "FROM opentelemetry_traces " +
-      where + " ORDER BY timestamp DESC LIMIT 50"
+      where + " ORDER BY timestamp DESC LIMIT " + limit + " OFFSET " + offset
     );
-    var data = rowsToObjects(res);
+    var allRows = rowsToObjects(res);
+    traceHasNext = allRows.length > tracePageSize;
+    var data = traceHasNext ? allRows.slice(0, tracePageSize) : allRows;
     var tbody = document.getElementById('traces-body');
 
     if (!data.length) {
+      if (tracePage > 0) { tracePage--; return loadTraces(); }
       tbody.innerHTML = '<tr><td colspan="7" class="loading">' + t('empty.no_traces') + '</td></tr>';
+      updateTracePager(0);
       return;
     }
 
@@ -205,7 +225,7 @@ async function loadTraces() {
       '<td>' + escapeHTML(d.model || 'unknown') + '</td>' +
       '<td>' + fmtNum(d.input_tok) + '</td>' +
       '<td>' + fmtNum(d.output_tok) + '</td>' +
-      '<td>' + (d.duration_ms != null ? d.duration_ms + 'ms' : '\u2014') + '</td>' +
+      '<td>' + fmtDurMs(d.duration_ms) + '</td>' +
       '<td><span class="badge ' + (d.status === 'STATUS_CODE_ERROR' ? 'badge-error' : 'badge-ok') + '">' +
         (d.status === 'STATUS_CODE_ERROR' ? 'ERROR' : 'OK') + '</span></td>' +
       '<td>' + escapeHTML(d.finish_reason || '') + '</td>' +
@@ -220,7 +240,10 @@ async function loadTraces() {
       models.map(function(m) { return '<option value="' + escapeHTML(m) + '"' +
         (m === current ? ' selected' : '') + '>' + escapeHTML(m) + '</option>'; }).join('');
 
+    updateTracePager(data.length);
   } catch (err) {
+    traceHasNext = false;
+    updateTracePager(0);
     document.getElementById('traces-body').innerHTML =
       '<tr><td colspan="7" class="loading">Error: ' + escapeHTML(err.message) + '</td></tr>';
   }
@@ -359,10 +382,10 @@ function renderWaterfall(container, spans) {
       '</div>' +
       '<div class="waterfall-track">' +
         '<div class="waterfall-bar ' + barClass + '" style="left:' + leftPct + '%;width:' + widthPct + '%">' +
-          (durMs >= 10 ? Math.round(durMs) + 'ms' : '') +
+          (durMs >= 10 ? fmtDurMs(durMs) : '') +
         '</div>' +
       '</div>' +
-      '<div class="waterfall-dur">' + (durMs >= 1 ? Math.round(durMs) + 'ms' : '<1ms') + '</div>';
+      '<div class="waterfall-dur">' + fmtDurMs(durMs) + '</div>';
     container.appendChild(row);
   });
 }
@@ -395,11 +418,17 @@ async function loadCostTab() {
 
 async function loadCostByModel() {
   try {
+    var costExpr = costCaseSQL(
+      '"span_attributes.gen_ai.request.model"',
+      '"span_attributes.gen_ai.usage.input_tokens"',
+      '"span_attributes.gen_ai.usage.output_tokens"'
+    );
     var res = await query(
-      "SELECT model, ROUND(SUM(" + costCaseSQL('model', 'input_tokens', 'output_tokens') +
+      "SELECT \"span_attributes.gen_ai.request.model\" AS model, ROUND(SUM(" + costExpr +
       "), 4) AS total_cost " +
-      "FROM tma1_token_usage_1m " +
-      "WHERE time_window > NOW() - INTERVAL '" + intervalSQL() + "' " +
+      "FROM opentelemetry_traces " +
+      "WHERE \"span_attributes.gen_ai.system\" IS NOT NULL " +
+      "  AND timestamp > NOW() - INTERVAL '" + intervalSQL() + "' " +
       "GROUP BY model ORDER BY total_cost DESC LIMIT 10"
     );
     var data = rowsToObjects(res);
@@ -484,15 +513,21 @@ async function loadFinishReasons() {
 
 async function loadModelComparison() {
   try {
+    var costExpr = costCaseSQL(
+      '"span_attributes.gen_ai.request.model"',
+      '"span_attributes.gen_ai.usage.input_tokens"',
+      '"span_attributes.gen_ai.usage.output_tokens"'
+    );
     var res = await query(
-      "SELECT s.model, " +
-      "SUM(s.request_count) AS reqs, " +
-      "SUM(s.error_count) AS errs, " +
-      "SUM(" + costCaseSQL('t.model', 't.input_tokens', 't.output_tokens') + ") AS total_cost " +
-      "FROM tma1_status_1m s " +
-      "LEFT JOIN tma1_token_usage_1m t ON s.model = t.model AND s.time_window = t.time_window " +
-      "WHERE s.time_window > NOW() - INTERVAL '" + intervalSQL() + "' " +
-      "GROUP BY s.model ORDER BY reqs DESC"
+      "SELECT \"span_attributes.gen_ai.request.model\" AS model, " +
+      "COUNT(1) AS reqs, " +
+      "SUM(CASE WHEN span_status_code = 'STATUS_CODE_ERROR' THEN 1 ELSE 0 END) AS errs, " +
+      "ROUND(AVG(duration_nano) / 1000000.0, 0) AS avg_latency_ms, " +
+      "SUM(" + costExpr + ") AS total_cost " +
+      "FROM opentelemetry_traces " +
+      "WHERE \"span_attributes.gen_ai.system\" IS NOT NULL " +
+      "  AND timestamp > NOW() - INTERVAL '" + intervalSQL() + "' " +
+      "GROUP BY model ORDER BY reqs DESC"
     );
     var data = rowsToObjects(res);
     var tbody = document.getElementById('model-compare-body');
@@ -508,7 +543,7 @@ async function loadModelComparison() {
       return '<tr>' +
         '<td>' + escapeHTML(d.model) + '</td>' +
         '<td>' + fmtNum(reqs) + '</td>' +
-        '<td>\u2014</td>' +
+        '<td>' + fmtDurMs(d.avg_latency_ms) + '</td>' +
         '<td>' + avgCost + '</td>' +
         '<td>' + errRate + '</td>' +
         '</tr>';
@@ -522,6 +557,7 @@ function switchToTrace(traceId) {
   document.querySelector('[data-tab="traces"]').classList.add('active');
   document.getElementById('tab-traces').classList.add('active');
   document.getElementById('trace-id-filter').value = traceId;
+  resetTracePaging();
   loadTraces().then(function() {
     var row = document.querySelector('#traces-body tr.clickable');
     if (row) toggleTraceDetail(row, traceId);
@@ -602,7 +638,7 @@ async function loadAnomalies() {
         '<div style="font-size:13px">' +
         escapeHTML(d.model || 'unknown') + ' &middot; ' +
         fmtNum(d.input_tok) + ' in / ' + fmtNum(d.output_tok) + ' out &middot; ' +
-        (d.duration_ms || '\u2014') + 'ms &middot; ' +
+        fmtDurMs(d.duration_ms) + ' &middot; ' +
         fmtTime(d.timestamp) +
         '</div>' +
         '</div>';
@@ -830,7 +866,7 @@ async function loadDangerousCommands() {
       '<td title="' + escapeHTML(d.trace_id) + '">' + escapeHTML((d.trace_id || '').substring(0, 8)) + '...</td>' +
       '<td>' + escapeHTML(d.span_name) + '</td>' +
       '<td>' + escapeHTML(d.model || '\u2014') + '</td>' +
-      '<td>' + (d.duration_ms != null ? d.duration_ms + 'ms' : '\u2014') + '</td>' +
+      '<td>' + fmtDurMs(d.duration_ms) + '</td>' +
       '</tr>';
     }).join('');
   } catch {
@@ -867,7 +903,7 @@ async function loadToolTimeline() {
       '<td>' + escapeHTML(d.span_name) + '</td>' +
       '<td><span class="badge ' + (d.span_status_code === 'STATUS_CODE_ERROR' ? 'badge-error' : 'badge-ok') + '">' +
         (d.span_status_code === 'STATUS_CODE_ERROR' ? 'ERROR' : 'OK') + '</span></td>' +
-      '<td>' + (d.duration_ms != null ? d.duration_ms + 'ms' : '\u2014') + '</td>' +
+      '<td>' + fmtDurMs(d.duration_ms) + '</td>' +
       '</tr>';
     }).join('');
   } catch {

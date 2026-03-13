@@ -15,7 +15,14 @@ async function query(sql) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ sql: sql }),
   });
-  if (!r.ok) throw new Error('HTTP ' + r.status);
+  if (!r.ok) {
+    var msg = 'HTTP ' + r.status;
+    try {
+      var body = await r.text();
+      if (body) msg += ': ' + body.slice(0, 200);
+    } catch { /* keep status-only message */ }
+    throw new Error(msg);
+  }
   return r.json();
 }
 
@@ -50,9 +57,18 @@ function fmtCost(n) {
 
 function fmtMs(ns) {
   if (ns == null) return '\u2014';
-  var ms = ns / 1000000;
-  if (ms >= 1000) return (ms / 1000).toFixed(1) + 's';
-  return Math.round(ms) + 'ms';
+  var s = ns / 1e9;
+  return s.toFixed(1) + 's';
+}
+
+function fmtDurMs(ms) {
+  if (ms == null) return '\u2014';
+  return (ms / 1000).toFixed(1) + 's';
+}
+
+function fmtDurMsPrecise(ms) {
+  if (ms == null) return '\u2014';
+  return (ms / 1000).toFixed(3) + 's';
 }
 
 function tsToMs(v) {

@@ -250,6 +250,20 @@ post_install() {
   echo '    "OTEL_LOGS_EXPORTER": "otlp"'
   echo '  }'
   echo ""
+  echo "Codex (~/.codex/config.toml):"
+  echo ""
+  echo '  [otel]'
+  echo '  log_user_prompt = true'
+  echo '  [otel.exporter.otlp-http]'
+  echo '  endpoint = "http://localhost:14318/v1/logs"'
+  echo '  protocol = "binary"'
+  echo '  [otel.trace_exporter.otlp-http]'
+  echo '  endpoint = "http://localhost:14318/v1/traces"'
+  echo '  protocol = "binary"'
+  echo '  [otel.metrics_exporter.otlp-http]'
+  echo '  endpoint = "http://localhost:14318/v1/metrics"'
+  echo '  protocol = "binary"'
+  echo ""
   echo "Dashboard: http://localhost:${TMA1_PORT}"
   echo ""
 }

@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -66,18 +65,9 @@ func main() {
 		_ = gdb.Stop(stopCtx)
 	}()
 
-	// Step 3: initialize Flow aggregations (idempotent).
-	if err := greptimedb.InitFlows(cfg.GreptimeDBHTTPPort, logger); err != nil {
-		// Non-fatal: log and continue. Flows may already exist.
-		logger.Warn("flow init warning", "err", err)
-	}
-
-	// Step 3b: seed model pricing + create dynamic cost flow.
+	// Step 3: ensure pricing table exists and seed model pricing.
 	if err := greptimedb.SeedPricing(cfg.GreptimeDBHTTPPort, logger); err != nil {
 		logger.Warn("seed pricing warning", "err", err)
-	}
-	if err := greptimedb.InitCostFlow(cfg.GreptimeDBHTTPPort, logger); err != nil {
-		logger.Warn("cost flow init warning", "err", err)
 	}
 
 	// Step 4: start HTTP server (dashboard + API proxy).
@@ -108,7 +98,7 @@ func main() {
 
 	logger.Info("tma1 dashboard ready",
 		"url", "http://localhost:"+cfg.Port,
-		"otlp_endpoint", fmt.Sprintf("http://localhost:%d/v1/otlp", cfg.GreptimeDBHTTPPort),
+		"otlp_endpoint", "http://localhost:"+cfg.Port+"/v1/otlp",
 	)
 
 	if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {

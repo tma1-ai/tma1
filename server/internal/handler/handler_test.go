@@ -289,6 +289,99 @@ func TestOTLPProxyMetrics(t *testing.T) {
 	}
 }
 
+func TestOTLPDirectProxyTraces(t *testing.T) {
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/otlp/v1/traces" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		if got := r.Header.Get("x-greptime-pipeline-name"); got != "greptime_trace_v1" {
+			t.Errorf("x-greptime-pipeline-name = %q, want %q", got, "greptime_trace_v1")
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{}`)
+	}))
+	defer fake.Close()
+
+	port := strings.TrimPrefix(fake.URL, "http://127.0.0.1:")
+	portNum := 0
+	fmt.Sscanf(port, "%d", &portNum)
+
+	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
+	srv := New(portNum, "14318", http.Dir("."), logger)
+	router := srv.Router()
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/traces", strings.NewReader("trace-payload"))
+	req.Header.Set("Content-Type", "application/x-protobuf")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+}
+
+func TestOTLPDirectProxyLogs(t *testing.T) {
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/otlp/v1/logs" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		if got := r.Header.Get("x-greptime-pipeline-name"); got != "" {
+			t.Errorf("x-greptime-pipeline-name = %q, want empty (not injected for logs)", got)
+		}
+		w.WriteHeader(http.StatusAccepted)
+		fmt.Fprint(w, `{}`)
+	}))
+	defer fake.Close()
+
+	port := strings.TrimPrefix(fake.URL, "http://127.0.0.1:")
+	portNum := 0
+	fmt.Sscanf(port, "%d", &portNum)
+
+	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
+	srv := New(portNum, "14318", http.Dir("."), logger)
+	router := srv.Router()
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/logs", strings.NewReader("log-payload"))
+	req.Header.Set("Content-Type", "application/x-protobuf")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusAccepted)
+	}
+}
+
+func TestOTLPDirectProxyMetrics(t *testing.T) {
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/otlp/v1/metrics" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		if got := r.Header.Get("x-greptime-pipeline-name"); got != "" {
+			t.Errorf("x-greptime-pipeline-name = %q, want empty (not injected for metrics)", got)
+		}
+		w.WriteHeader(http.StatusAccepted)
+		fmt.Fprint(w, `{}`)
+	}))
+	defer fake.Close()
+
+	port := strings.TrimPrefix(fake.URL, "http://127.0.0.1:")
+	portNum := 0
+	fmt.Sscanf(port, "%d", &portNum)
+
+	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
+	srv := New(portNum, "14318", http.Dir("."), logger)
+	router := srv.Router()
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/metrics", strings.NewReader("metrics-payload"))
+	req.Header.Set("Content-Type", "application/x-protobuf")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusAccepted)
+	}
+}
+
 func TestOTLPProxyPassthrough(t *testing.T) {
 	// Verify request body and custom headers are forwarded.
 	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

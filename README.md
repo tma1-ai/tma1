@@ -3,7 +3,7 @@
 > *"Your agent runs. TMA1 remembers."*
 
 Local-first observability for AI agents.
-Track traces, token usage, cost, latency, errors, and conversation replay in one place.
+Track token usage, cost, latency, errors, and security signals across your AI agents.
 No cloud account, no Docker, no Grafana setup.
 
 Named after TMA-1 (Tycho Magnetic Anomaly-1) from *2001: A Space Odyssey*:
@@ -11,11 +11,13 @@ the monolith buried on the moon, silently recording everything until you dig it 
 
 ## What You Get
 
-- **Conversation replay**: inspect prompts and responses for each run
-- **Cost and token tracking**: per model, per time window
-- **Latency and error visibility**: find slow and failing calls quickly
-- **Cross-signal debugging**: traces, metrics, and logs linked by `trace_id`
-- **SQL access**: query raw events and rollups directly
+- **Cost breakdown**: token counts and estimated cost per model, with burn-rate projections and cache efficiency
+- **Latency tracking**: p50/p95 percentiles per model, tool performance tables
+- **Security monitoring**: shell command detection, prompt injection alerts, webhook error tracking
+- **Conversation replay**: inspect prompts and responses (where supported, e.g. Claude Code)
+- **Anomaly detection**: flags unusual token counts, high error rates, or slow responses
+- **Full-text search**: search across all recorded events and traces
+- **SQL access**: query raw events directly via MySQL protocol or built-in query UI
 
 ## Quick Install
 
@@ -50,7 +52,25 @@ tma1-server
 # OpenClaw (sends traces)
 openclaw config set diagnostics.otel.endpoint http://localhost:14318/v1/otlp
 
-# Any OTel SDK (sends traces)
+# Codex — add to ~/.codex/config.toml:
+#   [otel]
+#   log_user_prompt = true
+#
+#   [otel.exporter.otlp-http]
+#   endpoint = "http://localhost:14318/v1/logs"
+#   protocol = "binary"
+#
+#   [otel.trace_exporter.otlp-http]
+#   endpoint = "http://localhost:14318/v1/traces"
+#   protocol = "binary"
+#
+#   [otel.metrics_exporter.otlp-http]
+#   endpoint = "http://localhost:14318/v1/metrics"
+#   protocol = "binary"
+#
+#   Then restart Codex.
+
+# Any OTel SDK
 OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:14318/v1/otlp \
 OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf \
 your-agent
@@ -62,13 +82,25 @@ open http://localhost:14318
 ## Supported Sources
 
 - **Claude Code**: OTel metrics + logs
+- **Codex**: OTel logs + traces, plus native metrics when `otel.metrics_exporter` is enabled
 - **OpenClaw**: OTel traces + metrics
 - **Any OTel-compatible GenAI app**: traces with `gen_ai.*` attributes
+
+Codex uses separate OTLP exporters per signal. In practice, configure logs, traces,
+and metrics with their own direct endpoints rather than a single `/v1/otlp` base URL.
 
 Send OTLP to:
 
 ```text
 http://localhost:14318/v1/otlp
+```
+
+Or direct signal endpoints (also supported):
+
+```text
+http://localhost:14318/v1/logs
+http://localhost:14318/v1/traces
+http://localhost:14318/v1/metrics
 ```
 
 ## How It Works

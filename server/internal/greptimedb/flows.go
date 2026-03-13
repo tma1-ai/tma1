@@ -73,6 +73,14 @@ type modelPrice struct {
 	OutputPrice float64
 }
 
+const pricingTableDDL = `CREATE TABLE IF NOT EXISTS tma1_model_pricing (
+    model_pattern STRING PRIMARY KEY,
+    priority      INT32,
+    input_price   DOUBLE,
+    output_price  DOUBLE,
+    ts            TIMESTAMP TIME INDEX DEFAULT '2024-01-01T00:00:00Z'
+);`
+
 // defaultPricing is the seed data inserted on first start.
 var defaultPricing = []modelPrice{
 	{"claude-opus-4-6", 10, 5.0, 25.0},
@@ -109,6 +117,9 @@ var defaultPricing = []modelPrice{
 // SeedPricing inserts default model pricing if the table is empty.
 func SeedPricing(httpPort int, logger *slog.Logger) error {
 	sqlURL := fmt.Sprintf("http://localhost:%d/v1/sql", httpPort)
+	if err := execSQL(sqlURL, pricingTableDDL); err != nil {
+		return fmt.Errorf("ensure pricing table: %w", err)
+	}
 
 	count, err := queryScalarInt(sqlURL, "SELECT COUNT(*) FROM tma1_model_pricing")
 	if err != nil {

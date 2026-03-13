@@ -52,6 +52,10 @@ func (s *Server) Router() http.Handler {
 	// OTLP proxy — agents send OTel data here; tma1-server injects
 	// the x-greptime-pipeline-name header for trace requests.
 	r.HandleFunc("/v1/otlp/*", s.handleOTLPProxy)
+	// Also support direct OTLP signal paths used by some SDKs/tools.
+	r.HandleFunc("/v1/traces", s.handleOTLPDirectProxy)
+	r.HandleFunc("/v1/metrics", s.handleOTLPDirectProxy)
+	r.HandleFunc("/v1/logs", s.handleOTLPDirectProxy)
 
 	// Dashboard UI (embedded static files)
 	r.Handle("/*", http.FileServer(s.webFS))
@@ -70,9 +74,9 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	resp, err := http.Get(healthURL) //nolint:gosec
 	if err != nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
-			"status":      "degraded",
-			"greptimedb":  "unreachable",
-			"error":       err.Error(),
+			"status":     "degraded",
+			"greptimedb": "unreachable",
+			"error":      err.Error(),
 		})
 		return
 	}
@@ -160,6 +164,16 @@ func (s *Server) handlePromProxy(w http.ResponseWriter, r *http.Request) {
 // x-greptime-pipeline-name header required by GreptimeDB.
 func (s *Server) handleOTLPProxy(w http.ResponseWriter, r *http.Request) {
 	subPath := chi.URLParam(r, "*")
+	s.proxyOTLP(w, r, subPath)
+}
+
+// handleOTLPDirectProxy supports direct signal routes: /v1/traces, /v1/metrics, /v1/logs.
+func (s *Server) handleOTLPDirectProxy(w http.ResponseWriter, r *http.Request) {
+	subPath := strings.TrimPrefix(r.URL.Path, "/")
+	s.proxyOTLP(w, r, subPath)
+}
+
+func (s *Server) proxyOTLP(w http.ResponseWriter, r *http.Request, subPath string) {
 	target := fmt.Sprintf("http://localhost:%d/v1/otlp/%s", s.greptimeHTTPPort, subPath)
 	if r.URL.RawQuery != "" {
 		target += "?" + r.URL.RawQuery

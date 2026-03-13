@@ -131,11 +131,11 @@ curl -sf http://localhost:14318/health && echo "RUNNING" || echo "NOT_RUNNING"
 `[AGENT]` Download and run the TMA1 installer:
 
 ```bash
-curl -sSL https://tma1.ai/install.sh | sh
+curl -fsSL https://tma1.ai/install.sh | sh
 ```
 
 This will:
-1. Download the GreptimeDB binary into `~/.tma1/bin/`
+1. Download the `tma1-server` binary into `~/.tma1/bin/` (GreptimeDB is auto-downloaded on first start)
 2. Start `tma1-server` (which manages GreptimeDB and serves the dashboard)
 3. Print the dashboard URL: `http://localhost:14318`
 
@@ -146,7 +146,7 @@ curl -sf http://localhost:14318/health && echo "OK" || echo "FAILED"
 ```
 
 If it fails, tell the user:
-> TMA1 didn't start correctly. Check `~/.tma1/tma1-server.log` for errors.
+> TMA1 didn't start correctly. Check logs for errors: on macOS `~/Library/Logs/tma1-server.log`, on Linux `journalctl --user -u tma1-server`.
 
 ---
 
@@ -194,6 +194,29 @@ Add to `~/.claude/settings.json`:
 
 Claude Code exports metrics and logs (not traces). The metrics/logs exporters must be explicitly enabled.
 
+#### Codex
+
+Add to `~/.codex/config.toml`:
+
+```toml
+[otel]
+log_user_prompt = true
+
+[otel.exporter.otlp-http]
+endpoint = "http://localhost:14318/v1/logs"
+protocol = "binary"
+
+[otel.trace_exporter.otlp-http]
+endpoint = "http://localhost:14318/v1/traces"
+protocol = "binary"
+
+[otel.metrics_exporter.otlp-http]
+endpoint = "http://localhost:14318/v1/metrics"
+protocol = "binary"
+```
+
+Codex uses separate exporters for logs, traces, and metrics. Restart Codex after config changes.
+
 #### Any OTel SDK
 
 ```bash
@@ -238,7 +261,7 @@ curl -s -X POST http://localhost:14318/api/query \
   | python3 -m json.tool
 ```
 
-If you see `opentelemetry_traces`, `openclaw_*`, or `claude_code_*` tables, data is flowing.
+If you see `opentelemetry_logs`, `opentelemetry_traces`, `openclaw_*`, or `claude_code_*` tables, data is flowing.
 
 ---
 
@@ -258,17 +281,15 @@ Your agent's token usage, cost, and latency are now being recorded locally.
 Open the GreptimeDB query console at http://localhost:14000/dashboard
 and try these:
 
--- Today's cost by model (from flow aggregation)
-SELECT model, ROUND(SUM(cost_usd), 4) AS total_cost
-FROM tma1_cost_1m
-WHERE time_window > NOW() - INTERVAL '1 day'
-GROUP BY model ORDER BY total_cost DESC;
-
--- Token usage by model today
-SELECT model, SUM(input_tokens) AS input, SUM(output_tokens) AS output
-FROM tma1_token_usage_1m
-WHERE time_window > NOW() - INTERVAL '1 day'
-GROUP BY model ORDER BY input DESC;
+-- Today's cost by model
+SELECT "span_attributes.gen_ai.request.model" AS model,
+       COUNT(*) AS requests,
+       SUM(CAST("span_attributes.gen_ai.usage.input_tokens" AS DOUBLE)) AS input_tok,
+       SUM(CAST("span_attributes.gen_ai.usage.output_tokens" AS DOUBLE)) AS output_tok
+FROM opentelemetry_traces
+WHERE "span_attributes.gen_ai.system" IS NOT NULL
+  AND timestamp > NOW() - INTERVAL '1 day'
+GROUP BY model ORDER BY input_tok DESC;
 
 💾 YOUR DATA
 Stored locally in: ~/.tma1/data/
@@ -276,7 +297,7 @@ Never sent to any cloud service.
 
 ♻️ RESTART
 If TMA1 stops, run: tma1-server
-Or reinstall: curl -sSL https://tma1.ai/install.sh | sh
+Or reinstall: curl -fsSL https://tma1.ai/install.sh | sh
 ```
 
 ---
@@ -304,7 +325,6 @@ Check which tables exist:
 - `claude_code_cost_usage_USD_total` → Claude Code metrics
 - `opentelemetry_traces` → traces from OpenClaw or GenAI SDK
 - `openclaw_tokens_total` → OpenClaw metrics
-- `tma1_cost_1m` → flow aggregations (from GenAI traces)
 
 ---
 
@@ -388,7 +408,7 @@ SELECT timestamp,
        json_get_int(log_attributes, 'input_tokens') AS input_tok,
        json_get_int(log_attributes, 'output_tokens') AS output_tok,
        json_get_float(log_attributes, 'cost_usd') AS cost_usd,
-       json_get_int(log_attributes, 'duration_ms') AS duration_ms
+       json_get_float(log_attributes, 'duration_ms') AS duration_ms
 FROM opentelemetry_logs
 WHERE body = 'claude_code.api_request'
 ORDER BY timestamp DESC
@@ -424,24 +444,34 @@ ORDER BY timestamp DESC
 LIMIT 20
 ```
 
-**Cost from flow aggregation:**
+**Cost by model (from raw traces, approximate pricing):**
 ```sql
-SELECT model,
-       ROUND(SUM(cost_usd), 4) AS cost_usd
-FROM tma1_cost_1m
-WHERE time_window >= DATE_TRUNC('day', NOW())
+-- NOTE: pricing rates below are approximate and may be outdated.
+-- Adjust the per-token rates to match your current provider pricing.
+SELECT "span_attributes.gen_ai.request.model" AS model,
+       ROUND(SUM(CASE
+         WHEN "span_attributes.gen_ai.request.model" LIKE '%claude-3-5-sonnet%' THEN
+           CAST("span_attributes.gen_ai.usage.input_tokens" AS DOUBLE)*3/1e6 + CAST("span_attributes.gen_ai.usage.output_tokens" AS DOUBLE)*15/1e6
+         WHEN "span_attributes.gen_ai.request.model" LIKE '%gpt-4o%' THEN
+           CAST("span_attributes.gen_ai.usage.input_tokens" AS DOUBLE)*2.5/1e6 + CAST("span_attributes.gen_ai.usage.output_tokens" AS DOUBLE)*10/1e6
+         ELSE CAST("span_attributes.gen_ai.usage.input_tokens" AS DOUBLE)*1/1e6 + CAST("span_attributes.gen_ai.usage.output_tokens" AS DOUBLE)*3/1e6
+       END), 4) AS cost_usd
+FROM opentelemetry_traces
+WHERE "span_attributes.gen_ai.system" IS NOT NULL
+  AND timestamp >= DATE_TRUNC('day', NOW())
 GROUP BY model
 ORDER BY cost_usd DESC
 ```
 
-**Token usage from flow aggregation:**
+**Token usage by model:**
 ```sql
-SELECT model,
-       SUM(input_tokens) AS input_tok,
-       SUM(output_tokens) AS output_tok,
-       SUM(request_count) AS requests
-FROM tma1_token_usage_1m
-WHERE time_window >= DATE_TRUNC('day', NOW())
+SELECT "span_attributes.gen_ai.request.model" AS model,
+       SUM(CAST("span_attributes.gen_ai.usage.input_tokens" AS DOUBLE)) AS input_tok,
+       SUM(CAST("span_attributes.gen_ai.usage.output_tokens" AS DOUBLE)) AS output_tok,
+       COUNT(*) AS requests
+FROM opentelemetry_traces
+WHERE "span_attributes.gen_ai.system" IS NOT NULL
+  AND timestamp >= DATE_TRUNC('day', NOW())
 GROUP BY model
 ORDER BY input_tok DESC
 ```
@@ -452,7 +482,7 @@ ORDER BY input_tok DESC
 
 | Symptom | Fix |
 | --- | --- |
-| `tma1-server` not starting | Check `~/.tma1/tma1-server.log`; verify port 14318 is free |
+| `tma1-server` not starting | macOS: check `~/Library/Logs/tma1-server.log`; Linux: `journalctl --user -u tma1-server`; verify port 14318 is free |
 | GreptimeDB not healthy | Wait longer; check port 14000 is free |
 | No data in dashboard | Verify agent OTel config points to `http://localhost:14318/v1/otlp` and restart the agent |
 | Port conflict on 14000 | Set `TMA1_GREPTIMEDB_HTTP_PORT=14001` and update agent endpoint config |

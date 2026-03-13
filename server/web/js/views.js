@@ -1,9 +1,18 @@
 // views.js — view management, theme, tab navigation, init
-// Depends on: core.js, chart.js, i18n.js, traces.js, claude-code.js
+// Depends on: core.js, chart.js, i18n.js, traces.js, claude-code.js, codex.js
 // Must be loaded LAST. Calls initViews() at the bottom.
 
-var currentView = null; // 'claude-code', 'openclaw', or 'traces'
-var dataSources = { hasLogs: false, hasTraces: false, hasOpenClaw: false, hasGenAITraces: false, ccMetrics: [] };
+var currentView = null; // 'claude-code', 'codex', 'openclaw', or 'traces'
+var dataSources = {
+  hasLogs: false,
+  hasTraces: false,
+  hasOpenClaw: false,
+  hasGenAITraces: false,
+  hasClaudeLogs: false,
+  hasCodex: false,
+  ccMetrics: [],
+  codexMetrics: [],
+};
 
 async function detectDataSources() {
   try {
@@ -16,8 +25,25 @@ async function detectDataSources() {
       hasTraces: tables.includes('opentelemetry_traces'),
       hasOpenClaw: false,
       hasGenAITraces: false,
+      hasClaudeLogs: false,
+      hasCodex: false,
       ccMetrics: tables.filter(function(t) { return t.startsWith('claude_code_'); }),
+      codexMetrics: tables.filter(function(t) { return t.startsWith('codex_'); }),
     };
+    result.hasCodex = result.codexMetrics.length > 0;
+    if (result.hasLogs) {
+      try {
+        var logKindRes = await query(
+          "SELECT " +
+          "SUM(CASE WHEN body LIKE 'claude_code.%' OR scope_name = 'com.anthropic.claude_code.events' THEN 1 ELSE 0 END) AS claude_rows, " +
+          "SUM(CASE WHEN scope_name LIKE 'codex_%' THEN 1 ELSE 0 END) AS codex_rows " +
+          "FROM opentelemetry_logs"
+        );
+        var logKindRow = rows(logKindRes)?.[0] || [];
+        result.hasClaudeLogs = (Number(logKindRow[0]) || 0) > 0;
+        result.hasCodex = (Number(logKindRow[1]) || 0) > 0;
+      } catch { /* ignore */ }
+    }
     if (result.hasTraces) {
       try {
         var colRes = await query(
@@ -28,6 +54,14 @@ async function detectDataSources() {
         result.hasOpenClaw = columns.some(function(c) { return c.indexOf('span_attributes.openclaw.') === 0; });
         result.hasGenAITraces = columns.some(function(c) { return c.indexOf('span_attributes.gen_ai.') === 0; });
       } catch { /* column detection failed, fall back to showing traces view */ }
+      if (!result.hasCodex) {
+        try {
+          var codexTraceRes = await query(
+            "SELECT COUNT(*) AS cnt FROM opentelemetry_traces WHERE service_name = 'codex_cli_rs'"
+          );
+          result.hasCodex = (Number(rows(codexTraceRes)?.[0]?.[0]) || 0) > 0;
+        } catch { /* ignore */ }
+      }
       // If column detection failed or neither schema found, default to GenAI
       if (!result.hasOpenClaw && !result.hasGenAITraces) {
         result.hasGenAITraces = true;
@@ -35,7 +69,16 @@ async function detectDataSources() {
     }
     return result;
   } catch {
-    return { hasLogs: false, hasTraces: false, hasOpenClaw: false, hasGenAITraces: false, ccMetrics: [] };
+    return {
+      hasLogs: false,
+      hasTraces: false,
+      hasOpenClaw: false,
+      hasGenAITraces: false,
+      hasClaudeLogs: false,
+      hasCodex: false,
+      ccMetrics: [],
+      codexMetrics: [],
+    };
   }
 }
 
@@ -45,6 +88,10 @@ function updateHash() {
     var tab = document.querySelector('#cc-tabs .tab.active');
     var tabName = tab ? tab.dataset.cctab : null;
     if (tabName && tabName !== 'cc-overview') hash += '/' + tabName;
+  } else if (currentView === 'codex') {
+    var cdxTab = document.querySelector('#cdx-tabs .tab.active');
+    var cdxTabName = cdxTab ? cdxTab.dataset.cdxtab : null;
+    if (cdxTabName && cdxTabName !== 'cdx-overview') hash += '/' + cdxTabName;
   } else if (currentView === 'openclaw') {
     var tab3 = document.querySelector('#oc-tabs .tab.active');
     var tabName3 = tab3 ? tab3.dataset.octab : null;
@@ -72,6 +119,7 @@ function parseHash() {
 
 async function switchView(viewId, skipHash) {
   document.getElementById('view-claude-code').style.display = 'none';
+  document.getElementById('view-codex').style.display = 'none';
   document.getElementById('view-openclaw').style.display = 'none';
   document.getElementById('view-traces').style.display = 'none';
   document.getElementById('setup-notice').style.display = 'none';
@@ -83,6 +131,9 @@ async function switchView(viewId, skipHash) {
     if (viewId === 'claude-code') {
       cc_loadCards();
       cc_loadOverview();
+    } else if (viewId === 'codex') {
+      cdx_loadCards();
+      cdx_loadOverview();
     } else if (viewId === 'openclaw') {
       oc_loadCards();
       oc_loadOverview();
@@ -92,18 +143,19 @@ async function switchView(viewId, skipHash) {
       loadOverviewCharts();
     }
   }
+  checkDataFreshness();
   if (!skipHash) updateHash();
 }
 
 async function initViews() {
   dataSources = await detectDataSources();
-  var hasCCView = dataSources.hasLogs || dataSources.ccMetrics.length > 0;
-  var hasTracesView = dataSources.hasTraces;
+  var hasCCView = dataSources.hasClaudeLogs || dataSources.ccMetrics.length > 0;
   var viewSelect = document.getElementById('view-select');
 
   viewSelect.innerHTML = '';
   var views = [];
   if (hasCCView) views.push({ id: 'claude-code', label: 'Claude Code' });
+  if (dataSources.hasCodex) views.push({ id: 'codex', label: 'Codex' });
   if (dataSources.hasOpenClaw) views.push({ id: 'openclaw', label: 'OpenClaw' });
   if (dataSources.hasGenAITraces) views.push({ id: 'traces', label: 'OTel GenAI' });
 
@@ -142,6 +194,9 @@ async function initViews() {
     if (targetView === 'claude-code') {
       var tabBtn = document.querySelector('#cc-tabs .tab[data-cctab="' + hash.tab + '"]');
       if (tabBtn) tabBtn.click();
+    } else if (targetView === 'codex') {
+      var tabBtnCodex = document.querySelector('#cdx-tabs .tab[data-cdxtab="' + hash.tab + '"]');
+      if (tabBtnCodex) tabBtnCodex.click();
     } else if (targetView === 'openclaw') {
       var tabBtn3 = document.querySelector('#oc-tabs .tab[data-octab="' + hash.tab + '"]');
       if (tabBtn3) tabBtn3.click();
@@ -206,6 +261,18 @@ function cc_onTabChange(tab) {
   else if (tab === 'cc-search') cc_loadAnomalies();
 }
 
+// Tab navigation (Codex view)
+document.querySelectorAll('#cdx-tabs .tab').forEach(function(btn) {
+  btn.addEventListener('click', function() {
+    document.querySelectorAll('#cdx-tabs .tab').forEach(function(t) { t.classList.remove('active'); });
+    document.querySelectorAll('#view-codex .tab-content').forEach(function(t) { t.classList.remove('active'); });
+    btn.classList.add('active');
+    document.getElementById('tab-' + btn.dataset.cdxtab).classList.add('active');
+    cdx_onTabChange(btn.dataset.cdxtab);
+    updateHash();
+  });
+});
+
 function onTimeRangeChange() {
   currentTimeRange = document.getElementById('time-range').value;
   updateHash();
@@ -224,6 +291,11 @@ function onTimeRangeChange() {
     var activeTab2 = document.querySelector('#cc-tabs .tab.active');
     var tabName2 = activeTab2 ? activeTab2.dataset.cctab : null;
     if (tabName2) cc_onTabChange(tabName2);
+  } else if (currentView === 'codex') {
+    cdx_loadCards();
+    var activeCodexTab = document.querySelector('#cdx-tabs .tab.active');
+    var codexTabName = activeCodexTab ? activeCodexTab.dataset.cdxtab : null;
+    if (codexTabName) cdx_onTabChange(codexTabName);
   }
 }
 
@@ -243,6 +315,87 @@ async function checkStatus() {
   } catch {
     document.getElementById('status-dot').classList.add('offline');
   }
+  checkDataFreshness();
+}
+
+// ===================================================================
+// Data freshness indicator
+// ===================================================================
+async function checkDataFreshness() {
+  var el = document.getElementById('data-freshness');
+  if (!el || !currentView) { if (el) el.textContent = ''; return; }
+
+  var sql;
+  if (currentView === 'claude-code') {
+    // Check both logs and metrics — use whichever is newer
+    try {
+      var ccResults = await Promise.all([
+        query("SELECT MAX(timestamp) AS last_ts FROM opentelemetry_logs").catch(function() { return null; }),
+        query("SELECT MAX(ts) AS last_ts FROM claude_code_token_usage_tokens_total").catch(function() { return null; }),
+      ]);
+      var ts1 = ccResults[0] && rows(ccResults[0])?.[0]?.[0];
+      var ts2 = ccResults[1] && rows(ccResults[1])?.[0]?.[0];
+      var lastTs = null;
+      if (ts1 && ts2) lastTs = new Date(ts1) > new Date(ts2) ? ts1 : ts2;
+      else lastTs = ts1 || ts2;
+      renderFreshness(el, lastTs);
+    } catch { el.textContent = ''; el.className = 'data-freshness'; }
+    return;
+  } else if (currentView === 'codex') {
+    try {
+      var codexResults = await Promise.all([
+        query("SELECT MAX(timestamp) AS last_ts FROM opentelemetry_logs WHERE scope_name LIKE 'codex_%'").catch(function() { return null; }),
+        query("SELECT MAX(timestamp) AS last_ts FROM opentelemetry_traces WHERE service_name = 'codex_cli_rs'").catch(function() { return null; }),
+        query("SELECT MAX(greptime_timestamp) AS last_ts FROM codex_websocket_request_total").catch(function() { return null; }),
+      ]);
+      var cTs1 = codexResults[0] && rows(codexResults[0])?.[0]?.[0];
+      var cTs2 = codexResults[1] && rows(codexResults[1])?.[0]?.[0];
+      var cTs3 = codexResults[2] && rows(codexResults[2])?.[0]?.[0];
+      var cLastTs = [cTs1, cTs2, cTs3].filter(Boolean).reduce(function(latest, ts) {
+        if (!latest) return ts;
+        return new Date(ts).getTime() > new Date(latest).getTime() ? ts : latest;
+      }, null);
+      renderFreshness(el, cLastTs);
+    } catch { el.textContent = ''; el.className = 'data-freshness'; }
+    return;
+  } else if (currentView === 'openclaw') {
+    sql = "SELECT MAX(timestamp) AS last_ts FROM opentelemetry_traces WHERE span_name LIKE 'openclaw.%'";
+  } else if (currentView === 'traces') {
+    sql = "SELECT MAX(timestamp) AS last_ts FROM opentelemetry_traces WHERE \"span_attributes.gen_ai.system\" IS NOT NULL";
+  } else {
+    el.textContent = '';
+    return;
+  }
+
+  try {
+    var res = await query(sql);
+    var r = rows(res);
+    var lastTs = r && r[0] && r[0][0];
+    renderFreshness(el, lastTs);
+  } catch {
+    el.textContent = '';
+    el.className = 'data-freshness';
+  }
+}
+
+function renderFreshness(el, lastTs) {
+  if (!lastTs) {
+    el.textContent = t('freshness.no_data');
+    el.className = 'data-freshness very-stale';
+    return;
+  }
+  var diffMs = Date.now() - new Date(lastTs).getTime();
+  var diffSec = Math.floor(diffMs / 1000);
+  var label;
+  if (diffSec < 60) label = diffSec + 's ago';
+  else if (diffSec < 3600) label = Math.floor(diffSec / 60) + 'm ago';
+  else if (diffSec < 86400) label = Math.floor(diffSec / 3600) + 'h ago';
+  else label = Math.floor(diffSec / 86400) + 'd ago';
+
+  el.textContent = t('freshness.last_data') + label;
+  el.className = 'data-freshness';
+  if (diffSec > 3600) el.classList.add('very-stale');
+  else if (diffSec > 300) el.classList.add('stale');
 }
 
 // ===================================================================
@@ -264,6 +417,8 @@ function setTheme(mode) {
   // Rebuild current view charts (colors change with theme)
   if (currentView === 'claude-code') {
     cc_loadOverview();
+  } else if (currentView === 'codex') {
+    cdx_loadOverview();
   } else if (currentView === 'openclaw') {
     oc_loadOverview();
   } else if (currentView === 'traces') {

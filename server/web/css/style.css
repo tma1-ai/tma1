@@ -82,6 +82,11 @@ header .tagline { font-size: 13px; color: var(--text-muted); }
   background: var(--green); flex-shrink: 0;
 }
 .status-dot.offline { background: var(--red); }
+.data-freshness {
+  font-size: 11px; color: var(--text-muted); white-space: nowrap;
+}
+.data-freshness.stale { color: var(--yellow); }
+.data-freshness.very-stale { color: var(--red); }
 
 /* --- Theme toggle --- */
 .theme-toggle {
@@ -201,6 +206,7 @@ tr.clickable:hover td { background: var(--bg-hover); }
 }
 .badge-ok { background: var(--green-bg); color: var(--green); }
 .badge-error { background: var(--red-bg); color: var(--red); }
+.badge-warn { background: rgba(210,153,34,0.15); color: var(--yellow); }
 
 /* --- Trace Detail (inline expand below clicked row) --- */
 .trace-detail-row td {

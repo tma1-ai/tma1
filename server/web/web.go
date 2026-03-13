@@ -3,5 +3,5 @@ package web
 
 import "embed"
 
-//go:embed *.html *.svg css js
+//go:embed *.html *.svg css js vendor
 var FS embed.FS

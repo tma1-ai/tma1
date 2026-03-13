@@ -8,6 +8,15 @@ var ME_MAX_LABEL_VALUES = 10;
 // High-cardinality or PII label patterns — not useful for exploration
 var ME_HIGH_CARDINALITY_RE = /(_id|_uuid|_key|_email|_token|_secret|_password)$|^(id|uuid|trace_id|span_id|session_id|user_id|organization_id|instance|email)$/;
 
+// Per-view metric prefix filters — only show relevant metrics in each dashboard
+var ME_VIEW_PREFIXES = {
+  'cc-metrics':  ['claude_code_'],
+  'cdx-metrics': ['codex_'],
+  'oc-metrics':  ['openclaw_'],
+};
+// 'metrics' (GenAI/Traces view) has no entry → shows everything except other views' prefixes
+var ME_ALL_VIEW_PREFIXES = ['claude_code_', 'codex_', 'openclaw_'];
+
 function meRangeVector() {
   var m = { '1h': '5m', '6h': '5m', '24h': '15m', '7d': '1h' };
   return m[currentTimeRange] || '5m';
@@ -44,8 +53,15 @@ async function initMetricsExplorer(prefix) {
     if (json.status !== 'success' || !json.data) throw new Error('bad response');
 
     var metrics = json.data.filter(function(name) {
-      return !name.startsWith('greptime_') && !name.startsWith('numbers_') &&
-             !name.startsWith('scripts_') && !name.startsWith('__');
+      if (name.startsWith('greptime_') || name.startsWith('numbers_') ||
+          name.startsWith('scripts_') || name.startsWith('__')) return false;
+      var viewPrefixes = ME_VIEW_PREFIXES[prefix];
+      if (viewPrefixes) {
+        // View-specific: only show metrics matching this view's prefixes
+        return viewPrefixes.some(function(p) { return name.startsWith(p); });
+      }
+      // GenAI/Traces view: show everything except other views' agent-specific metrics
+      return !ME_ALL_VIEW_PREFIXES.some(function(p) { return name.startsWith(p); });
     });
 
     if (!metrics.length) {

@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <title>TMA1 — LLM Agent Observability</title>
-  <script src="https://cdn.jsdelivr.net/npm/uplot@1.6.31/dist/uPlot.iife.min.js" integrity="sha384-XMP23k7YSCFr13Xrkxh4IO0v1W+8fB6AP+3Vycxphp2Z0V2vocAZHyuGaFCysrtM" crossorigin="anonymous"></script>
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/uplot@1.6.31/dist/uPlot.min.css" integrity="sha384-IfV0B7MIOYuO95kO9G5ySKPz/85zqFNOAs8iy4tkK5zd9izhJAB8b7lHrwYqqmYE" crossorigin="anonymous" />
+  <script src="/vendor/uPlot.iife.min.js"></script>
+  <link rel="stylesheet" href="/vendor/uPlot.min.css" />
   <link rel="stylesheet" href="/css/style.css" />
   <script>
     var s=localStorage.getItem('tma1-theme');
@@ -22,6 +22,7 @@
       <h1>TMA1</h1>
       <div class="tagline" data-i18n="header.tagline">Your agent runs. TMA1 remembers.</div>
     </div>
+    <span id="data-freshness" class="data-freshness"></span>
     <div class="header-right">
       <div class="lang-switch">
         <button data-lang="en" onclick="setLocale('en')">EN</button>
@@ -59,7 +60,20 @@
       <code>export OTEL_METRICS_EXPORTER=otlp</code><br/>
       <code>export OTEL_LOGS_EXPORTER=otlp</code><br/>
       <code>export OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf</code><br/>
-      <code>export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:14318</code>
+      <code>export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:14318/v1/otlp</code>
+      <br/><br/>
+      <code># Codex (~/.codex/config.toml)</code><br/>
+      <code>[otel]</code><br/>
+      <code>log_user_prompt = true</code><br/>
+      <code>[otel.exporter.otlp-http]</code><br/>
+      <code>endpoint = "http://localhost:14318/v1/logs"</code><br/>
+      <code>protocol = "binary"</code><br/>
+      <code>[otel.trace_exporter.otlp-http]</code><br/>
+      <code>endpoint = "http://localhost:14318/v1/traces"</code><br/>
+      <code>protocol = "binary"</code><br/>
+      <code>[otel.metrics_exporter.otlp-http]</code><br/>
+      <code>endpoint = "http://localhost:14318/v1/metrics"</code><br/>
+      <code>protocol = "binary"</code>
       <br/><br/>
       <code># OpenClaw</code><br/>
       <code>openclaw config set diagnostics.otel.endpoint http://localhost:14318/v1/otlp</code><br/>
@@ -68,7 +82,7 @@
       <code>openclaw config set diagnostics.otel.logs true</code> <span style="color:var(--text-muted);font-size:12px"># optional: gateway internal logs</span>
       <br/><br/>
       <code># Any OTel SDK</code><br/>
-      <code>OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:14318 your-agent</code>
+      <code>OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:14318/v1/otlp your-agent</code>
     </p>
   </div>
 
@@ -111,7 +125,7 @@
         <div id="cc-chart-cost"><div class="chart-empty" data-i18n="empty.waiting">Waiting for data...</div></div>
       </div>
       <div class="chart-container">
-        <h3 data-i18n="section.cc_latency">Latency Over Time (avg)</h3>
+        <h3 data-i18n="section.cc_latency">Latency Over Time (p50 / p95)</h3>
         <div id="cc-chart-latency"><div class="chart-empty" data-i18n="empty.waiting">Waiting for data...</div></div>
       </div>
       <div class="chart-container">
@@ -169,7 +183,7 @@
     <!-- CC Events -->
     <div class="tab-content" id="tab-cc-events">
       <div class="filters">
-        <select class="filter-select" id="cc-event-filter" onchange="cc_loadEvents()">
+        <select class="filter-select" id="cc-event-filter" onchange="cc_onEventsFilterChange()">
           <option value="" data-i18n="filter.all_events">All events</option>
           <option value="claude_code.api_request">api_request</option>
           <option value="claude_code.tool_result">tool_result</option>
@@ -197,6 +211,22 @@
             <tr><td colspan="8" class="loading" data-i18n="empty.loading_events">Loading events...</td></tr>
           </tbody>
         </table>
+      </div>
+      <div class="filters" style="margin-top:12px;justify-content:flex-end">
+        <button class="filter-btn" id="cc-events-prev-btn" onclick="cc_prevEventsPage()">Prev</button>
+        <span id="cc-events-page-info" style="color:var(--text-muted);font-size:13px;min-width:120px;text-align:center">Page 1</span>
+        <button class="filter-btn" id="cc-events-next-btn" onclick="cc_nextEventsPage()">Next</button>
+      </div>
+      <div class="chart-container" style="margin-top:16px">
+        <h3>Prompt/Session Traces</h3>
+        <div class="filters">
+          <input class="filter-input" id="cc-prompt-trace-filter" type="text"
+                 placeholder="Filter by prompt.id or session.id..." onkeydown="if(event.key==='Enter')cc_loadPromptTraces()" />
+          <button class="filter-btn primary" onclick="cc_loadPromptTraces()">Refresh</button>
+        </div>
+        <div id="cc-prompt-traces">
+          <div class="loading">Loading prompt traces...</div>
+        </div>
       </div>
     </div>
 
@@ -279,6 +309,182 @@
     </div>
   </div>
 
+  <!-- ========================= CODEX VIEW ========================= -->
+  <div id="view-codex" style="display:none">
+    <div class="cards">
+      <div class="card">
+        <div class="label">Estimated Cost</div>
+        <div class="value cost" id="cdx-val-cost">&mdash;</div>
+      </div>
+      <div class="card">
+        <div class="label">Total Tokens</div>
+        <div class="value tokens" id="cdx-val-tokens">&mdash;</div>
+      </div>
+      <div class="card">
+        <div class="label">API Requests</div>
+        <div class="value requests" id="cdx-val-requests">&mdash;</div>
+      </div>
+      <div class="card">
+        <div class="label">Avg Response Latency</div>
+        <div class="value latency" id="cdx-val-latency">&mdash;</div>
+      </div>
+      <div class="card">
+        <div class="label">Avg TTFT</div>
+        <div class="value latency" id="cdx-val-ttft">&mdash;</div>
+      </div>
+    </div>
+
+    <div class="tabs" id="cdx-tabs">
+      <button class="tab active" data-cdxtab="cdx-overview">Overview</button>
+      <button class="tab" data-cdxtab="cdx-events">Events</button>
+      <button class="tab" data-cdxtab="cdx-cost">Cost</button>
+    </div>
+
+    <div class="tab-content active" id="tab-cdx-overview">
+      <div class="chart-container">
+        <h3>Token Usage Over Time</h3>
+        <div id="cdx-chart-tokens"><div class="chart-empty">Waiting for data...</div></div>
+      </div>
+      <div class="chart-container">
+        <h3>Response Latency</h3>
+        <div id="cdx-chart-latency"><div class="chart-empty">Waiting for data...</div></div>
+      </div>
+      <div class="chart-container">
+        <h3>Turn Startup (TTFT / TTFM)</h3>
+        <div id="cdx-chart-turn-startup"><div class="chart-empty">Waiting for data...</div></div>
+      </div>
+      <div class="chart-container">
+        <h3>Trace Span Distribution</h3>
+        <div id="cdx-span-dist" class="bar-chart"><div class="chart-empty">Waiting for data...</div></div>
+      </div>
+      <div class="chart-container">
+        <h3>Request Outcome</h3>
+        <div id="cdx-request-outcome" class="bar-chart"><div class="chart-empty">Waiting for data...</div></div>
+      </div>
+      <div class="chart-container">
+        <h3>Tool Performance</h3>
+        <div style="overflow-x:auto">
+          <table>
+            <thead>
+              <tr>
+                <th>Tool</th>
+                <th>Calls</th>
+                <th>Success Rate</th>
+                <th>Avg Latency</th>
+              </tr>
+            </thead>
+            <tbody id="cdx-tool-perf-body">
+              <tr><td colspan="4" class="loading">Loading...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="chart-container">
+        <h3 data-i18n="section.activity_heatmap">Activity Heatmap</h3>
+        <div id="cdx-activity-heatmap"><div class="chart-empty" data-i18n="empty.waiting">Waiting for data...</div></div>
+      </div>
+      <div class="chart-container" id="cdx-metrics-explorer-section" style="display:none">
+        <h3 data-i18n="section.metrics_explorer">Metrics Explorer</h3>
+        <p style="font-size:13px;color:var(--text-muted);margin-bottom:12px" data-i18n="section.metrics_explorer_desc">Explore OTel metrics with PromQL.</p>
+        <div class="me-controls">
+          <select id="cdx-metrics-metric-select" class="filter-select" onchange="meOnMetricSelect('cdx-metrics')">
+            <option value="" data-i18n="filter.select_metric">Select a metric...</option>
+          </select>
+          <div id="cdx-metrics-label-tags" class="me-label-tags"></div>
+        </div>
+        <div class="me-query-row">
+          <input id="cdx-metrics-promql-input" class="filter-input me-promql-input"
+                 placeholder="PromQL: rate(metric[5m])"
+                 onkeydown="if(event.key==='Enter')meRunQuery('cdx-metrics')" />
+          <button class="filter-btn primary" onclick="meRunQuery('cdx-metrics')" data-i18n="btn.run_query">Run</button>
+        </div>
+        <div id="cdx-metrics-quick-actions" class="me-quick-actions"></div>
+        <div id="cdx-metrics-chart-area"></div>
+        <div id="cdx-metrics-legend" class="me-legend"></div>
+      </div>
+    </div>
+
+    <div class="tab-content" id="tab-cdx-events">
+      <div class="filters">
+        <select class="filter-select" id="cdx-event-filter" onchange="cdx_onEventsFilterChange()">
+          <option value="">All events</option>
+          <option value="requests">API requests</option>
+          <option value="tools">Tool results</option>
+          <option value="decisions">Tool decisions</option>
+        </select>
+        <button class="filter-btn primary" onclick="cdx_loadEvents()">Refresh</button>
+      </div>
+      <div style="overflow-x:auto">
+        <table>
+          <thead>
+            <tr>
+              <th>Timestamp</th>
+              <th>Type</th>
+              <th>Model</th>
+              <th>Tokens</th>
+              <th>Tool</th>
+              <th>Duration</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="cdx-events-body">
+            <tr><td colspan="7" class="loading">Loading events...</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="filters" style="margin-top:12px;justify-content:flex-end">
+        <button class="filter-btn" id="cdx-events-prev-btn" onclick="cdx_prevEventsPage()">Prev</button>
+        <span id="cdx-events-page-info" style="color:var(--text-muted);font-size:13px;min-width:120px;text-align:center">Page 1</span>
+        <button class="filter-btn" id="cdx-events-next-btn" onclick="cdx_nextEventsPage()">Next</button>
+      </div>
+    </div>
+
+    <div class="tab-content" id="tab-cdx-cost">
+      <div class="chart-container">
+        <h3>Estimated Cost by Model</h3>
+        <div id="cdx-cost-by-model" class="bar-chart"><div class="chart-empty">Waiting for data...</div></div>
+      </div>
+      <div class="chart-container">
+        <h3>Top Expensive API Requests</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>Timestamp</th>
+              <th>Model</th>
+              <th>Input Tok</th>
+              <th>Output Tok</th>
+              <th>Estimated Cost</th>
+              <th>Duration</th>
+            </tr>
+          </thead>
+          <tbody id="cdx-expensive-body">
+            <tr><td colspan="6" class="loading">Loading...</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="chart-container">
+        <h3>Cache Efficiency</h3>
+        <div id="cdx-cache-chart" class="bar-chart"><div class="chart-empty">Waiting for data...</div></div>
+      </div>
+      <div class="chart-container">
+        <h3>Model Comparison</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>Model</th>
+              <th>Requests</th>
+              <th>Avg Latency</th>
+              <th>Avg Cost</th>
+            </tr>
+          </thead>
+          <tbody id="cdx-model-compare-body">
+            <tr><td colspan="4" class="loading">Loading...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
   <!-- ========================= OPENCLAW VIEW ========================= -->
   <div id="view-openclaw" style="display:none">
     <div class="cards">
@@ -304,6 +510,7 @@
       <button class="tab active" data-octab="oc-overview">Overview</button>
       <button class="tab" data-octab="oc-traces">Traces</button>
       <button class="tab" data-octab="oc-cost">Cost</button>
+      <button class="tab" data-octab="oc-security" data-i18n="tab.oc_security">Security</button>
       <button class="tab" data-octab="oc-search">Search</button>
     </div>
 
@@ -318,7 +525,7 @@
         <div id="oc-chart-cost"><div class="chart-empty" data-i18n="empty.waiting">Waiting for data...</div></div>
       </div>
       <div class="chart-container">
-        <h3 data-i18n="section.cc_latency">Latency Over Time (avg)</h3>
+        <h3 data-i18n="section.oc_latency">Latency Over Time (p50 / p95)</h3>
         <div id="oc-chart-latency"><div class="chart-empty" data-i18n="empty.waiting">Waiting for data...</div></div>
       </div>
       <div class="chart-container">
@@ -357,6 +564,10 @@
         <h3>Run Duration</h3>
         <div id="oc-chart-run-duration"><div class="chart-empty" data-i18n="empty.waiting">Waiting for data...</div></div>
       </div>
+      <div class="chart-container">
+        <h3 data-i18n="section.activity_heatmap">Activity Heatmap</h3>
+        <div id="oc-activity-heatmap"><div class="chart-empty" data-i18n="empty.waiting">Waiting for data...</div></div>
+      </div>
       <div class="chart-container" id="oc-metrics-explorer-section" style="display:none">
         <h3 data-i18n="section.metrics_explorer">Metrics Explorer</h3>
         <p style="font-size:13px;color:var(--text-muted);margin-bottom:12px" data-i18n="section.metrics_explorer_desc">Explore OTel metrics with PromQL.</p>
@@ -381,19 +592,24 @@
     <!-- OC Traces -->
     <div class="tab-content" id="tab-oc-traces">
       <div class="filters">
-        <select class="filter-select" id="oc-trace-span-filter">
+        <select class="filter-select" id="oc-trace-span-filter" onchange="oc_onTraceFilterChange()">
           <option value="">All span types</option>
         </select>
-        <select class="filter-select" id="oc-trace-model-filter">
+        <select class="filter-select" id="oc-trace-model-filter" onchange="oc_onTraceFilterChange()">
           <option value="" data-i18n="filter.all_models">All models</option>
         </select>
-        <select class="filter-select" id="oc-trace-channel-filter">
+        <select class="filter-select" id="oc-trace-channel-filter" onchange="oc_onTraceFilterChange()">
           <option value="">All channels</option>
         </select>
-        <select class="filter-select" id="oc-trace-outcome-filter">
+        <select class="filter-select" id="oc-trace-session-filter" onchange="oc_onTraceFilterChange()">
+          <option value="">All sessions</option>
+        </select>
+        <select class="filter-select" id="oc-trace-outcome-filter" onchange="oc_onTraceFilterChange()">
           <option value="">All outcomes</option>
         </select>
-        <button class="filter-btn primary" onclick="oc_loadTraces()" data-i18n="btn.refresh">Refresh</button>
+        <input class="filter-input" id="oc-trace-query-filter" type="text"
+               placeholder="Search trace/span/model/channel..." onkeydown="if(event.key==='Enter')oc_onTraceFilterChange()" />
+        <button class="filter-btn primary" onclick="oc_onTraceFilterChange()" data-i18n="btn.refresh">Refresh</button>
       </div>
       <div style="overflow-x:auto">
         <table id="oc-traces-table">
@@ -414,6 +630,11 @@
             <tr><td colspan="9" class="loading" data-i18n="empty.loading_traces">Loading traces...</td></tr>
           </tbody>
         </table>
+      </div>
+      <div class="filters" style="margin-top:12px;justify-content:flex-end">
+        <button class="filter-btn" id="oc-trace-prev-btn" onclick="oc_prevTracePage()">Prev</button>
+        <span id="oc-trace-page-info" style="color:var(--text-muted);font-size:13px;min-width:120px;text-align:center">Page 1</span>
+        <button class="filter-btn" id="oc-trace-next-btn" onclick="oc_nextTracePage()">Next</button>
       </div>
     </div>
 
@@ -464,6 +685,70 @@
             <tr><td colspan="4" class="loading" data-i18n="empty.loading">Loading...</td></tr>
           </tbody>
         </table>
+      </div>
+    </div>
+
+    <!-- OC Security -->
+    <div class="tab-content" id="tab-oc-security">
+      <div class="cards" style="border-bottom:none;padding-left:0;padding-right:0">
+        <div class="card">
+          <div class="label" data-i18n="card.webhook_errors">Webhook Errors</div>
+          <div class="value cost" id="oc-sec-webhook-errors">&mdash;</div>
+        </div>
+        <div class="card">
+          <div class="label" data-i18n="card.stuck_sessions">Stuck Sessions</div>
+          <div class="value cost" id="oc-sec-stuck-sessions">&mdash;</div>
+        </div>
+        <div class="card">
+          <div class="label" data-i18n="card.failed_outcomes">Failed Outcomes</div>
+          <div class="value latency" id="oc-sec-failed-outcomes">&mdash;</div>
+        </div>
+        <div class="card">
+          <div class="label" data-i18n="card.token_anomalies">Token Anomalies</div>
+          <div class="value tokens" id="oc-sec-token-anomalies">&mdash;</div>
+        </div>
+      </div>
+
+      <div class="chart-container">
+        <h3 data-i18n="section.error_rate_by_channel">Error Rate by Channel</h3>
+        <div id="oc-sec-channel-errors" class="bar-chart"><div class="chart-empty" data-i18n="empty.waiting">Waiting for data...</div></div>
+      </div>
+
+      <div class="chart-container">
+        <h3 data-i18n="section.session_health">Session Health</h3>
+        <div style="overflow-x:auto">
+          <table id="oc-sec-session-table">
+            <thead><tr>
+              <th data-i18n="table.timestamp">Timestamp</th>
+              <th data-i18n="table.session">Session</th>
+              <th data-i18n="table.state">State</th>
+              <th data-i18n="table.channel">Channel</th>
+              <th data-i18n="table.duration">Duration</th>
+            </tr></thead>
+            <tbody id="oc-sec-session-body">
+              <tr><td colspan="5" class="loading" data-i18n="empty.loading">Loading...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="chart-container">
+        <h3 data-i18n="section.webhook_error_timeline">Webhook Error Timeline</h3>
+        <div class="anomaly-list" id="oc-sec-webhook-timeline">
+          <div class="chart-empty" data-i18n="empty.waiting">Waiting for data...</div>
+        </div>
+      </div>
+
+      <div class="chart-container">
+        <h3 data-i18n="section.token_anomalies">Token Anomalies</h3>
+        <div class="anomaly-list" id="oc-sec-token-anomalies-list">
+          <div class="chart-empty" data-i18n="empty.waiting">Waiting for data...</div>
+        </div>
+      </div>
+
+      <div class="chart-container">
+        <h3 data-i18n="section.channel_activity">Channel Activity (Message Velocity)</h3>
+        <div id="oc-sec-channel-activity"><div class="chart-empty" data-i18n="empty.waiting">Waiting for data...</div></div>
       </div>
     </div>
 
@@ -560,16 +845,16 @@
   <!-- ========================= TRACES TAB ========================= -->
   <div class="tab-content" id="tab-traces">
     <div class="filters">
-      <input class="filter-input" id="trace-id-filter" data-i18n-placeholder="filter.trace_id_placeholder" placeholder="Trace ID..." onkeydown="if(event.key==='Enter')loadTraces()" />
-      <select class="filter-select" id="trace-model-filter">
+      <input class="filter-input" id="trace-id-filter" data-i18n-placeholder="filter.trace_id_placeholder" placeholder="Trace ID..." onkeydown="if(event.key==='Enter'){resetTracePaging();loadTraces()}" />
+      <select class="filter-select" id="trace-model-filter" onchange="resetTracePaging();loadTraces()">
         <option value="" data-i18n="filter.all_models">All models</option>
       </select>
-      <select class="filter-select" id="trace-status-filter">
+      <select class="filter-select" id="trace-status-filter" onchange="resetTracePaging();loadTraces()">
         <option value="" data-i18n="filter.all_statuses">All statuses</option>
         <option value="STATUS_CODE_UNSET">OK</option>
         <option value="STATUS_CODE_ERROR">ERROR</option>
       </select>
-      <button class="filter-btn primary" onclick="loadTraces()" data-i18n="btn.refresh">Refresh</button>
+      <button class="filter-btn primary" onclick="resetTracePaging();loadTraces()" data-i18n="btn.refresh">Refresh</button>
     </div>
 
     <div style="overflow-x: auto;">
@@ -589,6 +874,11 @@
           <tr><td colspan="7" class="loading" data-i18n="empty.loading_traces">Loading traces...</td></tr>
         </tbody>
       </table>
+    </div>
+    <div class="filters" style="margin-top:12px;justify-content:flex-end">
+      <button class="filter-btn" id="trace-prev-btn" onclick="prevTracePage()">Prev</button>
+      <span id="trace-page-info" style="color:var(--text-muted);font-size:13px;min-width:120px;text-align:center">Page 1</span>
+      <button class="filter-btn" id="trace-next-btn" onclick="nextTracePage()">Next</button>
     </div>
   </div>
 
@@ -761,6 +1051,7 @@
   <script src="/js/metrics-explorer.js"></script>
   <script src="/js/traces.js"></script>
   <script src="/js/claude-code.js"></script>
+  <script src="/js/codex.js"></script>
   <script src="/js/openclaw.js"></script>
   <script src="/js/views.js"></script>
 </body>

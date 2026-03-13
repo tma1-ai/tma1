@@ -1,6 +1,117 @@
 // claude-code.js — Claude Code view: all cc_* functions
 // Depends on: core.js, chart.js, i18n.js
 
+var ccEventsPage = 0;
+var ccEventsPageSize = 15;
+var ccEventsHasNext = false;
+var ccPendingEventFocus = null;
+
+function cc_resetEventsPaging() {
+  ccEventsPage = 0;
+}
+
+function cc_onEventsFilterChange() {
+  cc_resetEventsPaging();
+  cc_loadEvents();
+}
+
+function cc_prevEventsPage() {
+  if (ccEventsPage <= 0) return;
+  ccEventsPage--;
+  cc_loadEvents(false);
+}
+
+function cc_nextEventsPage() {
+  if (!ccEventsHasNext) return;
+  ccEventsPage++;
+  cc_loadEvents(false);
+}
+
+function cc_updateEventsPager(resultCount) {
+  var prevBtn = document.getElementById('cc-events-prev-btn');
+  var nextBtn = document.getElementById('cc-events-next-btn');
+  var info = document.getElementById('cc-events-page-info');
+  if (!prevBtn || !nextBtn || !info) return;
+
+  prevBtn.disabled = ccEventsPage <= 0;
+  nextBtn.disabled = !ccEventsHasNext;
+  if (!resultCount) {
+    info.textContent = 'No results';
+    return;
+  }
+  var start = ccEventsPage * ccEventsPageSize + 1;
+  var end = start + resultCount - 1;
+  info.textContent = 'Page ' + (ccEventsPage + 1) + ' · ' + start + '-' + end;
+}
+
+function cc_focusPendingEvent() {
+  if (!ccPendingEventFocus) return;
+  var pending = ccPendingEventFocus;
+  var target = null;
+  document.querySelectorAll('#cc-events-body tr.clickable').forEach(function(row) {
+    if (target) return;
+    var ts = row.dataset.eventTs || '';
+    var sid = row.dataset.sessionId || '';
+    var seqTxt = row.dataset.eventSeq;
+    var seq = seqTxt === '' ? null : Number(seqTxt);
+    var tsMatch = ts === pending.timestamp;
+    var seqMatch = pending.seq == null || (seq != null && seq === pending.seq);
+    var sidMatch = !pending.sessionId || sid === pending.sessionId;
+    if (tsMatch && seqMatch && sidMatch) target = row;
+  });
+  if (!target) return;
+
+  var idx = Number(target.dataset.idx);
+  if (!Number.isNaN(idx)) cc_toggleEventDetail(target, idx);
+  target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  ccPendingEventFocus = null;
+}
+
+async function cc_switchToEvent(tsEnc, sidEnc, seq) {
+  var targetTs = decodeURIComponent(tsEnc || '');
+  var targetSid = decodeURIComponent(sidEnc || '');
+  var targetSeq = seq == null ? null : Number(seq);
+  if (Number.isNaN(targetSeq)) targetSeq = null;
+  if (!targetTs) return;
+
+  document.querySelectorAll('#cc-tabs .tab').forEach(function(t) { t.classList.remove('active'); });
+  document.querySelectorAll('#view-claude-code .tab-content').forEach(function(t) { t.classList.remove('active'); });
+  document.querySelector('[data-cctab="cc-events"]').classList.add('active');
+  document.getElementById('tab-cc-events').classList.add('active');
+
+  var filter = document.getElementById('cc-event-filter');
+  if (filter) filter.value = 'claude_code.api_request';
+  cc_resetEventsPaging();
+
+  try {
+    var iv = intervalSQL();
+    var tsSQL = escapeSQLString(targetTs);
+    var where =
+      "FROM opentelemetry_logs " +
+      "WHERE body = 'claude_code.api_request' " +
+      "  AND timestamp > NOW() - INTERVAL '" + iv + "' " +
+      "  AND timestamp > CAST('" + tsSQL + "' AS TIMESTAMP)";
+
+    var rankRes = await query("SELECT COUNT(*) AS newer " + where);
+    var newer = Number(rows(rankRes)?.[0]?.[0]) || 0;
+    ccEventsPage = Math.floor(newer / ccEventsPageSize);
+  } catch {
+    ccEventsPage = 0;
+  }
+
+  ccPendingEventFocus = {
+    timestamp: targetTs,
+    sessionId: targetSid || '',
+    seq: targetSeq,
+  };
+  await cc_loadEvents(false);
+  if (ccPendingEventFocus) {
+    ccEventsPage = 0;
+    await cc_loadEvents(false);
+    ccPendingEventFocus = null;
+  }
+}
+
 // ===================================================================
 // Claude Code view — Cards
 // ===================================================================
@@ -17,7 +128,7 @@ async function cc_loadCards() {
     document.getElementById('cc-val-tokens').textContent = fmtNum(rows(results[1])?.[0]?.[0]);
     document.getElementById('cc-val-requests').textContent = fmtNum(rows(results[2])?.[0]?.[0]);
     var latVal = rows(results[3])?.[0]?.[0];
-    document.getElementById('cc-val-latency').textContent = latVal != null ? Math.round(latVal) + 'ms' : '\u2014';
+    document.getElementById('cc-val-latency').textContent = fmtDurMs(latVal);
   } catch (err) {
     var banner = document.getElementById('error-banner');
     banner.style.display = 'block';
@@ -83,7 +194,8 @@ async function cc_loadLatencyChart() {
   try {
     var res = await query(
       "SELECT date_bin('5 minutes'::INTERVAL, timestamp) AS t, " +
-      "ROUND(AVG(json_get_float(log_attributes, 'duration_ms')), 0) AS avg_ms " +
+      "ROUND(APPROX_PERCENTILE_CONT(json_get_float(log_attributes, 'duration_ms'), 0.50), 0) AS p50_ms, " +
+      "ROUND(APPROX_PERCENTILE_CONT(json_get_float(log_attributes, 'duration_ms'), 0.95), 0) AS p95_ms " +
       "FROM opentelemetry_logs " +
       "WHERE body = 'claude_code.api_request' AND timestamp > NOW() - INTERVAL '" + intervalSQL() + "' " +
       "GROUP BY t ORDER BY t"
@@ -91,8 +203,9 @@ async function cc_loadLatencyChart() {
     var data = rowsToObjects(res);
     if (!data.length) return;
     renderChart('cc-chart-latency', data, [
-      { label: t('chart.avg_latency'), key: 'avg_ms', color: '#d2a8ff' },
-    ], function(v) { return Math.round(v) + 'ms'; });
+      { label: t('chart.p50'), key: 'p50_ms', color: '#3fb950' },
+      { label: t('chart.p95'), key: 'p95_ms', color: '#d2a8ff' },
+    ], function(v) { return fmtDurMs(v); });
   } catch { /* no data */ }
 }
 
@@ -178,7 +291,7 @@ async function cc_loadToolPerformance() {
         '<td>' + escapeHTML(d.tool || 'unknown') + '</td>' +
         '<td>' + fmtNum(calls) + '</td>' +
         '<td><span style="color:' + rateColor + '">' + rate + '%</span></td>' +
-        '<td>' + (d.avg_ms != null ? Math.round(d.avg_ms) + 'ms' : '\u2014') + '</td>' +
+        '<td>' + fmtDurMs(d.avg_ms) + '</td>' +
         '<td>' + (d.total_kb != null ? d.total_kb + ' KB' : '\u2014') + '</td></tr>';
     }).join('');
   } catch {
@@ -188,16 +301,8 @@ async function cc_loadToolPerformance() {
 
 async function cc_loadActivityHeatmap() {
   var el = document.getElementById('cc-activity-heatmap');
-
-  // Adaptive bucket size and grid layout based on time range
-  var config = {
-    '1h':  { bucket: '5 minutes',  interval: '1 hour',  cols: 12, rowCount: 1 },
-    '6h':  { bucket: '15 minutes', interval: '6 hours', cols: 24, rowCount: 1 },
-    '24h': { bucket: '1 hour',     interval: '1 day',   cols: 24, rowCount: 1 },
-    '7d':  { bucket: '1 hour',     interval: '7 days',  cols: 24, rowCount: 7 },
-  };
-  var cfg = config[currentTimeRange] || config['24h'];
-
+  if (!el) return;
+  var cfg = heatmapConfig();
   try {
     var res = await query(
       "SELECT date_bin('" + cfg.bucket + "'::INTERVAL, timestamp) AS t, COUNT(*) AS cnt " +
@@ -206,150 +311,7 @@ async function cc_loadActivityHeatmap() {
       "  AND timestamp > NOW() - INTERVAL '" + cfg.interval + "' " +
       "GROUP BY t ORDER BY t"
     );
-    var data = rowsToObjects(res);
-    if (!data.length) { el.innerHTML = '<div class="chart-empty">' + t('empty.no_activity') + '</div>'; return; }
-
-    var tc = getThemeColors();
-    var heatColors = tc.heatmap;
-    var counts = {};
-    var maxCnt = 0;
-    var now = new Date();
-    var locale = currentLocale === 'zh' ? 'zh-CN' : currentLocale === 'es' ? 'es' : 'en';
-
-    function cellColor(cnt) {
-      if (!cnt) return heatColors[0];
-      var ratio = cnt / maxCnt;
-      if (ratio < 0.25) return heatColors[1];
-      if (ratio < 0.50) return heatColors[2];
-      if (ratio < 0.75) return heatColors[3];
-      return heatColors[4];
-    }
-
-    if (currentTimeRange === '7d') {
-      // 7-day mode: 7 rows (days) × 24 cols (hours)
-      var weekAgo = new Date(now.getTime() - 7 * 24 * 3600 * 1000);
-      data.forEach(function(d) {
-        var dt = new Date(tsToMs(d.t));
-        var dayIdx = Math.floor((dt.getTime() - weekAgo.getTime()) / (24 * 3600 * 1000));
-        var hour = dt.getHours();
-        var key = dayIdx + ':' + hour;
-        var cnt = Number(d.cnt) || 0;
-        counts[key] = (counts[key] || 0) + cnt;
-        if (counts[key] > maxCnt) maxCnt = counts[key];
-      });
-
-      var dayNames = [];
-      for (var i = 0; i < 7; i++) {
-        var d = new Date(weekAgo.getTime() + i * 24 * 3600 * 1000);
-        dayNames.push(d.toLocaleDateString(locale, { weekday: 'short' }));
-      }
-
-      var html = '<div class="heatmap-grid" style="grid-template-columns:40px repeat(24, 1fr)">';
-      html += '<div class="heatmap-label"></div>';
-      for (var h = 0; h < 24; h++) {
-        html += '<div class="heatmap-label" style="justify-content:center">' + (h % 3 === 0 ? h : '') + '</div>';
-      }
-      for (var day = 0; day < 7; day++) {
-        html += '<div class="heatmap-label">' + dayNames[day] + '</div>';
-        for (var h2 = 0; h2 < 24; h2++) {
-          var cnt = counts[day + ':' + h2] || 0;
-          html += '<div class="heatmap-cell" style="background:' + cellColor(cnt) + '" title="' + dayNames[day] + ' ' + h2 + ':00 \u2014 ' + cnt + '"></div>';
-        }
-      }
-      html += '</div>';
-
-    } else if (currentTimeRange === '24h') {
-      // 24h mode: single row × 24 cols (hours)
-      var dayStart = new Date(now.getTime() - 24 * 3600 * 1000);
-      data.forEach(function(d) {
-        var dt = new Date(tsToMs(d.t));
-        var hour = Math.floor((dt.getTime() - dayStart.getTime()) / (3600 * 1000));
-        if (hour < 0 || hour >= 24) return;
-        var key = '0:' + hour;
-        var cnt = Number(d.cnt) || 0;
-        counts[key] = (counts[key] || 0) + cnt;
-        if (counts[key] > maxCnt) maxCnt = counts[key];
-      });
-
-      var html = '<div class="heatmap-grid" style="grid-template-columns:40px repeat(24, 1fr)">';
-      html += '<div class="heatmap-label"></div>';
-      for (var h = 0; h < 24; h++) {
-        var hourLabel = new Date(dayStart.getTime() + h * 3600 * 1000);
-        html += '<div class="heatmap-label" style="justify-content:center">' + (h % 3 === 0 ? hourLabel.getHours() + 'h' : '') + '</div>';
-      }
-      html += '<div class="heatmap-label"></div>';
-      for (var h2 = 0; h2 < 24; h2++) {
-        var cnt = counts['0:' + h2] || 0;
-        var hourLabel2 = new Date(dayStart.getTime() + h2 * 3600 * 1000);
-        html += '<div class="heatmap-cell" style="background:' + cellColor(cnt) + '" title="' + hourLabel2.getHours() + ':00 \u2014 ' + cnt + '"></div>';
-      }
-      html += '</div>';
-
-    } else if (currentTimeRange === '6h') {
-      // 6h mode: single row × 24 cols (15-min buckets)
-      var rangeStart = new Date(now.getTime() - 6 * 3600 * 1000);
-      data.forEach(function(d) {
-        var dt = new Date(tsToMs(d.t));
-        var slot = Math.floor((dt.getTime() - rangeStart.getTime()) / (15 * 60 * 1000));
-        if (slot < 0 || slot >= 24) return;
-        var key = '0:' + slot;
-        var cnt = Number(d.cnt) || 0;
-        counts[key] = (counts[key] || 0) + cnt;
-        if (counts[key] > maxCnt) maxCnt = counts[key];
-      });
-
-      var html = '<div class="heatmap-grid" style="grid-template-columns:40px repeat(24, 1fr)">';
-      html += '<div class="heatmap-label"></div>';
-      for (var s = 0; s < 24; s++) {
-        var slotTime = new Date(rangeStart.getTime() + s * 15 * 60 * 1000);
-        var showLabel = s % 4 === 0;
-        html += '<div class="heatmap-label" style="justify-content:center;font-size:9px">' +
-          (showLabel ? slotTime.getHours() + ':' + String(slotTime.getMinutes()).padStart(2, '0') : '') + '</div>';
-      }
-      html += '<div class="heatmap-label"></div>';
-      for (var s2 = 0; s2 < 24; s2++) {
-        var cnt = counts['0:' + s2] || 0;
-        var slotTime2 = new Date(rangeStart.getTime() + s2 * 15 * 60 * 1000);
-        html += '<div class="heatmap-cell" style="background:' + cellColor(cnt) + '" title="' +
-          slotTime2.getHours() + ':' + String(slotTime2.getMinutes()).padStart(2, '0') + ' \u2014 ' + cnt + '"></div>';
-      }
-      html += '</div>';
-
-    } else {
-      // 1h mode: single row × 12 cols (5-min buckets)
-      var rangeStart = new Date(now.getTime() - 3600 * 1000);
-      data.forEach(function(d) {
-        var dt = new Date(tsToMs(d.t));
-        var slot = Math.floor((dt.getTime() - rangeStart.getTime()) / (5 * 60 * 1000));
-        if (slot < 0 || slot >= 12) return;
-        var key = '0:' + slot;
-        var cnt = Number(d.cnt) || 0;
-        counts[key] = (counts[key] || 0) + cnt;
-        if (counts[key] > maxCnt) maxCnt = counts[key];
-      });
-
-      var html = '<div class="heatmap-grid" style="grid-template-columns:40px repeat(12, 1fr)">';
-      html += '<div class="heatmap-label"></div>';
-      for (var s = 0; s < 12; s++) {
-        var slotTime = new Date(rangeStart.getTime() + s * 5 * 60 * 1000);
-        var showLabel = s % 2 === 0;
-        html += '<div class="heatmap-label" style="justify-content:center;font-size:9px">' +
-          (showLabel ? ':' + String(slotTime.getMinutes()).padStart(2, '0') : '') + '</div>';
-      }
-      html += '<div class="heatmap-label"></div>';
-      for (var s2 = 0; s2 < 12; s2++) {
-        var cnt = counts['0:' + s2] || 0;
-        var slotTime2 = new Date(rangeStart.getTime() + s2 * 5 * 60 * 1000);
-        html += '<div class="heatmap-cell" style="background:' + cellColor(cnt) + '" title="' +
-          slotTime2.getHours() + ':' + String(slotTime2.getMinutes()).padStart(2, '0') + ' \u2014 ' + cnt + '"></div>';
-      }
-      html += '</div>';
-    }
-
-    html += '<div class="heatmap-legend">' + t('heatmap.less') + ' ';
-    heatColors.forEach(function(c) { html += '<div class="heatmap-legend-cell" style="background:' + c + '"></div>'; });
-    html += ' ' + t('heatmap.more') + '</div>';
-    el.innerHTML = html;
+    renderHeatmap('cc-activity-heatmap', rowsToObjects(res));
   } catch {
     el.innerHTML = '<div class="chart-empty">' + t('error.load_activity') + '</div>';
   }
@@ -362,9 +324,12 @@ function cc_loadMetricsExplorer() {
 // ===================================================================
 // Claude Code view — Events tab
 // ===================================================================
-async function cc_loadEvents() {
+async function cc_loadEvents(reloadPromptTraces) {
+  if (reloadPromptTraces !== false) cc_loadPromptTraces();
   var filter = document.getElementById('cc-event-filter').value;
   var iv = intervalSQL();
+  var limit = ccEventsPageSize + 1;
+  var offset = ccEventsPage * ccEventsPageSize;
   var where = "WHERE body LIKE 'claude_code.%' AND timestamp > NOW() - INTERVAL '" + iv + "'";
   if (filter) where = "WHERE body = '" + escapeSQLString(filter) + "' AND timestamp > NOW() - INTERVAL '" + iv + "'";
 
@@ -383,12 +348,19 @@ async function cc_loadEvents() {
       "json_get_string(log_attributes, 'error') AS error, " +
       "log_attributes " +
       "FROM opentelemetry_logs " +
-      where + " ORDER BY timestamp DESC LIMIT 100"
+      where + " ORDER BY timestamp DESC LIMIT " + limit + " OFFSET " + offset
     );
-    var data = rowsToObjects(res);
+    var allRows = rowsToObjects(res);
+    ccEventsHasNext = allRows.length > ccEventsPageSize;
+    var data = ccEventsHasNext ? allRows.slice(0, ccEventsPageSize) : allRows;
     var tbody = document.getElementById('cc-events-body');
     if (!data.length) {
+      if (ccEventsPage > 0) {
+        ccEventsPage--;
+        return cc_loadEvents(reloadPromptTraces);
+      }
       tbody.innerHTML = '<tr><td colspan="8" class="loading">' + t('empty.no_events') + '</td></tr>';
+      cc_updateEventsPager(0);
       return;
     }
     tbody.innerHTML = data.map(function(d, i) {
@@ -403,11 +375,14 @@ async function cc_loadEvents() {
         cacheDisplay = fmtNum(cacheRead) + ' / ' + fmtNum(cacheCreate) + ' <span style="color:var(--text-muted)">(' + hitPct + '% hit)</span>';
       }
       var cost = d.cost_usd != null ? fmtCost(d.cost_usd) : '\u2014';
-      var dur = d.duration_ms != null ? Math.round(d.duration_ms) + 'ms' : '\u2014';
+      var dur = fmtDurMs(d.duration_ms);
       var isErr = d.error || d.success === 'false' || evtName === 'api_error';
       var label = d.tool_name ? evtName + ' (' + d.tool_name + ')' : evtName;
+      var parsedAttrs = cc_parseAttrs(d.log_attributes);
+      var evtSeq = cc_attr(parsedAttrs, 'event.sequence');
+      var sessionId = cc_attr(parsedAttrs, 'session.id');
       var attrsStr = typeof d.log_attributes === 'string' ? d.log_attributes : JSON.stringify(d.log_attributes || {});
-      return '<tr class="clickable" onclick="cc_toggleEventDetail(this, ' + i + ')" data-attrs="' + escapeHTML(attrsStr) + '">' +
+      return '<tr class="clickable" onclick="cc_toggleEventDetail(this, ' + i + ')" data-idx="' + i + '" data-event-ts="' + escapeHTML(String(d.timestamp || '')) + '" data-event-seq="' + (evtSeq != null ? String(evtSeq) : '') + '" data-session-id="' + escapeHTML(sessionId || '') + '" data-attrs="' + escapeHTML(attrsStr) + '">' +
         '<td>' + fmtTime(d.timestamp) + '</td>' +
         '<td>' + escapeHTML(label) + '</td>' +
         '<td>' + escapeHTML(d.model || '\u2014') + '</td>' +
@@ -418,7 +393,11 @@ async function cc_loadEvents() {
         '<td><span class="badge ' + (isErr ? 'badge-error' : 'badge-ok') + '">' + (isErr ? 'ERROR' : 'OK') + '</span></td>' +
         '</tr>';
     }).join('');
+    cc_updateEventsPager(data.length);
+    cc_focusPendingEvent();
   } catch (err) {
+    ccEventsHasNext = false;
+    cc_updateEventsPager(0);
     document.getElementById('cc-events-body').innerHTML =
       '<tr><td colspan="8" class="loading">Error: ' + escapeHTML(err.message) + '</td></tr>';
   }
@@ -443,6 +422,204 @@ function cc_toggleEventDetail(clickedRow, idx) {
     '<pre style="font-size:12px;color:var(--text-muted);overflow-x:auto;white-space:pre-wrap;word-break:break-all">' +
     escapeHTML(formatted) + '</pre></div></td>';
   clickedRow.after(detailRow);
+}
+
+function cc_parseAttrs(raw) {
+  if (!raw) return {};
+  if (typeof raw === 'object') return raw;
+  try { return JSON.parse(raw); } catch { return {}; }
+}
+
+function cc_attr(attrs, key) {
+  if (!attrs) return null;
+  if (Object.prototype.hasOwnProperty.call(attrs, key)) return attrs[key];
+  var parts = key.split('.');
+  var curr = attrs;
+  for (var i = 0; i < parts.length; i++) {
+    if (curr == null || typeof curr !== 'object' || !Object.prototype.hasOwnProperty.call(curr, parts[i])) {
+      return null;
+    }
+    curr = curr[parts[i]];
+  }
+  return curr;
+}
+
+function cc_sortPromptEvents(a, b) {
+  if (a.seq != null && b.seq != null) return a.seq - b.seq;
+  return tsToMs(a.timestamp) - tsToMs(b.timestamp);
+}
+
+function cc_togglePromptTraceDetail(item) {
+  var detail = item.querySelector('.cc-prompt-detail');
+  if (!detail) return;
+  detail.style.display = detail.style.display === 'none' ? 'block' : 'none';
+}
+
+function cc_newTraceGroup(id, sessionId, latestTs) {
+  return {
+    promptId: String(id),
+    sessionId: sessionId || null,
+    events: [],
+    models: {},
+    cost: 0,
+    errors: 0,
+    reqs: 0,
+    tools: 0,
+    latestTs: latestTs,
+  };
+}
+
+function cc_addEventToTraceGroup(g, e) {
+  if (e.model) g.models[e.model] = true;
+  if (e.body === 'claude_code.api_request') {
+    g.reqs++;
+    g.cost += e.cost || 0;
+  }
+  if (e.body === 'claude_code.api_error' || e.error) g.errors++;
+  if (e.body === 'claude_code.tool_result') g.tools++;
+  if (tsToMs(e.timestamp) > tsToMs(g.latestTs)) g.latestTs = e.timestamp;
+  g.events.push(e);
+}
+
+async function cc_loadPromptTraces() {
+  var container = document.getElementById('cc-prompt-traces');
+  if (!container) return;
+  container.innerHTML = '<div class="loading">Loading prompt traces...</div>';
+
+  try {
+    var iv = intervalSQL();
+    var promptFilter = (document.getElementById('cc-prompt-trace-filter')?.value || '').trim();
+    var res = await query(
+      "SELECT timestamp, body, log_attributes " +
+      "FROM opentelemetry_logs " +
+      "WHERE body IN ('claude_code.user_prompt', 'claude_code.api_request', 'claude_code.api_error', 'claude_code.tool_result', 'claude_code.tool_decision') " +
+      "  AND timestamp > NOW() - INTERVAL '" + iv + "' " +
+      "ORDER BY timestamp DESC LIMIT 2000"
+    );
+    var data = rowsToObjects(res);
+    if (!data.length) {
+      container.innerHTML = '<div class="chart-empty">No recent Claude events.</div>';
+      return;
+    }
+
+    var events = [];
+    var hasPromptId = false;
+    var hasSessionId = false;
+    data.forEach(function(d) {
+      var attrs = cc_parseAttrs(d.log_attributes);
+      var promptId = cc_attr(attrs, 'prompt.id');
+      var sessionId = cc_attr(attrs, 'session.id');
+      var seqRaw = cc_attr(attrs, 'event.sequence');
+      var seq = seqRaw == null ? null : Number(seqRaw);
+      if (seq != null && Number.isNaN(seq)) seq = null;
+      if (promptId) hasPromptId = true;
+      if (sessionId) hasSessionId = true;
+      events.push({
+        timestamp: d.timestamp,
+        body: d.body,
+        seq: seq,
+        promptId: promptId ? String(promptId) : null,
+        sessionId: sessionId ? String(sessionId) : null,
+        model: cc_attr(attrs, 'model'),
+        tool: cc_attr(attrs, 'tool_name'),
+        cost: Number(cc_attr(attrs, 'cost_usd')) || 0,
+        duration: cc_attr(attrs, 'duration_ms'),
+        error: cc_attr(attrs, 'error'),
+      });
+    });
+
+    var groups = [];
+    if (hasPromptId) {
+      var byPrompt = {};
+      events.forEach(function(e) {
+        if (!e.promptId) return;
+        if (!byPrompt[e.promptId]) byPrompt[e.promptId] = cc_newTraceGroup(e.promptId, e.sessionId, e.timestamp);
+        cc_addEventToTraceGroup(byPrompt[e.promptId], e);
+      });
+      groups = Object.values(byPrompt);
+    } else if (hasSessionId) {
+      var bySession = {};
+      events.forEach(function(e) {
+        if (!e.sessionId) return;
+        if (!bySession[e.sessionId]) bySession[e.sessionId] = [];
+        bySession[e.sessionId].push(e);
+      });
+      Object.keys(bySession).forEach(function(sessionId) {
+        var arr = bySession[sessionId].sort(cc_sortPromptEvents);
+        var turn = 0;
+        var current = null;
+        arr.forEach(function(e) {
+          if (!current || e.body === 'claude_code.user_prompt') {
+            turn++;
+            var traceLabel = sessionId + ' #' + turn;
+            current = cc_newTraceGroup(traceLabel, sessionId, e.timestamp);
+            groups.push(current);
+          }
+          cc_addEventToTraceGroup(current, e);
+        });
+      });
+    }
+
+    groups = groups.filter(function(g) {
+      if (!promptFilter) return true;
+      var sid = g.sessionId || '';
+      return g.promptId.indexOf(promptFilter) >= 0 || sid.indexOf(promptFilter) >= 0;
+    });
+    groups.sort(function(a, b) { return tsToMs(b.latestTs) - tsToMs(a.latestTs); });
+
+    if (!groups.length) {
+      var hint;
+      if (!hasPromptId && !hasSessionId) hint = 'No prompt.id/session.id found in current logs.';
+      else if (hasPromptId) hint = 'No prompt trace matches current filter.';
+      else hint = 'No session trace matches current filter.';
+      container.innerHTML = '<div class="chart-empty">' + escapeHTML(hint) + '</div>';
+      return;
+    }
+
+    if (!hasPromptId) {
+      container.innerHTML = '<div class="loading">prompt.id not found, grouped by session.id + user_prompt boundaries.</div>';
+    } else {
+      container.innerHTML = '';
+    }
+
+    var maxShow = 30;
+    var shown = groups.slice(0, maxShow);
+    container.innerHTML += shown.map(function(g) {
+      var events = g.events.sort(cc_sortPromptEvents);
+      var timeline = events.map(function(e) {
+        var evt = (e.body || '').replace('claude_code.', '');
+        var parts = [];
+        if (e.seq != null) parts.push('#' + e.seq);
+        parts.push(evt);
+        if (e.model) parts.push('model=' + e.model);
+        if (e.tool) parts.push('tool=' + e.tool);
+        if (e.cost) parts.push('cost=' + fmtCost(e.cost));
+        if (e.duration != null) parts.push('dur=' + fmtDurMs(Number(e.duration)));
+        if (e.error) parts.push('error=' + e.error);
+        return '<div style="font-size:12px;color:var(--text-muted);padding:3px 0">' +
+          '<span style="color:var(--text-secondary)">' + escapeHTML(fmtTime(e.timestamp)) + '</span> · ' +
+          escapeHTML(parts.join(' · ')) + '</div>';
+      }).join('');
+      var models = Object.keys(g.models);
+      return '<div class="anomaly-item" style="cursor:pointer" onclick="cc_togglePromptTraceDetail(this)">' +
+        '<div class="anomaly-reason">' + escapeHTML(g.promptId) + '</div>' +
+        '<div style="font-size:13px">' +
+        fmtTime(g.latestTs) + ' · ' +
+        fmtNum(g.events.length) + ' events · ' +
+        fmtNum(g.reqs) + ' requests · ' +
+        fmtCost(g.cost) + ' · ' +
+        g.errors + ' errors' +
+        (models.length ? ' · ' + escapeHTML(models.slice(0, 3).join(', ')) : '') +
+        '</div>' +
+        '<div class="cc-prompt-detail" style="display:none;margin-top:8px">' + timeline + '</div>' +
+        '</div>';
+    }).join('');
+    if (groups.length > maxShow) {
+      container.innerHTML += '<div class="loading">Showing latest ' + maxShow + ' traces.</div>';
+    }
+  } catch (err) {
+    container.innerHTML = '<div class="chart-empty">Failed to load prompt traces: ' + escapeHTML(err.message) + '</div>';
+  }
 }
 
 // ===================================================================
@@ -512,7 +689,8 @@ async function cc_loadExpensiveRequests() {
       "json_get_int(log_attributes, 'input_tokens') AS input_tok, " +
       "json_get_int(log_attributes, 'output_tokens') AS output_tok, " +
       "json_get_float(log_attributes, 'cost_usd') AS cost_usd, " +
-      "json_get_float(log_attributes, 'duration_ms') AS duration_ms " +
+      "json_get_float(log_attributes, 'duration_ms') AS duration_ms, " +
+      "log_attributes " +
       "FROM opentelemetry_logs " +
       "WHERE body = 'claude_code.api_request' " +
       "  AND timestamp > NOW() - INTERVAL '" + intervalSQL() + "' " +
@@ -522,12 +700,19 @@ async function cc_loadExpensiveRequests() {
     var tbody = document.getElementById('cc-expensive-body');
     if (!data.length) { tbody.innerHTML = '<tr><td colspan="6" class="loading">' + t('empty.no_data') + '</td></tr>'; return; }
     tbody.innerHTML = data.map(function(d) {
-      return '<tr><td>' + fmtTime(d.timestamp) + '</td>' +
+      var parsedAttrs = cc_parseAttrs(d.log_attributes);
+      var sessionId = cc_attr(parsedAttrs, 'session.id');
+      var evtSeq = cc_attr(parsedAttrs, 'event.sequence');
+      var tsArg = encodeURIComponent(String(d.timestamp || ''));
+      var sidArg = encodeURIComponent(String(sessionId || ''));
+      var seqNum = evtSeq == null ? null : Number(evtSeq);
+      var seqArg = Number.isNaN(seqNum) ? 'null' : String(seqNum);
+      return '<tr class="clickable" onclick="cc_switchToEvent(\'' + tsArg + '\',\'' + sidArg + '\',' + seqArg + ')"><td>' + fmtTime(d.timestamp) + '</td>' +
       '<td>' + escapeHTML(d.model || 'unknown') + '</td>' +
       '<td>' + fmtNum(d.input_tok) + '</td>' +
       '<td>' + fmtNum(d.output_tok) + '</td>' +
       '<td>' + fmtCost(d.cost_usd) + '</td>' +
-      '<td>' + (d.duration_ms != null ? Math.round(d.duration_ms) + 'ms' : '\u2014') + '</td></tr>';
+      '<td>' + fmtDurMs(d.duration_ms) + '</td></tr>';
     }).join('');
   } catch { /* ignore */ }
 }
@@ -595,7 +780,7 @@ async function cc_loadCCModelComparison() {
       return '<tr>' +
         '<td>' + escapeHTML(d.model || 'unknown') + '</td>' +
         '<td>' + fmtNum(reqs) + '</td>' +
-        '<td>' + (d.avg_lat != null ? Math.round(d.avg_lat) + 'ms' : '\u2014') + '</td>' +
+        '<td>' + fmtDurMs(d.avg_lat) + '</td>' +
         '<td>' + fmtCost(d.avg_cost) + '</td>' +
         '<td>' + errRate + '</td></tr>';
     }).join('');
@@ -719,7 +904,7 @@ async function cc_loadAnomalies() {
         '<div style="font-size:13px">' +
         escapeHTML(d.model || 'unknown') + ' &middot; ' +
         fmtNum(d.input_tok) + ' in / ' + fmtNum(d.output_tok) + ' out &middot; ' +
-        (d.duration_ms != null ? Math.round(d.duration_ms) + 'ms' : '') +
+        (d.duration_ms != null ? fmtDurMs(d.duration_ms) : '') +
         (d.error ? ' &middot; ' + escapeHTML(d.error) : '') +
         ' &middot; ' + fmtTime(d.timestamp) +
         '</div><div class="anomaly-detail" style="display:none"></div></div>';
@@ -731,7 +916,7 @@ async function cc_loadAnomalies() {
         '<div class="anomaly-reason">' + t('anomaly.slow_tool') + '</div>' +
         '<div style="font-size:13px">' +
         escapeHTML(d.tool_name || 'unknown') + ' &middot; ' +
-        Math.round(Number(d.duration_ms)) + 'ms &middot; ' +
+        fmtDurMs(d.duration_ms) + ' &middot; ' +
         fmtTime(d.timestamp) +
         '</div><div class="anomaly-detail" style="display:none"></div></div>';
     });
