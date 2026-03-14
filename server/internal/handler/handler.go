@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -20,6 +21,8 @@ type Server struct {
 	tma1Port         string
 	logger           *slog.Logger
 	webFS            http.FileSystem
+	httpClient       *http.Client
+	otlpClient       *http.Client
 }
 
 // New creates a new Server.
@@ -29,6 +32,8 @@ func New(greptimeHTTPPort int, tma1Port string, webFS http.FileSystem, logger *s
 		tma1Port:         tma1Port,
 		logger:           logger,
 		webFS:            webFS,
+		httpClient:       &http.Client{Timeout: 30 * time.Second},
+		otlpClient:       &http.Client{Timeout: 60 * time.Second},
 	}
 }
 
@@ -71,7 +76,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 // handleStatus checks whether GreptimeDB is reachable.
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	healthURL := fmt.Sprintf("http://localhost:%d/health", s.greptimeHTTPPort)
-	resp, err := http.Get(healthURL) //nolint:gosec
+	resp, err := s.httpClient.Get(healthURL) //nolint:gosec
 	if err != nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
 			"status":     "degraded",
@@ -117,7 +122,7 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 	form := url.Values{}
 	form.Set("sql", req.SQL)
 
-	resp, err := http.Post(sqlURL, "application/x-www-form-urlencoded", strings.NewReader(form.Encode())) //nolint:gosec
+	resp, err := s.httpClient.Post(sqlURL, "application/x-www-form-urlencoded", strings.NewReader(form.Encode())) //nolint:gosec
 	if err != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
 		return
@@ -147,7 +152,7 @@ func (s *Server) handlePromProxy(w http.ResponseWriter, r *http.Request) {
 		proxyReq.Header.Set("Content-Type", ct)
 	}
 
-	resp, err := http.DefaultClient.Do(proxyReq)
+	resp, err := s.httpClient.Do(proxyReq)
 	if err != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
 		return
@@ -197,7 +202,7 @@ func (s *Server) proxyOTLP(w http.ResponseWriter, r *http.Request, subPath strin
 		proxyReq.Header.Set("x-greptime-pipeline-name", "greptime_trace_v1")
 	}
 
-	resp, err := http.DefaultClient.Do(proxyReq)
+	resp, err := s.otlpClient.Do(proxyReq)
 	if err != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
 		return

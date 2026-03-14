@@ -10,7 +10,10 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 )
+
+var httpClient = &http.Client{Timeout: 30 * time.Second}
 
 //go:embed flows.sql
 var flowsSQL string
@@ -69,7 +72,7 @@ func FlowsReady(httpPort int) bool {
 	form := url.Values{}
 	form.Set("sql", "SHOW FLOWS")
 
-	resp, err := http.Post(sqlURL, "application/x-www-form-urlencoded", strings.NewReader(form.Encode())) //nolint:gosec
+	resp, err := httpClient.Post(sqlURL, "application/x-www-form-urlencoded", strings.NewReader(form.Encode())) //nolint:gosec
 	if err != nil {
 		return false
 	}
@@ -126,7 +129,7 @@ func execSQL(sqlURL, stmt string) error {
 	form := url.Values{}
 	form.Set("sql", stmt)
 
-	resp, err := http.Post(sqlURL, "application/x-www-form-urlencoded", strings.NewReader(form.Encode())) //nolint:gosec
+	resp, err := httpClient.Post(sqlURL, "application/x-www-form-urlencoded", strings.NewReader(form.Encode())) //nolint:gosec
 	if err != nil {
 		return fmt.Errorf("exec sql: %w", err)
 	}
@@ -284,7 +287,7 @@ func queryScalarInt(sqlURL, stmt string) (int, error) {
 	form := url.Values{}
 	form.Set("sql", stmt)
 
-	resp, err := http.Post(sqlURL, "application/x-www-form-urlencoded", strings.NewReader(form.Encode())) //nolint:gosec
+	resp, err := httpClient.Post(sqlURL, "application/x-www-form-urlencoded", strings.NewReader(form.Encode())) //nolint:gosec
 	if err != nil {
 		return 0, err
 	}
@@ -321,7 +324,7 @@ func queryPricing(sqlURL string) ([]modelPrice, error) {
 	form := url.Values{}
 	form.Set("sql", "SELECT model_pattern, priority, input_price, output_price FROM tma1_model_pricing ORDER BY priority")
 
-	resp, err := http.Post(sqlURL, "application/x-www-form-urlencoded", strings.NewReader(form.Encode())) //nolint:gosec
+	resp, err := httpClient.Post(sqlURL, "application/x-www-form-urlencoded", strings.NewReader(form.Encode())) //nolint:gosec
 	if err != nil {
 		return nil, err
 	}

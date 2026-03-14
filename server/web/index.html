@@ -44,6 +44,13 @@
         <option value="24h" selected data-i18n="time.24h">Last 24h</option>
         <option value="7d" data-i18n="time.7d">Last 7d</option>
       </select>
+      <select class="time-select" id="auto-refresh" onchange="onAutoRefreshChange()">
+        <option value="0" data-i18n="refresh.off">Off</option>
+        <option value="15" data-i18n="refresh.15s">&#x21bb; 15s</option>
+        <option value="30" selected data-i18n="refresh.30s">&#x21bb; 30s</option>
+        <option value="60" data-i18n="refresh.1m">&#x21bb; 1m</option>
+        <option value="300" data-i18n="refresh.5m">&#x21bb; 5m</option>
+      </select>
     </div>
   </header>
 

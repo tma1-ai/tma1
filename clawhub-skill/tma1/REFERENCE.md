@@ -98,8 +98,8 @@ ORDER BY cost_usd DESC
 SELECT json_get_string(log_attributes, 'model') AS model,
        SUM(json_get_int(log_attributes, 'input_tokens')) AS input_tok,
        SUM(json_get_int(log_attributes, 'output_tokens')) AS output_tok,
-       SUM(json_get_int(log_attributes, 'cache_read_input_tokens')) AS cache_read,
-       SUM(json_get_int(log_attributes, 'cache_creation_input_tokens')) AS cache_write
+       SUM(json_get_int(log_attributes, 'cache_read_tokens')) AS cache_read,
+       SUM(json_get_int(log_attributes, 'cache_creation_tokens')) AS cache_write
 FROM opentelemetry_logs
 WHERE body = 'claude_code.api_request'
   AND timestamp >= DATE_TRUNC('day', NOW())

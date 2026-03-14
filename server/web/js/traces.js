@@ -220,7 +220,7 @@ async function loadTraces() {
     }
 
     tbody.innerHTML = data.map(function(d, i) {
-      return '<tr class="clickable" data-idx="' + i + '" onclick="toggleTraceDetail(this, \'' + escapeHTML(d.trace_id) + '\')">' +
+      return '<tr class="clickable" data-idx="' + i + '" onclick="toggleTraceDetail(this, \'' + escapeJSString(d.trace_id) + '\')">' +
       '<td>' + fmtTime(d.timestamp) + '</td>' +
       '<td>' + escapeHTML(d.model || 'unknown') + '</td>' +
       '<td>' + fmtNum(d.input_tok) + '</td>' +
@@ -610,7 +610,7 @@ async function loadExpensiveConversations() {
       return;
     }
     tbody.innerHTML = data.map(function(d) {
-      return '<tr class="clickable" onclick="switchToTrace(\'' + escapeHTML(d.trace_id) + '\')">' +
+      return '<tr class="clickable" onclick="switchToTrace(\'' + escapeJSString(d.trace_id) + '\')">' +
       '<td>' + fmtTime(d.timestamp) + '</td>' +
       '<td>' + escapeHTML(d.model || 'unknown') + '</td>' +
       '<td>' + fmtNum(d.input_tok) + '</td>' +
@@ -729,7 +729,7 @@ async function doSearch() {
       var p = parseSearchBody(d.body);
       var preview = (p.content || '').substring(0, 200);
       if ((p.content || '').length > 200) preview += '...';
-      return '<div class="search-result-item" onclick="switchToTrace(\'' + escapeHTML(d.trace_id) + '\')">' +
+      return '<div class="search-result-item" onclick="switchToTrace(\'' + escapeJSString(d.trace_id) + '\')">' +
       '<div class="search-result-meta">' +
       '<span>' + fmtTime(d.timestamp) + '</span>' +
       '<span class="badge ' + (p.role === 'assistant' ? 'badge-ok' : 'badge-info') + '">' + escapeHTML(p.role) + '</span>' +
@@ -771,7 +771,7 @@ async function loadAnomalies() {
     el.innerHTML = data.map(function(d) {
       var reason = t('anomaly.high_token');
       if (d.status === 'STATUS_CODE_ERROR') reason = t('anomaly.error_response');
-      return '<div class="anomaly-item" onclick="switchToTrace(\'' + escapeHTML(d.trace_id) + '\')">' +
+      return '<div class="anomaly-item" onclick="switchToTrace(\'' + escapeJSString(d.trace_id) + '\')">' +
         '<div class="anomaly-reason">' + reason + '</div>' +
         '<div style="font-size:13px">' +
         escapeHTML(d.model || 'unknown') + ' &middot; ' +
@@ -851,7 +851,7 @@ async function loadPerQuestionCost() {
       return;
     }
     tbody.innerHTML = data.map(function(d) {
-      return '<tr class="clickable" onclick="switchToTrace(\'' + escapeHTML(d.trace_id) + '\')">' +
+      return '<tr class="clickable" onclick="switchToTrace(\'' + escapeJSString(d.trace_id) + '\')">' +
       '<td>' + fmtTime(d.started) + '</td>' +
       '<td title="' + escapeHTML(d.trace_id) + '">' + escapeHTML((d.trace_id || '').substring(0, 8)) + '...</td>' +
       '<td>' + fmtNum(d.llm_calls) + '</td>' +
@@ -999,7 +999,7 @@ async function loadDangerousCommands() {
       return;
     }
     tbody.innerHTML = data.map(function(d) {
-      return '<tr class="clickable" onclick="switchToTrace(\'' + escapeHTML(d.trace_id) + '\')">' +
+      return '<tr class="clickable" onclick="switchToTrace(\'' + escapeJSString(d.trace_id) + '\')">' +
       '<td>' + fmtTime(d.timestamp) + '</td>' +
       '<td title="' + escapeHTML(d.trace_id) + '">' + escapeHTML((d.trace_id || '').substring(0, 8)) + '...</td>' +
       '<td>' + escapeHTML(d.span_name) + '</td>' +
@@ -1101,7 +1101,7 @@ async function loadInjectionAlerts() {
       var severityClass = a.severity === 'high' ? 'badge-error' : a.severity === 'medium' ? 'badge-warn' : 'badge-info';
       var preview = (a.content || '').substring(0, 150);
       if ((a.content || '').length > 150) preview += '...';
-      return '<div class="anomaly-item' + (a.severity !== 'high' ? ' warn' : '') + '" onclick="switchToTrace(\'' + escapeHTML(a.trace_id) + '\')">' +
+      return '<div class="anomaly-item' + (a.severity !== 'high' ? ' warn' : '') + '" onclick="switchToTrace(\'' + escapeJSString(a.trace_id) + '\')">' +
         '<div class="anomaly-reason">' +
         '<span class="badge ' + severityClass + '">' + escapeHTML(a.severity.toUpperCase()) + '</span> ' +
         escapeHTML(a.label) + '</div>' +
@@ -1133,7 +1133,7 @@ async function loadToolTimeline() {
       return;
     }
     tbody.innerHTML = data.map(function(d) {
-      return '<tr class="clickable" onclick="switchToTrace(\'' + escapeHTML(d.trace_id) + '\')">' +
+      return '<tr class="clickable" onclick="switchToTrace(\'' + escapeJSString(d.trace_id) + '\')">' +
       '<td>' + fmtTime(d.timestamp) + '</td>' +
       '<td title="' + escapeHTML(d.trace_id) + '">' + escapeHTML((d.trace_id || '').substring(0, 8)) + '...</td>' +
       '<td>' + escapeHTML(d.span_name) + '</td>' +

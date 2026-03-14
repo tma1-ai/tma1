@@ -68,8 +68,8 @@ function cc_focusPendingEvent() {
 }
 
 async function cc_switchToEvent(tsEnc, sidEnc, seq) {
-  var targetTs = decodeURIComponent(tsEnc || '');
-  var targetSid = decodeURIComponent(sidEnc || '');
+  var targetTs = tsEnc || '';
+  var targetSid = sidEnc || '';
   var targetSeq = seq == null ? null : Number(seq);
   if (Number.isNaN(targetSeq)) targetSeq = null;
   if (!targetTs) return;
@@ -85,12 +85,12 @@ async function cc_switchToEvent(tsEnc, sidEnc, seq) {
 
   try {
     var iv = intervalSQL();
-    var tsSQL = escapeSQLString(targetTs);
+    if (!/^\d+$/.test(targetTs)) throw new Error('invalid ts');
     var where =
       "FROM opentelemetry_logs " +
       "WHERE body = 'claude_code.api_request' " +
       "  AND timestamp > NOW() - INTERVAL '" + iv + "' " +
-      "  AND timestamp > CAST('" + tsSQL + "' AS TIMESTAMP)";
+      "  AND timestamp > " + targetTs + "::TIMESTAMP_NS";
 
     var rankRes = await query("SELECT COUNT(*) AS newer " + where);
     var newer = Number(rows(rankRes)?.[0]?.[0]) || 0;
@@ -120,7 +120,7 @@ async function cc_loadCards() {
   try {
     var results = await Promise.all([
       query("SELECT ROUND(SUM(json_get_float(log_attributes, 'cost_usd')), 4) AS v FROM opentelemetry_logs WHERE body = 'claude_code.api_request' AND timestamp > NOW() - INTERVAL '" + iv + "'"),
-      query("SELECT SUM(json_get_int(log_attributes, 'cache_read_tokens') + json_get_int(log_attributes, 'cache_creation_tokens') + json_get_int(log_attributes, 'output_tokens')) AS v FROM opentelemetry_logs WHERE body = 'claude_code.api_request' AND timestamp > NOW() - INTERVAL '" + iv + "'"),
+      query("SELECT SUM(COALESCE(json_get_int(log_attributes, 'input_tokens'),0) + COALESCE(json_get_int(log_attributes, 'output_tokens'),0) + COALESCE(json_get_int(log_attributes, 'cache_read_tokens'),0) + COALESCE(json_get_int(log_attributes, 'cache_creation_tokens'),0)) AS v FROM opentelemetry_logs WHERE body = 'claude_code.api_request' AND timestamp > NOW() - INTERVAL '" + iv + "'"),
       query("SELECT COUNT(*) AS v FROM opentelemetry_logs WHERE body = 'claude_code.api_request' AND timestamp > NOW() - INTERVAL '" + iv + "'"),
       query("SELECT ROUND(AVG(json_get_float(log_attributes, 'duration_ms')), 0) AS v FROM opentelemetry_logs WHERE body = 'claude_code.api_request' AND timestamp > NOW() - INTERVAL '" + iv + "'"),
     ]);
@@ -156,9 +156,10 @@ async function cc_loadTokenChart() {
   try {
     var res = await query(
       "SELECT date_bin('5 minutes'::INTERVAL, timestamp) AS t, " +
+      "SUM(json_get_int(log_attributes, 'input_tokens')) AS inp, " +
+      "SUM(json_get_int(log_attributes, 'output_tokens')) AS outp, " +
       "SUM(json_get_int(log_attributes, 'cache_read_tokens')) AS cache_read, " +
-      "SUM(json_get_int(log_attributes, 'cache_creation_tokens')) AS cache_create, " +
-      "SUM(json_get_int(log_attributes, 'output_tokens')) AS outp " +
+      "SUM(json_get_int(log_attributes, 'cache_creation_tokens')) AS cache_create " +
       "FROM opentelemetry_logs " +
       "WHERE body = 'claude_code.api_request' AND timestamp > NOW() - INTERVAL '" + intervalSQL() + "' " +
       "GROUP BY t ORDER BY t"
@@ -166,9 +167,10 @@ async function cc_loadTokenChart() {
     var data = rowsToObjects(res);
     if (!data.length) return;
     renderChart('cc-chart-tokens', data, [
+      { label: t('chart.input_tokens'), key: 'inp', color: '#d2a8ff' },
+      { label: t('chart.output_tokens'), key: 'outp', color: '#f0883e' },
       { label: t('chart.cache_read'), key: 'cache_read', color: '#3fb950' },
       { label: t('chart.cache_creation'), key: 'cache_create', color: '#79c0ff' },
-      { label: t('chart.output_tokens'), key: 'outp', color: '#f0883e' },
     ], function(v) { return fmtNum(v); });
   } catch { /* no data */ }
 }
@@ -703,8 +705,8 @@ async function cc_loadExpensiveRequests() {
       var parsedAttrs = cc_parseAttrs(d.log_attributes);
       var sessionId = cc_attr(parsedAttrs, 'session.id');
       var evtSeq = cc_attr(parsedAttrs, 'event.sequence');
-      var tsArg = encodeURIComponent(String(d.timestamp || ''));
-      var sidArg = encodeURIComponent(String(sessionId || ''));
+      var tsArg = escapeJSString(String(d.timestamp || ''));
+      var sidArg = escapeJSString(String(sessionId || ''));
       var seqNum = evtSeq == null ? null : Number(evtSeq);
       var seqArg = Number.isNaN(seqNum) ? 'null' : String(seqNum);
       return '<tr class="clickable" onclick="cc_switchToEvent(\'' + tsArg + '\',\'' + sidArg + '\',' + seqArg + ')"><td>' + fmtTime(d.timestamp) + '</td>' +

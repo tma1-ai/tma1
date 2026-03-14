@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -60,11 +61,15 @@ func main() {
 		logger.Error("failed to start greptimedb", "err", err)
 		os.Exit(1)
 	}
-	defer func() {
-		stopCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		_ = gdb.Stop(stopCtx)
-	}()
+	var stopOnce sync.Once
+	stopGDB := func() {
+		stopOnce.Do(func() {
+			stopCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			_ = gdb.Stop(stopCtx)
+		})
+	}
+	defer stopGDB()
 
 	// Step 3: set database default TTL (before pricing/flows so new tables inherit it).
 	if err := greptimedb.SetDatabaseTTL(cfg.GreptimeDBHTTPPort, cfg.DataTTL, logger); err != nil {
@@ -81,7 +86,9 @@ func main() {
 	// first trace arrives. Sink table DDL always succeeds (IF NOT EXISTS),
 	// but CREATE FLOW fails until the source table exists. We retry
 	// periodically so flows are created once trace data arrives.
-	go initFlowsWithRetry(cfg.GreptimeDBHTTPPort, logger)
+	flowCtx, flowCancel := context.WithCancel(context.Background())
+	defer flowCancel()
+	go initFlowsWithRetry(flowCtx, cfg.GreptimeDBHTTPPort, logger)
 
 	// Step 6: start HTTP server (dashboard + API proxy).
 	srv := handler.New(cfg.GreptimeDBHTTPPort, cfg.Port, webFileSystem(), logger)
@@ -100,13 +107,13 @@ func main() {
 		sig := <-sigCh
 		logger.Info("received signal, shutting down", "signal", sig)
 
+		flowCancel()
+
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		_ = httpSrv.Shutdown(ctx)
 
-		stopCtx, stopCancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer stopCancel()
-		_ = gdb.Stop(stopCtx)
+		stopGDB()
 	}()
 
 	logger.Info("tma1 dashboard ready",
@@ -124,7 +131,7 @@ func main() {
 // initFlowsWithRetry attempts to create flow aggregations up to 10 times
 // (~5 minutes). Skips if all flows already exist. Only attempts creation
 // when GenAI trace data is present (flows depend on gen_ai.* columns).
-func initFlowsWithRetry(httpPort int, logger *slog.Logger) {
+func initFlowsWithRetry(ctx context.Context, httpPort int, logger *slog.Logger) {
 	for i := 0; i < 10; i++ {
 		// Re-attempt pricing seed in case it failed at startup.
 		if err := greptimedb.SeedPricing(httpPort, logger); err != nil {
@@ -140,7 +147,11 @@ func initFlowsWithRetry(httpPort int, logger *slog.Logger) {
 			greptimedb.InitCostFlow(httpPort, logger)
 		}
 		if i < 9 {
-			time.Sleep(30 * time.Second)
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(30 * time.Second):
+			}
 		}
 	}
 }

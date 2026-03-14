@@ -28,7 +28,7 @@ func TestEnsureDefaultConfigFileWritesTemplate(t *testing.T) {
 
 	for _, snippet := range []string{
 		`enable_telemetry = false`,
-		`max_concurrent_queries = 8`,
+		`max_concurrent_queries = 4`,
 		`bind_addr = "127.0.0.1:14001"`,
 		`[postgres]`,
 		`enable = false`,
@@ -36,7 +36,7 @@ func TestEnsureDefaultConfigFileWritesTemplate(t *testing.T) {
 		`[jaeger]`,
 		`[prom_store]`,
 		`with_metric_engine = true`,
-		`memory_pool_size = "256MB"`,
+		`memory_pool_size = "128MB"`,
 	} {
 		if !strings.Contains(string(content), snippet) {
 			t.Fatalf("default config missing %q", snippet)

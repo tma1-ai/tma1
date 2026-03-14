@@ -128,8 +128,8 @@ async function meOnMetricSelect(prefix) {
           var vals = st.labels[name] || [];
           if (vals.length <= 1 || vals.length > ME_MAX_LABEL_VALUES) return;
           vals.forEach(function(val) {
-            html += '<span class="me-label-tag" onclick="meClickLabel(\'' + escapeHTML(prefix) + '\',\'' +
-              escapeHTML(name) + '\',\'' + escapeHTML(val) + '\')">' +
+            html += '<span class="me-label-tag" onclick="meClickLabel(\'' + escapeJSString(prefix) + '\',\'' +
+              escapeJSString(name) + '\',\'' + escapeJSString(val) + '\')">' +
               escapeHTML(name) + '=' + escapeHTML(val) + '</span>';
           });
         });
@@ -154,7 +154,7 @@ async function meOnMetricSelect(prefix) {
 
     if (quickEl) {
       quickEl.innerHTML = actions.map(function(a) {
-        return '<button class="filter-btn" onclick="meQuickAction(\'' + escapeHTML(prefix) + '\', \'' +
+        return '<button class="filter-btn" onclick="meQuickAction(\'' + escapeJSString(prefix) + '\', \'' +
           a.key + '\')">' + escapeHTML(a.label) + '</button>';
       }).join('');
     }

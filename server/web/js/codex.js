@@ -143,8 +143,8 @@ function cdx_focusPendingEvent() {
 }
 
 async function cdx_switchToEvent(tsEnc, callIdEnc) {
-  var targetTs = decodeURIComponent(tsEnc || '');
-  var targetCall = decodeURIComponent(callIdEnc || '');
+  var targetTs = tsEnc || '';
+  var targetCall = callIdEnc || '';
   if (!targetTs) return;
 
   document.querySelectorAll('#cdx-tabs .tab').forEach(function(t) { t.classList.remove('active'); });
@@ -658,8 +658,8 @@ async function cdx_loadExpensiveRequests() {
       return;
     }
     tbody.innerHTML = data.map(function(d) {
-      var tsArg = encodeURIComponent(String(d.timestamp || ''));
-      var callArg = encodeURIComponent(String(d.call_id || ''));
+      var tsArg = escapeJSString(String(d.timestamp || ''));
+      var callArg = escapeJSString(String(d.call_id || ''));
       return '<tr class="clickable" onclick="cdx_switchToEvent(\'' + tsArg + '\',\'' + callArg + '\')">' +
         '<td>' + fmtTime(d.timestamp) + '</td>' +
         '<td>' + escapeHTML(d.model || 'unknown') + '</td>' +

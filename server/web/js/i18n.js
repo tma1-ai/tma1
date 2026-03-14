@@ -45,6 +45,12 @@ var I18N = {
     'time.6h': 'Last 6h',
     'time.24h': 'Last 24h',
     'time.7d': 'Last 7d',
+    // Auto-refresh
+    'refresh.off': 'Off',
+    'refresh.15s': '\u21bb 15s',
+    'refresh.30s': '\u21bb 30s',
+    'refresh.1m': '\u21bb 1m',
+    'refresh.5m': '\u21bb 5m',
     // Section titles / chart titles
     'section.token_usage': 'Token Usage Over Time',
     'section.cost_over_time': 'Cost Over Time',
@@ -235,6 +241,11 @@ var I18N = {
     'time.6h': '\u6700\u8fd1 6 \u5c0f\u65f6',
     'time.24h': '\u6700\u8fd1 24 \u5c0f\u65f6',
     'time.7d': '\u6700\u8fd1 7 \u5929',
+    'refresh.off': '\u5173\u95ed',
+    'refresh.15s': '\u21bb 15s',
+    'refresh.30s': '\u21bb 30s',
+    'refresh.1m': '\u21bb 1m',
+    'refresh.5m': '\u21bb 5m',
     'section.token_usage': 'Token \u7528\u91cf\u8d8b\u52bf',
     'section.cost_over_time': '\u8d39\u7528\u8d8b\u52bf',
     'section.latency_over_time': '\u5ef6\u8fdf\u8d8b\u52bf (p50 / p95)',
@@ -411,6 +422,11 @@ var I18N = {
     'time.6h': '\u00daltimas 6h',
     'time.24h': '\u00daltimas 24h',
     'time.7d': '\u00daltimos 7d',
+    'refresh.off': 'Desactivado',
+    'refresh.15s': '\u21bb 15s',
+    'refresh.30s': '\u21bb 30s',
+    'refresh.1m': '\u21bb 1m',
+    'refresh.5m': '\u21bb 5m',
     'section.token_usage': 'Uso de Tokens en el Tiempo',
     'section.cost_over_time': 'Costo en el Tiempo',
     'section.latency_over_time': 'Latencia en el Tiempo (p50 / p95)',
@@ -574,14 +590,16 @@ function applyLocale() {
     var key = el.getAttribute('data-i18n-placeholder');
     el.placeholder = t(key);
   });
-  // Update time range options
-  var timeRange = document.getElementById('time-range');
-  if (timeRange) {
-    timeRange.querySelectorAll('option').forEach(function(opt) {
-      var key = opt.getAttribute('data-i18n');
-      if (key) opt.textContent = t(key);
-    });
-  }
+  // Update time range + auto-refresh options
+  ['time-range', 'auto-refresh'].forEach(function(id) {
+    var el = document.getElementById(id);
+    if (el) {
+      el.querySelectorAll('option').forEach(function(opt) {
+        var key = opt.getAttribute('data-i18n');
+        if (key) opt.textContent = t(key);
+      });
+    }
+  });
   // Update language switcher active state
   document.querySelectorAll('.lang-switch button').forEach(function(btn) {
     btn.classList.toggle('active', btn.dataset.lang === currentLocale);

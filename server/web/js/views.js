@@ -3,6 +3,8 @@
 // Must be loaded LAST. Calls initViews() at the bottom.
 
 var currentView = null; // 'claude-code', 'codex', 'openclaw', or 'traces'
+var autoRefreshTimer = null;
+var refreshInFlight = false;
 var dataSources = {
   hasLogs: false,
   hasTraces: false,
@@ -206,6 +208,7 @@ async function initViews() {
     }
   }
   updateHash();
+  onAutoRefreshChange();
 }
 
 // ===================================================================
@@ -279,6 +282,31 @@ function onTimeRangeChange() {
   refreshCurrentView();
 }
 
+function onAutoRefreshChange() {
+  if (autoRefreshTimer) {
+    clearInterval(autoRefreshTimer);
+    autoRefreshTimer = null;
+  }
+  var seconds = parseInt(document.getElementById('auto-refresh').value, 10);
+  if (!seconds) return;
+  autoRefreshTimer = setInterval(function() {
+    if (refreshInFlight) return;
+    refreshInFlight = true;
+    refreshCurrentView().finally(function() { refreshInFlight = false; });
+  }, seconds * 1000);
+}
+
+document.addEventListener('visibilitychange', function() {
+  if (document.hidden) {
+    if (autoRefreshTimer) {
+      clearInterval(autoRefreshTimer);
+      autoRefreshTimer = null;
+    }
+  } else {
+    onAutoRefreshChange();
+  }
+});
+
 function refreshCurrentView() {
   if (!currentView) return;
   if (currentView === 'traces') {
@@ -336,7 +364,7 @@ async function checkDataFreshness() {
     try {
       var ccResults = await Promise.all([
         query("SELECT MAX(timestamp) AS last_ts FROM opentelemetry_logs").catch(function() { return null; }),
-        query("SELECT MAX(ts) AS last_ts FROM claude_code_token_usage_tokens_total").catch(function() { return null; }),
+        query("SELECT MAX(greptime_timestamp) AS last_ts FROM claude_code_token_usage_tokens_total").catch(function() { return null; }),
       ]);
       var ts1 = ccResults[0] && rows(ccResults[0])?.[0]?.[0];
       var ts2 = ccResults[1] && rows(ccResults[1])?.[0]?.[0];
@@ -350,7 +378,7 @@ async function checkDataFreshness() {
     try {
       var codexResults = await Promise.all([
         query("SELECT MAX(timestamp) AS last_ts FROM opentelemetry_logs WHERE scope_name LIKE 'codex_%'").catch(function() { return null; }),
-        query("SELECT MAX(greptime_timestamp) AS last_ts FROM codex_tokens_total").catch(function() { return null; }),
+        query("SELECT MAX(greptime_timestamp) AS last_ts FROM codex_turn_token_usage_sum").catch(function() { return null; }),
       ]);
       var cTs1 = codexResults[0] && rows(codexResults[0])?.[0]?.[0];
       var cTs2 = codexResults[1] && rows(codexResults[1])?.[0]?.[0];

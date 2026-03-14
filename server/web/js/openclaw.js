@@ -302,14 +302,14 @@ async function oc_loadMessageFlowChart() {
     var iv = intervalSQL();
     var results = await Promise.all([
       query(
-        "SELECT date_bin('5 minutes'::INTERVAL, ts) AS t, SUM(greptime_value) AS v " +
+        "SELECT date_bin('5 minutes'::INTERVAL, greptime_timestamp) AS t, SUM(greptime_value) AS v " +
         "FROM openclaw_message_processed_total " +
-        "WHERE ts > NOW() - INTERVAL '" + iv + "' GROUP BY t ORDER BY t"
+        "WHERE greptime_timestamp > NOW() - INTERVAL '" + iv + "' GROUP BY t ORDER BY t"
       ),
       query(
-        "SELECT date_bin('5 minutes'::INTERVAL, ts) AS t, SUM(greptime_value) AS v " +
+        "SELECT date_bin('5 minutes'::INTERVAL, greptime_timestamp) AS t, SUM(greptime_value) AS v " +
         "FROM openclaw_message_queued_total " +
-        "WHERE ts > NOW() - INTERVAL '" + iv + "' GROUP BY t ORDER BY t"
+        "WHERE greptime_timestamp > NOW() - INTERVAL '" + iv + "' GROUP BY t ORDER BY t"
       ),
     ]);
     var processed = rowsToObjects(results[0]);
@@ -334,15 +334,15 @@ async function oc_loadContextWindowChart() {
     var iv = intervalSQL();
     var results = await Promise.all([
       query(
-        "SELECT date_bin('5 minutes'::INTERVAL, ts) AS t, AVG(greptime_value) AS v " +
+        "SELECT date_bin('5 minutes'::INTERVAL, greptime_timestamp) AS t, AVG(greptime_value) AS v " +
         "FROM openclaw_context_tokens_sum " +
-        "WHERE openclaw_context = 'used' AND ts > NOW() - INTERVAL '" + iv + "' " +
+        "WHERE openclaw_context = 'used' AND greptime_timestamp > NOW() - INTERVAL '" + iv + "' " +
         "GROUP BY t ORDER BY t"
       ),
       query(
-        "SELECT date_bin('5 minutes'::INTERVAL, ts) AS t, AVG(greptime_value) AS v " +
+        "SELECT date_bin('5 minutes'::INTERVAL, greptime_timestamp) AS t, AVG(greptime_value) AS v " +
         "FROM openclaw_context_tokens_sum " +
-        "WHERE openclaw_context = 'limit' AND ts > NOW() - INTERVAL '" + iv + "' " +
+        "WHERE openclaw_context = 'limit' AND greptime_timestamp > NOW() - INTERVAL '" + iv + "' " +
         "GROUP BY t ORDER BY t"
       ),
     ]);
@@ -369,7 +369,7 @@ async function oc_loadOutcomeDistribution() {
     var res = await query(
       "SELECT openclaw_outcome AS outcome, SUM(greptime_value) AS cnt " +
       "FROM openclaw_message_processed_total " +
-      "WHERE ts > NOW() - INTERVAL '" + intervalSQL() + "' " +
+      "WHERE greptime_timestamp > NOW() - INTERVAL '" + intervalSQL() + "' " +
       "GROUP BY outcome ORDER BY cnt DESC"
     );
     var data = rowsToObjects(res);
@@ -394,7 +394,7 @@ async function oc_loadSessionStateChart() {
     var res = await query(
       "SELECT openclaw_state AS state, openclaw_reason AS reason, SUM(greptime_value) AS cnt " +
       "FROM openclaw_session_state_total " +
-      "WHERE ts > NOW() - INTERVAL '" + intervalSQL() + "' " +
+      "WHERE greptime_timestamp > NOW() - INTERVAL '" + intervalSQL() + "' " +
       "GROUP BY state, reason ORDER BY cnt DESC LIMIT 10"
     );
     var data = rowsToObjects(res);
@@ -417,10 +417,10 @@ async function oc_loadSessionStateChart() {
 async function oc_loadQueueDepthChart() {
   try {
     var res = await query(
-      "SELECT date_bin('5 minutes'::INTERVAL, ts) AS t, " +
+      "SELECT date_bin('5 minutes'::INTERVAL, greptime_timestamp) AS t, " +
       "AVG(greptime_value) AS avg_depth " +
       "FROM openclaw_queue_depth_sum " +
-      "WHERE ts > NOW() - INTERVAL '" + intervalSQL() + "' " +
+      "WHERE greptime_timestamp > NOW() - INTERVAL '" + intervalSQL() + "' " +
       "GROUP BY t ORDER BY t"
     );
     var data = rowsToObjects(res);
@@ -434,9 +434,9 @@ async function oc_loadQueueDepthChart() {
 async function oc_loadRunDurationChart() {
   try {
     var res = await query(
-      "SELECT date_bin('5 minutes'::INTERVAL, ts) AS t, SUM(greptime_value) AS runs " +
+      "SELECT date_bin('5 minutes'::INTERVAL, greptime_timestamp) AS t, SUM(greptime_value) AS runs " +
       "FROM openclaw_run_duration_ms_milliseconds_count " +
-      "WHERE ts > NOW() - INTERVAL '" + intervalSQL() + "' " +
+      "WHERE greptime_timestamp > NOW() - INTERVAL '" + intervalSQL() + "' " +
       "GROUP BY t ORDER BY t"
     );
     var data = rowsToObjects(res);
@@ -528,7 +528,7 @@ async function oc_loadTraces() {
       var statusHtml = isErr
         ? '<span class="badge badge-error">ERROR</span>'
         : (d.outcome ? escapeHTML(d.outcome) : '\u2014');
-      return '<tr class="clickable" onclick="oc_toggleTraceDetail(this, \'' + escapeHTML(d.trace_id) + '\')">' +
+      return '<tr class="clickable" onclick="oc_toggleTraceDetail(this, \'' + escapeJSString(d.trace_id) + '\')">' +
       '<td>' + fmtTime(d.timestamp) + '</td>' +
       '<td><span class="badge' + (isErr ? ' badge-error' : '') + '">' + escapeHTML(shortName) + '</span></td>' +
       '<td>' + escapeHTML(d.model || '\u2014') + '</td>' +
@@ -778,7 +778,7 @@ async function oc_loadExpensiveRequests() {
     var tbody = document.getElementById('oc-expensive-body');
     if (!data.length) { tbody.innerHTML = '<tr><td colspan="6" class="loading">' + t('empty.no_data') + '</td></tr>'; return; }
     tbody.innerHTML = data.map(function(d) {
-      return '<tr class="clickable" onclick="oc_switchToTrace(\'' + escapeHTML(d.trace_id) + '\')">' +
+      return '<tr class="clickable" onclick="oc_switchToTrace(\'' + escapeJSString(d.trace_id) + '\')">' +
       '<td>' + fmtTime(d.timestamp) + '</td>' +
       '<td>' + escapeHTML(d.model || 'unknown') + '</td>' +
       '<td>' + fmtNum(d.input_tok) + '</td>' +
@@ -942,7 +942,7 @@ async function oc_doSearch() {
     if (!data.length) { el.innerHTML = '<div class="loading">' + t('empty.no_results') + '</div>'; return; }
     el.innerHTML = data.map(function(d) {
       var isErr = d.span_status_code === 'STATUS_CODE_ERROR';
-      return '<div class="search-result-item" onclick="oc_switchToTrace(\'' + escapeHTML(d.trace_id) + '\')">' +
+      return '<div class="search-result-item" onclick="oc_switchToTrace(\'' + escapeJSString(d.trace_id) + '\')">' +
       '<div class="search-result-meta">' +
       '<span>' + fmtTime(d.timestamp) + '</span>' +
       '<span class="badge' + (isErr ? ' badge-error' : '') + '">' + escapeHTML(oc_shortSpanName(d.span_name)) + '</span>' +
@@ -1001,7 +1001,7 @@ async function oc_loadAnomalies() {
         reason = t('anomaly.high_token');
         severity = 'warn';
       }
-      return '<div class="anomaly-item ' + severity + '" onclick="oc_switchToTrace(\'' + escapeHTML(d.trace_id) + '\')">' +
+      return '<div class="anomaly-item ' + severity + '" onclick="oc_switchToTrace(\'' + escapeJSString(d.trace_id) + '\')">' +
         '<div class="anomaly-reason">' + reason + '</div>' +
         '<div style="font-size:13px">' +
         '<span class="badge">' + escapeHTML(oc_shortSpanName(d.span_name)) + '</span> &middot; ' +
@@ -1139,8 +1139,8 @@ async function oc_loadSessionHealth() {
       var shortName = oc_shortSpanName(d.span_name);
       var isErr = d.span_name === 'openclaw.webhook.error';
       var onclick = d.session_key
-        ? 'oc_filterBySession(\'' + escapeHTML(d.session_key) + '\')'
-        : 'oc_switchToTrace(\'' + escapeHTML(d.trace_id) + '\')';
+        ? 'oc_filterBySession(\'' + escapeJSString(d.session_key) + '\')'
+        : 'oc_switchToTrace(\'' + escapeJSString(d.trace_id) + '\')';
       return '<tr class="clickable" onclick="' + onclick + '">' +
         '<td>' + fmtTime(d.timestamp) + '</td>' +
         '<td>' + escapeHTML(d.session_key || '\u2014') + '</td>' +
@@ -1171,7 +1171,7 @@ async function oc_loadWebhookTimeline() {
     var data = rowsToObjects(res);
     if (!data.length) { el.innerHTML = '<div class="chart-empty">' + t('empty.no_webhook_errors') + '</div>'; return; }
     el.innerHTML = data.map(function(d) {
-      return '<div class="anomaly-item badge-error" onclick="oc_switchToTrace(\'' + escapeHTML(d.trace_id) + '\')">' +
+      return '<div class="anomaly-item badge-error" onclick="oc_switchToTrace(\'' + escapeJSString(d.trace_id) + '\')">' +
         '<div class="anomaly-reason">Webhook Error</div>' +
         '<div style="font-size:13px">' +
         (d.channel ? escapeHTML(d.channel) + ' &middot; ' : '') +
@@ -1207,7 +1207,7 @@ async function oc_loadTokenAnomalies() {
     var data = rowsToObjects(res);
     if (!data.length) { el.innerHTML = '<div class="chart-empty">' + t('empty.no_token_anomalies') + '</div>'; return; }
     el.innerHTML = data.map(function(d) {
-      return '<div class="anomaly-item warn" onclick="oc_switchToTrace(\'' + escapeHTML(d.trace_id) + '\')">' +
+      return '<div class="anomaly-item warn" onclick="oc_switchToTrace(\'' + escapeJSString(d.trace_id) + '\')">' +
         '<div class="anomaly-reason">' + t('anomaly.high_token') + ' (' + fmtNum(d.input_tok) + ' input)</div>' +
         '<div style="font-size:13px">' +
         escapeHTML(d.model || 'unknown') +
@@ -1223,10 +1223,10 @@ async function oc_loadChannelActivity() {
   try {
     var iv = intervalSQL();
     var res = await query(
-      "SELECT date_bin('5 minutes'::INTERVAL, ts) AS t, " +
+      "SELECT date_bin('5 minutes'::INTERVAL, greptime_timestamp) AS t, " +
       "SUM(greptime_value) AS msg_count " +
       "FROM openclaw_message_queued_total " +
-      "WHERE ts > NOW() - INTERVAL '" + iv + "' " +
+      "WHERE greptime_timestamp > NOW() - INTERVAL '" + iv + "' " +
       "GROUP BY t ORDER BY t"
     );
     var data = rowsToObjects(res);
