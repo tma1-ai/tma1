@@ -61,7 +61,8 @@ download() {
   checksum_url="${url}.sha256sum"
 
   tmp_dir="$(mktemp -d)"
-  trap 'rm -rf "$tmp_dir"' EXIT
+  # shellcheck disable=SC2064  # Intentional: expand tmp_dir now, not at exit time (local var)
+  trap "rm -rf '${tmp_dir}'" EXIT
 
   info "Downloading ${archive} (${VERSION})..."
   curl -fSL -o "${tmp_dir}/${archive}" "$url" \
