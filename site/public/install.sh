@@ -15,6 +15,7 @@ REPO="tma1-ai/tma1"
 INSTALL_DIR="${TMA1_INSTALL_DIR:-$HOME/.tma1/bin}"
 TMA1_PORT="${TMA1_PORT:-14318}"
 TMA1_FORCE="${TMA1_FORCE:-0}"
+TMA1_GREPTIMEDB_VERSION="${TMA1_GREPTIMEDB_VERSION:-latest}"
 
 info()  { printf "\033[1;34m==>\033[0m %s\n" "$1"; }
 warn()  { printf "\033[1;33mWarning:\033[0m %s\n" "$1"; }
@@ -91,6 +92,32 @@ download() {
   mkdir -p "$INSTALL_DIR"
   tar -xzf "${tmp_dir}/${archive}" -C "$INSTALL_DIR"
   chmod +x "${INSTALL_DIR}/tma1-server"
+}
+
+# --- Download GreptimeDB binary via official install script ---
+download_greptimedb() {
+  local greptime_bin="${INSTALL_DIR}/greptime"
+  if [ -f "$greptime_bin" ] && [ "$TMA1_FORCE" != "1" ]; then
+    info "GreptimeDB binary already present, skipping download."
+    return
+  fi
+
+  mkdir -p "$INSTALL_DIR"
+  info "Downloading GreptimeDB via official install script..."
+  local gdb_install_url="https://raw.githubusercontent.com/greptimeteam/greptimedb/main/scripts/install.sh"
+  local ok=0
+  # The official script installs to the current working directory.
+  # It accepts an optional version argument (default: latest).
+  if [ "$TMA1_GREPTIMEDB_VERSION" != "latest" ]; then
+    (cd "$INSTALL_DIR" && curl -fsSL "$gdb_install_url" | sh -s -- "$TMA1_GREPTIMEDB_VERSION") && ok=1
+  else
+    (cd "$INSTALL_DIR" && curl -fsSL "$gdb_install_url" | sh) && ok=1
+  fi
+  if [ "$ok" != "1" ]; then
+    warn "GreptimeDB download failed. tma1-server will download it on first start."
+    return
+  fi
+  info "GreptimeDB installed to ${greptime_bin}"
 }
 
 # --- Stop existing service before upgrade ---
@@ -302,6 +329,7 @@ main() {
   stop_service
   force_clean
   download
+  download_greptimedb
   setup_service
   post_install
 }
