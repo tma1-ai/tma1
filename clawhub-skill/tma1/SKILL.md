@@ -185,7 +185,7 @@ openclaw gateway restart
 
 #### Claude Code
 
-Add to `~/.claude/settings.json`:
+Add to `~/.claude/settings.json` (Windows: `%USERPROFILE%\.claude\settings.json`):
 
 ```json
 {
@@ -202,7 +202,7 @@ Claude Code exports metrics and logs (not traces). The metrics/logs exporters mu
 
 #### Codex
 
-Add to `~/.codex/config.toml`:
+Add to `~/.codex/config.toml` (Windows: `%USERPROFILE%\.codex\config.toml`):
 
 ```toml
 [otel]
@@ -226,8 +226,16 @@ Codex uses separate exporters for logs, traces, and metrics. Restart Codex after
 #### Any OTel SDK
 
 ```bash
+# macOS / Linux
 export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:14318/v1/otlp
 export OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+# Then run your agent as usual
+```
+
+```powershell
+# Windows (PowerShell)
+$env:OTEL_EXPORTER_OTLP_ENDPOINT = "http://localhost:14318/v1/otlp"
+$env:OTEL_EXPORTER_OTLP_PROTOCOL = "http/protobuf"
 # Then run your agent as usual
 ```
 
@@ -318,9 +326,9 @@ GROUP BY openclaw_model, openclaw_token ORDER BY tokens DESC;
 SHOW TABLES;
 
 💾 YOUR DATA
-Stored locally in: ~/.tma1/data/
+Stored locally in: ~/.tma1/data/ (Windows: %USERPROFILE%\.tma1\data\)
 
-Database config: ~/.tma1/config/standalone.toml
+Database config: ~/.tma1/config/standalone.toml (Windows: %USERPROFILE%\.tma1\config\standalone.toml)
 Edit this file if you want to tune database resource usage, then restart `tma1-server`.
 Never sent to any cloud service.
 

@@ -87,7 +87,7 @@ This should return `{"status":"ok","greptimedb":"running",...}`.
 
 Tell the user to set the OTel exporter endpoint. The exact method depends on their agent:
 
-**Claude Code** — add to `~/.claude/settings.json`:
+**Claude Code** — add to `~/.claude/settings.json` (Windows: `%USERPROFILE%\.claude\settings.json`):
 ```json
 {
   "env": {
@@ -101,7 +101,7 @@ Tell the user to set the OTel exporter endpoint. The exact method depends on the
 
 Claude Code exports metrics and logs (not traces). The metrics/logs exporters must be explicitly enabled.
 
-**Codex** — add to `~/.codex/config.toml`:
+**Codex** — add to `~/.codex/config.toml` (Windows: `%USERPROFILE%\.codex\config.toml`):
 ```toml
 [otel]
 log_user_prompt = true
@@ -133,8 +133,15 @@ openclaw gateway restart
 
 **Other OTel-compatible agents** (standard GenAI SDK) — typically export traces:
 ```bash
+# macOS / Linux
 export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:14318/v1/otlp
 export OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+```
+
+```powershell
+# Windows (PowerShell)
+$env:OTEL_EXPORTER_OTLP_ENDPOINT = "http://localhost:14318/v1/otlp"
+$env:OTEL_EXPORTER_OTLP_PROTOCOL = "http/protobuf"
 ```
 
 ## Step 6: Verify data flow
