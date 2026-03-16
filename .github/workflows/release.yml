@@ -24,6 +24,9 @@ jobs:
           - os: macos-latest
             goos: darwin
             goarch: arm64
+          - os: ubuntu-latest
+            goos: windows
+            goarch: amd64
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -38,12 +41,17 @@ jobs:
           CGO_ENABLED: '0'
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
-        run: go build -o ./bin/tma1-server ./cmd/tma1-server
+        run: |
+          BIN_NAME="tma1-server"
+          if [ "${{ matrix.goos }}" = "windows" ]; then BIN_NAME="tma1-server.exe"; fi
+          go build -o "./bin/${BIN_NAME}" ./cmd/tma1-server
 
       - name: Package
         run: |
+          BIN_NAME="tma1-server"
+          if [ "${{ matrix.goos }}" = "windows" ]; then BIN_NAME="tma1-server.exe"; fi
           ARCHIVE="tma1-server-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz"
-          tar -czf "${ARCHIVE}" -C server/bin tma1-server
+          tar -czf "${ARCHIVE}" -C server/bin "${BIN_NAME}"
           if command -v sha256sum >/dev/null 2>&1; then
             sha256sum "${ARCHIVE}" > "${ARCHIVE}.sha256sum"
           else

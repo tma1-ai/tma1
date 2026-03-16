@@ -1,6 +1,6 @@
 MAKEFILE_DIR:=$(shell dirname $(realpath $(firstword $(MAKEFILE_LIST))))
 
-.PHONY: build build-linux vet test clean run dev
+.PHONY: build build-linux build-windows vet test clean run dev
 
 build:
 	mkdir -p $(MAKEFILE_DIR)/server/bin
@@ -10,6 +10,10 @@ build-linux:
 	mkdir -p $(MAKEFILE_DIR)/server/bin
 	cd server && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o ./bin/tma1-server ./cmd/tma1-server
 
+build-windows:
+	mkdir -p $(MAKEFILE_DIR)/server/bin
+	cd server && CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -o ./bin/tma1-server.exe ./cmd/tma1-server
+
 vet:
 	cd server && go vet ./...
 
@@ -17,7 +21,7 @@ test:
 	cd server && go test -race -count=1 ./...
 
 clean:
-	rm -f server/bin/tma1-server
+	rm -f server/bin/tma1-server server/bin/tma1-server.exe
 
 run: build
 	./server/bin/tma1-server

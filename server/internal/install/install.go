@@ -22,6 +22,14 @@ const (
 	githubReleaseBase = "https://github.com/GreptimeTeam/greptimedb/releases"
 )
 
+// greptimeBinaryName returns the platform-appropriate binary name.
+func greptimeBinaryName() string {
+	if runtime.GOOS == "windows" {
+		return "greptime.exe"
+	}
+	return "greptime"
+}
+
 var (
 	versionClient  = &http.Client{Timeout: 10 * time.Second}
 	downloadClient = &http.Client{Timeout: 5 * time.Minute}
@@ -37,7 +45,7 @@ func EnsureGreptimeDB(dataDir, version string, logger *slog.Logger) (binPath str
 		return "", fmt.Errorf("install: create bin dir: %w", err)
 	}
 
-	binPath = filepath.Join(binDir, "greptime")
+	binPath = filepath.Join(binDir, greptimeBinaryName())
 	versionFile := filepath.Join(binDir, ".version")
 
 	if _, err := os.Stat(binPath); err == nil {
@@ -56,7 +64,7 @@ func EnsureGreptimeDB(dataDir, version string, logger *slog.Logger) (binPath str
 	}
 	logger.Info("downloading greptimedb", "version", resolvedVersion)
 
-	downloadURL, err := buildDownloadURL(resolvedVersion)
+	downloadURL, err := buildDownloadURL(resolvedVersion, runtime.GOOS, runtime.GOARCH)
 	if err != nil {
 		return "", err
 	}
@@ -143,11 +151,8 @@ func resolveVersion(version string) (string, error) {
 	return tag, nil
 }
 
-// buildDownloadURL constructs the download URL for the current OS/arch.
-func buildDownloadURL(version string) (string, error) {
-	goos := runtime.GOOS
-	goarch := runtime.GOARCH
-
+// buildDownloadURL constructs the download URL for the given OS/arch.
+func buildDownloadURL(version, goos, goarch string) (string, error) {
 	// Map Go arch names to GreptimeDB release names.
 	var osStr, archStr string
 	switch goos {
@@ -155,6 +160,8 @@ func buildDownloadURL(version string) (string, error) {
 		osStr = "darwin"
 	case "linux":
 		osStr = "linux"
+	case "windows":
+		osStr = "windows"
 	default:
 		return "", fmt.Errorf("install: unsupported OS %q", goos)
 	}
@@ -162,6 +169,9 @@ func buildDownloadURL(version string) (string, error) {
 	case "amd64":
 		archStr = "amd64"
 	case "arm64":
+		if goos == "windows" {
+			return "", fmt.Errorf("install: unsupported arch %q on %q", goarch, goos)
+		}
 		archStr = "arm64"
 	default:
 		return "", fmt.Errorf("install: unsupported arch %q", goarch)
@@ -191,7 +201,7 @@ func downloadFile(dst io.Writer, url string) error {
 // the tarball's checksum. Non-fatal: logs a warning if the checksum file is
 // unavailable but does not block installation.
 func verifyChecksum(tarball *os.File, version string, logger *slog.Logger) error {
-	downloadURL, err := buildDownloadURL(version)
+	downloadURL, err := buildDownloadURL(version, runtime.GOOS, runtime.GOARCH)
 	if err != nil {
 		return nil // can't build URL, skip
 	}
@@ -259,8 +269,7 @@ func extractBinary(r io.Reader, destPath string) error {
 		if hdr.Typeflag != tar.TypeReg {
 			continue
 		}
-		// The binary is named "greptime" (no extension).
-		if filepath.Base(hdr.Name) != "greptime" {
+		if filepath.Base(hdr.Name) != greptimeBinaryName() {
 			continue
 		}
 
@@ -275,5 +284,5 @@ func extractBinary(r io.Reader, destPath string) error {
 		return out.Close()
 	}
 
-	return fmt.Errorf("greptime binary not found in archive")
+	return fmt.Errorf("%s binary not found in archive", greptimeBinaryName())
 }

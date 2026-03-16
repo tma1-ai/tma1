@@ -28,6 +28,7 @@ tools/
 # Go build / test artifacts
 server/bin/
 server/tma1-server
+server/tma1-server.exe
 server/.gocache/
 .gocache/
 .gomodcache/

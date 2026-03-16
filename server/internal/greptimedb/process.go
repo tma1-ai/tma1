@@ -49,6 +49,7 @@ func Start(cfg Config) (*Process, error) {
 	cmd := exec.Command(cfg.BinPath, args...) //nolint:gosec
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+	setProcAttr(cmd)
 
 	cfg.Logger.Info("starting greptimedb",
 		"bin", cfg.BinPath,
@@ -71,13 +72,13 @@ func Start(cfg Config) (*Process, error) {
 	return p, nil
 }
 
-// Stop sends SIGTERM to the GreptimeDB process and waits for it to exit.
+// Stop sends an interrupt signal to the GreptimeDB process and waits for it to exit.
 func (p *Process) Stop(ctx context.Context) error {
 	if p.cmd == nil || p.cmd.Process == nil {
 		return nil
 	}
 	p.logger.Info("stopping greptimedb")
-	if err := p.cmd.Process.Signal(os.Interrupt); err != nil {
+	if err := sendInterrupt(p.cmd.Process); err != nil {
 		_ = p.cmd.Process.Kill()
 	}
 	done := make(chan error, 1)

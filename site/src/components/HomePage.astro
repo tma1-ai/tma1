@@ -9,6 +9,7 @@ const { t } = Astro.props;
 const lang = t.lang;
 const onboardingCmd = 'Read https://tma1.ai/SKILL.md and follow the instructions to install and configure TMA1 for your AI agent';
 const curlCmd = 'curl -fsSL https://tma1.ai/install.sh | bash';
+const psCmd = 'irm https://tma1.ai/install.ps1 | iex';
 
 // Screenshot pairs for showcase rows (cards 01-05)
 // padded: true → narrow crop, centered vertically with dashboard bg fill
@@ -90,9 +91,16 @@ const showcase = [
           <span class="terminal-title">terminal</span>
         </div>
         <div class="terminal-body">
+          <div class="line comment"># macOS / Linux</div>
           <div class="line">
             <span class="prompt">$</span>
             <span class="cmd">{curlCmd}</span>
+          </div>
+          <div class="line">&nbsp;</div>
+          <div class="line comment"># Windows (PowerShell)</div>
+          <div class="line">
+            <span class="prompt">&gt;</span>
+            <span class="cmd">{psCmd}</span>
           </div>
         </div>
       </div>
@@ -240,8 +248,11 @@ const showcase = [
           <span class="terminal-title">terminal</span>
         </div>
         <div class="terminal-body">
-          <div class="line comment"># Install TMA1</div>
+          <div class="line comment"># Install TMA1 (macOS / Linux)</div>
           <div class="line"><span class="prompt">$</span> <span class="cmd">curl -fsSL https://tma1.ai/install.sh | bash</span></div>
+          <div class="line">&nbsp;</div>
+          <div class="line comment"># Install TMA1 (Windows PowerShell)</div>
+          <div class="line"><span class="prompt">&gt;</span> <span class="cmd">irm https://tma1.ai/install.ps1 | iex</span></div>
           <div class="line">&nbsp;</div>
           <div class="line comment"># Start TMA1</div>
           <div class="line"><span class="prompt">$</span> <span class="cmd">tma1-server</span></div>

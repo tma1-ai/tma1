@@ -22,7 +22,11 @@ the monolith buried on the moon, silently recording everything until you dig it 
 ## Quick Install
 
 ```bash
+# macOS / Linux
 curl -fsSL https://tma1.ai/install.sh | bash
+
+# Windows (PowerShell)
+irm https://tma1.ai/install.ps1 | iex
 ```
 
 Or build from source:
@@ -131,10 +135,11 @@ On first start, TMA1 writes a default GreptimeDB config to `~/.tma1/config/stand
 ## Development
 
 ```bash
-make build       # Build the binary
-make vet         # Run go vet
-make test        # Run tests with race detector
-make run         # Build and run locally
+make build           # Build the binary
+make build-windows   # Cross-compile for Windows
+make vet             # Run go vet
+make test            # Run tests with race detector
+make run             # Build and run locally
 ```
 
 ## License

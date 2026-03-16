@@ -22,20 +22,38 @@ If this returns `{"status":"ok"}`, TMA1 is already running. Skip to Step 4.
 Download and install the tma1-server binary:
 
 ```bash
+# macOS / Linux
 curl -fsSL https://tma1.ai/install.sh | bash
 ```
 
-This installs the binary to `~/.tma1/bin/tma1-server`.
+```powershell
+# Windows (PowerShell)
+irm https://tma1.ai/install.ps1 | iex
+```
+
+This installs the binary to `~/.tma1/bin/tma1-server` (or `%USERPROFILE%\.tma1\bin\tma1-server.exe` on Windows).
 
 ## Step 3: Start TMA1
 
+On macOS/Linux the installer registers a service that auto-starts.
+On Windows the installer registers a Scheduled Task that auto-starts.
+
+If TMA1 is not running, start it manually:
+
 ```bash
+# macOS / Linux
 ~/.tma1/bin/tma1-server &
+```
+
+```powershell
+# Windows (PowerShell)
+Start-Process "$env:USERPROFILE\.tma1\bin\tma1-server.exe"
 ```
 
 Wait for GreptimeDB to become healthy:
 
 ```bash
+# macOS / Linux
 for i in $(seq 1 30); do
   if curl -sf http://localhost:14318/health > /dev/null 2>&1; then
     echo "TMA1 is ready."
@@ -43,6 +61,14 @@ for i in $(seq 1 30); do
   fi
   sleep 1
 done
+```
+
+```powershell
+# Windows (PowerShell)
+for ($i = 0; $i -lt 30; $i++) {
+  try { if ((Invoke-WebRequest -Uri http://localhost:14318/health -UseBasicParsing).StatusCode -eq 200) { Write-Host "TMA1 is ready."; break } } catch {}
+  Start-Sleep -Seconds 1
+}
 ```
 
 If it does not become healthy after 30 seconds, check the logs and report the error.

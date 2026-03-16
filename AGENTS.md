@@ -128,7 +128,8 @@ Source columns use GenAI semantic conventions:
 
 ```bash
 make build        # Build the binary
-make build-linux  # Cross-compile for Linux amd64
+make build-linux     # Cross-compile for Linux amd64
+make build-windows   # Cross-compile for Windows amd64
 make run          # Build and run locally
 make vet          # Run go vet
 make test         # Run tests with race detector
@@ -186,7 +187,8 @@ On first start, tma1 writes a default GreptimeDB config to `~/.tma1/config/stand
 | OpenClaw view JS | `server/web/js/openclaw.js` |
 | Embedded FS declaration | `server/web/web.go` |
 | Landing page | `site/src/pages/index.astro` |
-| Install script | `site/public/install.sh` |
+| Install script (Unix) | `site/public/install.sh` |
+| Install script (Windows) | `site/public/install.ps1` |
 | ClawHub skill | `clawhub-skill/tma1/SKILL.md` |
 | CI workflow | `.github/workflows/ci.yml` |
 | Release workflow | `.github/workflows/release.yml` |

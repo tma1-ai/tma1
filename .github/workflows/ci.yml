@@ -27,3 +27,11 @@ jobs:
       - name: Build
         working-directory: server
         run: CGO_ENABLED=0 go build -o ./bin/tma1-server ./cmd/tma1-server
+
+      - name: Cross-compile Windows
+        working-directory: server
+        env:
+          CGO_ENABLED: '0'
+          GOOS: windows
+          GOARCH: amd64
+        run: go build -o /dev/null ./cmd/tma1-server

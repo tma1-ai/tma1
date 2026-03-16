@@ -126,7 +126,13 @@ curl -sf http://localhost:14318/health && echo "RUNNING" || echo "NOT_RUNNING"
 `[AGENT]` Download and run the TMA1 installer:
 
 ```bash
+# macOS / Linux
 curl -fsSL https://tma1.ai/install.sh | bash
+```
+
+```powershell
+# Windows (PowerShell)
+irm https://tma1.ai/install.ps1 | iex
 ```
 
 This will:
@@ -142,7 +148,7 @@ curl -sf http://localhost:14318/health && echo "OK" || echo "FAILED"
 ```
 
 If it fails, tell the user:
-> TMA1 didn't start correctly. Check logs for errors: on macOS `~/Library/Logs/tma1-server.log`, on Linux `journalctl --user -u tma1-server`.
+> TMA1 didn't start correctly. Check logs for errors: on macOS `~/Library/Logs/tma1-server.log`, on Linux `journalctl --user -u tma1-server`, on Windows check Task Scheduler history for the "TMA1 Server" task.
 
 ---
 
@@ -320,7 +326,8 @@ Never sent to any cloud service.
 
 ♻️ RESTART / UPGRADE
 Restart: tma1-server
-Upgrade to latest: curl -fsSL https://tma1.ai/install.sh | bash
+Upgrade (macOS/Linux): curl -fsSL https://tma1.ai/install.sh | bash
+Upgrade (Windows PS):  irm https://tma1.ai/install.ps1 | iex
   (stops the running service, downloads the new binary, restarts — data is preserved)
 
 💡 For more queries, read: https://tma1.ai/REFERENCE.md
