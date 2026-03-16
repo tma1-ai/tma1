@@ -136,7 +136,7 @@ function Register-TMA1Task {
     # Pass runtime config as environment variables via cmd wrapper,
     # matching what the Unix installer does with launchd/systemd.
     $cmdArgs = "/c `"set `"TMA1_PORT=$TMA1Port`" && set `"TMA1_DATA_DIR=$TMA1DataDir`" && `"$binPath`"`""
-    $action = New-ScheduledTaskAction -Execute 'cmd.exe' -Arguments $cmdArgs
+    $action = New-ScheduledTaskAction -Execute 'cmd.exe' -Argument $cmdArgs
     # Scope to current user only, matching Unix installer's per-user service registration.
     # Use fully qualified DOMAIN\User identity so it works on domain-joined machines
     # and with Microsoft accounts (bare $env:USERNAME is ambiguous).

@@ -133,6 +133,7 @@ make build-windows   # Cross-compile for Windows amd64
 make run          # Build and run locally
 make vet          # Run go vet
 make test         # Run tests with race detector
+# CI also runs: shellcheck site/public/install.sh + PSScriptAnalyzer on install.ps1
 ```
 
 ## Go conventions

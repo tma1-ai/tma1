@@ -35,3 +35,12 @@ jobs:
           GOOS: windows
           GOARCH: amd64
         run: go build -o /dev/null ./cmd/tma1-server
+
+      - name: Lint install.sh
+        run: shellcheck site/public/install.sh
+
+      - name: Lint install.ps1
+        shell: pwsh
+        run: |
+          Install-Module -Name PSScriptAnalyzer -Force -Scope CurrentUser
+          Invoke-ScriptAnalyzer -Path site/public/install.ps1 -EnableExit -Severity Error
