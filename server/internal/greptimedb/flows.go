@@ -281,6 +281,11 @@ func TruncatePricing(httpPort int) error {
 	return execSQL(sqlURL, "TRUNCATE TABLE tma1_model_pricing")
 }
 
+// IsTableNotFound returns true if the error indicates the table does not exist.
+func IsTableNotFound(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "not found")
+}
+
 // InitCostFlow reads pricing from tma1_model_pricing and creates/replaces
 // the cost flow with a dynamic CASE expression.
 func InitCostFlow(httpPort int, logger *slog.Logger) error {
@@ -323,8 +328,9 @@ func buildCostCaseSQL(prices []modelPrice, modelExpr, inputExpr, outputExpr stri
 	var sb strings.Builder
 	sb.WriteString("CASE")
 	for _, p := range prices {
+		safe := strings.ReplaceAll(p.Pattern, "'", "''")
 		fmt.Fprintf(&sb, " WHEN %s LIKE '%%%s%%' THEN CAST(%s AS DOUBLE)*%.6f/1000000.0+CAST(%s AS DOUBLE)*%.6f/1000000.0",
-			modelExpr, p.Pattern, inputExpr, p.InputPrice, outputExpr, p.OutputPrice)
+			modelExpr, safe, inputExpr, p.InputPrice, outputExpr, p.OutputPrice)
 	}
 	// Default: Sonnet-tier ($3/$15)
 	fmt.Fprintf(&sb, " ELSE CAST(%s AS DOUBLE)*3.000000/1000000.0+CAST(%s AS DOUBLE)*15.000000/1000000.0 END",

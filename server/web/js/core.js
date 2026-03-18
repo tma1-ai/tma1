@@ -165,7 +165,7 @@ async function loadPricing() {
 
 function costCaseSQL(modelExpr, inputExpr, outputExpr) {
   var parts = modelPricing.map(function(m) {
-    return "WHEN " + modelExpr + " LIKE '%" + m.p + "%' THEN " +
+    return "WHEN " + modelExpr + " LIKE '%" + m.p.replace(/'/g, "''") + "%' THEN " +
       "CAST(" + inputExpr + " AS DOUBLE)*" + m.i + "/1000000.0+" +
       "CAST(" + outputExpr + " AS DOUBLE)*" + m.o + "/1000000.0";
   });
