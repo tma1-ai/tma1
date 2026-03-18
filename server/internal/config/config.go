@@ -33,7 +33,7 @@ type Config struct {
 	// LogLevel: debug, info, warn, error.
 	LogLevel string
 
-	// DataTTL is the default TTL for auto-created tables (e.g. "15d", "30d").
+	// DataTTL is the default TTL for auto-created tables (e.g. "60d", "30d").
 	DataTTL string
 }
 
@@ -53,7 +53,7 @@ func Load() (*Config, error) {
 		GreptimeDBGRPCPort:  envInt("TMA1_GREPTIMEDB_GRPC_PORT", 14001),
 		GreptimeDBMySQLPort: envInt("TMA1_GREPTIMEDB_MYSQL_PORT", 14002),
 		LogLevel:            env("TMA1_LOG_LEVEL", "info"),
-		DataTTL:             env("TMA1_DATA_TTL", "15d"),
+		DataTTL:             env("TMA1_DATA_TTL", "60d"),
 	}
 
 	return cfg, nil

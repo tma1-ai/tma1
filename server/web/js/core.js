@@ -5,15 +5,20 @@ var API = '/api/query';
 var currentTimeRange = '24h';
 
 function intervalSQL() {
-  var m = { '1h': '1 hour', '6h': '6 hours', '24h': '1 day', '7d': '7 days' };
+  var m = { '1h': '1 hour', '6h': '6 hours', '24h': '1 day', '7d': '7 days', '30d': '30 days' };
   return m[currentTimeRange] || '1 day';
+}
+
+function chartBucket() {
+  var m = { '1h': '5 minutes', '6h': '5 minutes', '24h': '5 minutes', '7d': '15 minutes', '30d': '1 hour' };
+  return m[currentTimeRange] || '5 minutes';
 }
 
 // Session query row limit scaled by time range.
 // Typical agent usage: ~1k events/day. These limits should cover all but
 // the most extreme workloads, while keeping browser performance reasonable.
 function sessionQueryLimit() {
-  var m = { '1h': 5000, '6h': 10000, '24h': 20000, '7d': 50000 };
+  var m = { '1h': 5000, '6h': 10000, '24h': 20000, '7d': 50000, '30d': 100000 };
   return m[currentTimeRange] || 20000;
 }
 
@@ -160,7 +165,7 @@ async function loadPricing() {
 
 function costCaseSQL(modelExpr, inputExpr, outputExpr) {
   var parts = modelPricing.map(function(m) {
-    return "WHEN " + modelExpr + " LIKE '%" + m.p + "%' THEN " +
+    return "WHEN " + modelExpr + " LIKE '%" + m.p.replace(/'/g, "''") + "%' THEN " +
       "CAST(" + inputExpr + " AS DOUBLE)*" + m.i + "/1000000.0+" +
       "CAST(" + outputExpr + " AS DOUBLE)*" + m.o + "/1000000.0";
   });

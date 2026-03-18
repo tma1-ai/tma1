@@ -44,7 +44,7 @@ jobs:
         run: |
           BIN_NAME="tma1-server"
           if [ "${{ matrix.goos }}" = "windows" ]; then BIN_NAME="tma1-server.exe"; fi
-          go build -o "./bin/${BIN_NAME}" ./cmd/tma1-server
+          go build -ldflags "-X main.Version=${{ github.ref_name }}" -o "./bin/${BIN_NAME}" ./cmd/tma1-server
 
       - name: Package
         run: |

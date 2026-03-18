@@ -122,7 +122,7 @@ function parseHash() {
   var h = location.hash.replace('#', '');
   if (!h) return { view: null, tab: null, range: null };
   var parts = h.split('/');
-  var validRanges = ['1h', '6h', '24h', '7d'];
+  var validRanges = ['1h', '6h', '24h', '7d', '30d'];
   var range = null;
   if (parts.length > 0 && validRanges.includes(parts[parts.length - 1])) {
     range = parts.pop();

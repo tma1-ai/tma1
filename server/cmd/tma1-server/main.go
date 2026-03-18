@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -16,6 +17,9 @@ import (
 	"github.com/tma1-ai/tma1/server/internal/handler"
 	"github.com/tma1-ai/tma1/server/internal/install"
 )
+
+// Version is set at build time via -ldflags "-X main.Version=<tag>".
+var Version = "dev"
 
 func parseLogLevel(s string) slog.Level {
 	switch strings.ToLower(s) {
@@ -76,9 +80,49 @@ func main() {
 		logger.Warn("set database TTL warning", "err", err)
 	}
 
+	// Step 3.5: check for tma1-server upgrade.
+	// No version file (old == "") covers both fresh install and old-version upgrade;
+	// we cannot distinguish the two, so we always attempt truncate+reseed.
+	// On fresh install the table doesn't exist yet — TruncatePricing returns a
+	// benign "table not found" error, which we ignore (SeedPricing creates it).
+	versionFile := filepath.Join(cfg.DataDir, ".tma1-version")
+	upgraded := false
+	var upgradeErr error
+	if Version != "dev" {
+		old := readVersionFile(versionFile)
+		if old != Version {
+			upgraded = true
+			if old != "" {
+				logger.Info("tma1 upgrade detected", "from", old, "to", Version)
+			}
+			if err := onUpgrade(cfg.GreptimeDBHTTPPort, logger); err != nil {
+				if greptimedb.IsTableNotFound(err) {
+					logger.Info("pricing table does not exist yet (fresh install), skipping truncate")
+				} else {
+					upgradeErr = err
+					logger.Warn("truncate pricing on upgrade failed, will retry next start", "err", err)
+				}
+			}
+		}
+	}
+
 	// Step 4: ensure pricing table exists and seed model pricing.
-	if err := greptimedb.SeedPricing(cfg.GreptimeDBHTTPPort, logger); err != nil {
-		logger.Warn("seed pricing warning", "err", err)
+	seedErr := greptimedb.SeedPricing(cfg.GreptimeDBHTTPPort, logger)
+	if seedErr != nil {
+		logger.Warn("seed pricing warning", "err", seedErr)
+	}
+
+	// Step 4.5: post-upgrade — write version file + best-effort cost flow recreate.
+	// Version file gates on truncate+seed only; cost flow creation is best-effort
+	// because it requires opentelemetry_traces which may not exist yet.
+	// initFlowsWithRetry (Step 5) handles deferred cost flow creation.
+	if upgraded && upgradeErr == nil && seedErr == nil {
+		if err := greptimedb.InitCostFlow(cfg.GreptimeDBHTTPPort, logger); err != nil {
+			logger.Warn("cost flow creation deferred to background retry", "err", err)
+		}
+		if err := os.WriteFile(versionFile, []byte(Version), 0o644); err != nil {
+			logger.Warn("failed to write version file", "err", err)
+		}
 	}
 
 	// Step 5: initialize flow aggregations (background retry).
@@ -128,6 +172,19 @@ func main() {
 	logger.Info("tma1-server stopped")
 }
 
+func readVersionFile(path string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
+}
+
+func onUpgrade(httpPort int, logger *slog.Logger) error {
+	// Clear stale pricing so SeedPricing re-inserts with latest data.
+	return greptimedb.TruncatePricing(httpPort)
+}
+
 // initFlowsWithRetry attempts to create flow aggregations up to 10 times
 // (~5 minutes). Skips if all flows already exist. Only attempts creation
 // when GenAI trace data is present (flows depend on gen_ai.* columns).
@@ -144,7 +201,9 @@ func initFlowsWithRetry(ctx context.Context, httpPort int, logger *slog.Logger) 
 		if greptimedb.HasGenAITraces(httpPort) {
 			logger.Info("GenAI trace data detected, creating flows")
 			greptimedb.InitFlows(httpPort, logger)
-			greptimedb.InitCostFlow(httpPort, logger)
+			if err := greptimedb.InitCostFlow(httpPort, logger); err != nil {
+				logger.Warn("cost flow creation failed, will retry", "err", err)
+			}
 		}
 		if i < 9 {
 			select {

@@ -18,14 +18,14 @@ var ME_VIEW_PREFIXES = {
 var ME_ALL_VIEW_PREFIXES = ['claude_code_', 'codex_', 'openclaw_'];
 
 function meRangeVector() {
-  var m = { '1h': '5m', '6h': '5m', '24h': '15m', '7d': '1h' };
+  var m = { '1h': '5m', '6h': '5m', '24h': '15m', '7d': '1h', '30d': '6h' };
   return m[currentTimeRange] || '5m';
 }
 
 function meQueryParams() {
   var now = Math.floor(Date.now() / 1000);
-  var rangeMap = { '1h': 3600, '6h': 21600, '24h': 86400, '7d': 604800 };
-  var stepMap = { '1h': 15, '6h': 60, '24h': 300, '7d': 900 };
+  var rangeMap = { '1h': 3600, '6h': 21600, '24h': 86400, '7d': 604800, '30d': 2592000 };
+  var stepMap = { '1h': 15, '6h': 60, '24h': 300, '7d': 900, '30d': 3600 };
   var range = rangeMap[currentTimeRange] || 86400;
   return { start: now - range, end: now, step: stepMap[currentTimeRange] || 300 };
 }

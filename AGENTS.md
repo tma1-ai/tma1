@@ -158,7 +158,7 @@ make test         # Run tests with race detector
 | `TMA1_GREPTIMEDB_GRPC_PORT` | `14001` | GreptimeDB gRPC port |
 | `TMA1_GREPTIMEDB_MYSQL_PORT` | `14002` | GreptimeDB MySQL protocol port |
 | `TMA1_LOG_LEVEL` | `info` | Log level: debug/info/warn/error |
-| `TMA1_DATA_TTL` | `15d` | Default TTL for auto-created tables |
+| `TMA1_DATA_TTL` | `60d` | Default TTL for auto-created tables (2 months) |
 
 ## Key design decisions
 
