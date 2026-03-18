@@ -166,7 +166,7 @@ async function oc_loadActivityHeatmap() {
 async function oc_loadTokenChart() {
   try {
     var res = await query(
-      "SELECT date_bin('5 minutes'::INTERVAL, timestamp) AS t, " +
+      "SELECT date_bin('" + chartBucket() + "'::INTERVAL, timestamp) AS t, " +
       "SUM(CAST(\"span_attributes.openclaw.tokens.input\" AS DOUBLE)) AS inp, " +
       "SUM(CAST(\"span_attributes.openclaw.tokens.output\" AS DOUBLE)) AS outp, " +
       "SUM(CAST(\"span_attributes.openclaw.tokens.cache_write\" AS DOUBLE)) AS cw " +
@@ -193,7 +193,7 @@ async function oc_loadCostChart() {
       '"span_attributes.openclaw.tokens.output"'
     );
     var res = await query(
-      "SELECT date_bin('5 minutes'::INTERVAL, timestamp) AS t, " +
+      "SELECT date_bin('" + chartBucket() + "'::INTERVAL, timestamp) AS t, " +
       "SUM(" + costExpr + ") AS cost " +
       "FROM opentelemetry_traces " +
       "WHERE " + OC_MODEL_SPAN + " AND timestamp > NOW() - INTERVAL '" + intervalSQL() + "' " +
@@ -210,7 +210,7 @@ async function oc_loadCostChart() {
 async function oc_loadLatencyChart() {
   try {
     var res = await query(
-      "SELECT date_bin('5 minutes'::INTERVAL, timestamp) AS t, " +
+      "SELECT date_bin('" + chartBucket() + "'::INTERVAL, timestamp) AS t, " +
       "ROUND(APPROX_PERCENTILE_CONT(duration_nano, 0.50) / 1000000.0, 0) AS p50_ms, " +
       "ROUND(APPROX_PERCENTILE_CONT(duration_nano, 0.95) / 1000000.0, 0) AS p95_ms " +
       "FROM opentelemetry_traces " +
@@ -309,12 +309,12 @@ async function oc_loadMessageFlowChart() {
     var iv = intervalSQL();
     var results = await Promise.all([
       query(
-        "SELECT date_bin('5 minutes'::INTERVAL, greptime_timestamp) AS t, SUM(greptime_value) AS v " +
+        "SELECT date_bin('" + chartBucket() + "'::INTERVAL, greptime_timestamp) AS t, SUM(greptime_value) AS v " +
         "FROM openclaw_message_processed_total " +
         "WHERE greptime_timestamp > NOW() - INTERVAL '" + iv + "' GROUP BY t ORDER BY t"
       ),
       query(
-        "SELECT date_bin('5 minutes'::INTERVAL, greptime_timestamp) AS t, SUM(greptime_value) AS v " +
+        "SELECT date_bin('" + chartBucket() + "'::INTERVAL, greptime_timestamp) AS t, SUM(greptime_value) AS v " +
         "FROM openclaw_message_queued_total " +
         "WHERE greptime_timestamp > NOW() - INTERVAL '" + iv + "' GROUP BY t ORDER BY t"
       ),
@@ -341,13 +341,13 @@ async function oc_loadContextWindowChart() {
     var iv = intervalSQL();
     var results = await Promise.all([
       query(
-        "SELECT date_bin('5 minutes'::INTERVAL, greptime_timestamp) AS t, AVG(greptime_value) AS v " +
+        "SELECT date_bin('" + chartBucket() + "'::INTERVAL, greptime_timestamp) AS t, AVG(greptime_value) AS v " +
         "FROM openclaw_context_tokens_sum " +
         "WHERE openclaw_context = 'used' AND greptime_timestamp > NOW() - INTERVAL '" + iv + "' " +
         "GROUP BY t ORDER BY t"
       ),
       query(
-        "SELECT date_bin('5 minutes'::INTERVAL, greptime_timestamp) AS t, AVG(greptime_value) AS v " +
+        "SELECT date_bin('" + chartBucket() + "'::INTERVAL, greptime_timestamp) AS t, AVG(greptime_value) AS v " +
         "FROM openclaw_context_tokens_sum " +
         "WHERE openclaw_context = 'limit' AND greptime_timestamp > NOW() - INTERVAL '" + iv + "' " +
         "GROUP BY t ORDER BY t"
@@ -424,7 +424,7 @@ async function oc_loadSessionStateChart() {
 async function oc_loadQueueDepthChart() {
   try {
     var res = await query(
-      "SELECT date_bin('5 minutes'::INTERVAL, greptime_timestamp) AS t, " +
+      "SELECT date_bin('" + chartBucket() + "'::INTERVAL, greptime_timestamp) AS t, " +
       "AVG(greptime_value) AS avg_depth " +
       "FROM openclaw_queue_depth_sum " +
       "WHERE greptime_timestamp > NOW() - INTERVAL '" + intervalSQL() + "' " +
@@ -441,7 +441,7 @@ async function oc_loadQueueDepthChart() {
 async function oc_loadRunDurationChart() {
   try {
     var res = await query(
-      "SELECT date_bin('5 minutes'::INTERVAL, greptime_timestamp) AS t, SUM(greptime_value) AS runs " +
+      "SELECT date_bin('" + chartBucket() + "'::INTERVAL, greptime_timestamp) AS t, SUM(greptime_value) AS runs " +
       "FROM openclaw_run_duration_ms_milliseconds_count " +
       "WHERE greptime_timestamp > NOW() - INTERVAL '" + intervalSQL() + "' " +
       "GROUP BY t ORDER BY t"
@@ -1522,7 +1522,7 @@ async function oc_loadChannelActivity() {
   try {
     var iv = intervalSQL();
     var res = await query(
-      "SELECT date_bin('5 minutes'::INTERVAL, greptime_timestamp) AS t, " +
+      "SELECT date_bin('" + chartBucket() + "'::INTERVAL, greptime_timestamp) AS t, " +
       "SUM(greptime_value) AS msg_count " +
       "FROM openclaw_message_queued_total " +
       "WHERE greptime_timestamp > NOW() - INTERVAL '" + iv + "' " +
@@ -1531,7 +1531,7 @@ async function oc_loadChannelActivity() {
     var data = rowsToObjects(res);
     if (!data.length) return;
     renderChart('oc-sec-channel-activity', data, [
-      { label: 'Messages/5min', key: 'msg_count', color: '#79c0ff' },
+      { label: 'Messages/' + chartBucket().replace(' ', ''), key: 'msg_count', color: '#79c0ff' },
     ], function(v) { return fmtNum(v); });
   } catch { /* table may not exist */ }
 }

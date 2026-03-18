@@ -97,7 +97,7 @@ async function loadOverviewCharts() {
 async function loadTokenChart() {
   try {
     var res = await query(
-      "SELECT date_bin('5 minutes'::INTERVAL, timestamp) AS t, " +
+      "SELECT date_bin('" + chartBucket() + "'::INTERVAL, timestamp) AS t, " +
       "SUM(CAST(\"span_attributes.gen_ai.usage.input_tokens\" AS DOUBLE)) AS inp, " +
       "SUM(CAST(\"span_attributes.gen_ai.usage.output_tokens\" AS DOUBLE)) AS outp " +
       "FROM opentelemetry_traces " +
@@ -117,7 +117,7 @@ async function loadTokenChart() {
 async function loadCostChart() {
   try {
     var res = await query(
-      "SELECT date_bin('5 minutes'::INTERVAL, timestamp) AS t, " +
+      "SELECT date_bin('" + chartBucket() + "'::INTERVAL, timestamp) AS t, " +
       "SUM(" + costCaseSQL(
         '"span_attributes.gen_ai.request.model"',
         '"span_attributes.gen_ai.usage.input_tokens"',
@@ -139,7 +139,7 @@ async function loadCostChart() {
 async function loadLatencyChart() {
   try {
     var res = await query(
-      "SELECT date_bin('5 minutes'::INTERVAL, timestamp) AS t, " +
+      "SELECT date_bin('" + chartBucket() + "'::INTERVAL, timestamp) AS t, " +
       "APPROX_PERCENTILE_CONT(duration_nano, 0.50) AS p50, " +
       "APPROX_PERCENTILE_CONT(duration_nano, 0.95) AS p95 " +
       "FROM opentelemetry_traces " +
@@ -160,7 +160,7 @@ async function loadLatencyChart() {
 async function loadErrorChart() {
   try {
     var res = await query(
-      "SELECT date_bin('5 minutes'::INTERVAL, timestamp) AS t, " +
+      "SELECT date_bin('" + chartBucket() + "'::INTERVAL, timestamp) AS t, " +
       "COUNT(1) AS total, " +
       "SUM(CASE WHEN span_status_code = 'STATUS_CODE_ERROR' THEN 1 ELSE 0 END) AS errors " +
       "FROM opentelemetry_traces " +

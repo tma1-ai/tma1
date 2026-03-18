@@ -114,6 +114,7 @@ function heatmapConfig() {
     '6h':  { bucket: '15 minutes', interval: '6 hours', cols: 24, rowCount: 1 },
     '24h': { bucket: '1 hour',     interval: '1 day',   cols: 24, rowCount: 1 },
     '7d':  { bucket: '1 hour',     interval: '7 days',  cols: 24, rowCount: 7 },
+    '30d': { bucket: '1 hour',     interval: '30 days', cols: 24, rowCount: 30 },
   };
   return config[currentTimeRange] || config['24h'];
 }
@@ -144,11 +145,12 @@ function renderHeatmap(elementId, data) {
 
   var html;
 
-  if (currentTimeRange === '7d') {
-    var weekAgo = new Date(now.getTime() - 7 * 24 * 3600 * 1000);
+  if (currentTimeRange === '7d' || currentTimeRange === '30d') {
+    var numDays = currentTimeRange === '30d' ? 30 : 7;
+    var rangeAgo = new Date(now.getTime() - numDays * 24 * 3600 * 1000);
     data.forEach(function(d) {
       var dt = new Date(tsToMs(d.t));
-      var dayIdx = Math.floor((dt.getTime() - weekAgo.getTime()) / (24 * 3600 * 1000));
+      var dayIdx = Math.floor((dt.getTime() - rangeAgo.getTime()) / (24 * 3600 * 1000));
       var hour = dt.getHours();
       var key = dayIdx + ':' + hour;
       var cnt = Number(d.cnt) || 0;
@@ -156,10 +158,12 @@ function renderHeatmap(elementId, data) {
       if (counts[key] > maxCnt) maxCnt = counts[key];
     });
 
-    var dayNames = [];
-    for (var i = 0; i < 7; i++) {
-      var d = new Date(weekAgo.getTime() + i * 24 * 3600 * 1000);
-      dayNames.push(d.toLocaleDateString(locale, { weekday: 'short' }));
+    var dayLabels = [];
+    for (var i = 0; i < numDays; i++) {
+      var d = new Date(rangeAgo.getTime() + i * 24 * 3600 * 1000);
+      dayLabels.push(currentTimeRange === '30d'
+        ? (d.getMonth() + 1) + '/' + d.getDate()
+        : d.toLocaleDateString(locale, { weekday: 'short' }));
     }
 
     html = '<div class="heatmap-grid" style="grid-template-columns:40px repeat(24, 1fr)">';
@@ -167,11 +171,11 @@ function renderHeatmap(elementId, data) {
     for (var h = 0; h < 24; h++) {
       html += '<div class="heatmap-label" style="justify-content:center">' + (h % 3 === 0 ? h : '') + '</div>';
     }
-    for (var day = 0; day < 7; day++) {
-      html += '<div class="heatmap-label">' + dayNames[day] + '</div>';
+    for (var day = 0; day < numDays; day++) {
+      html += '<div class="heatmap-label">' + dayLabels[day] + '</div>';
       for (var h2 = 0; h2 < 24; h2++) {
         var cnt = counts[day + ':' + h2] || 0;
-        html += '<div class="heatmap-cell" style="background:' + cellColor(cnt) + '" title="' + dayNames[day] + ' ' + h2 + ':00 \u2014 ' + cnt + '"></div>';
+        html += '<div class="heatmap-cell" style="background:' + cellColor(cnt) + '" title="' + dayLabels[day] + ' ' + h2 + ':00 \u2014 ' + cnt + '"></div>';
       }
     }
     html += '</div>';

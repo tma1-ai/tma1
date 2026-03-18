@@ -199,7 +199,7 @@ async function cc_loadOverview() {
 async function cc_loadTokenChart() {
   try {
     var res = await query(
-      "SELECT date_bin('5 minutes'::INTERVAL, timestamp) AS t, " +
+      "SELECT date_bin('" + chartBucket() + "'::INTERVAL, timestamp) AS t, " +
       "SUM(json_get_int(log_attributes, 'input_tokens')) AS inp, " +
       "SUM(json_get_int(log_attributes, 'output_tokens')) AS outp, " +
       "SUM(json_get_int(log_attributes, 'cache_read_tokens')) AS cache_read, " +
@@ -222,7 +222,7 @@ async function cc_loadTokenChart() {
 async function cc_loadCostChart() {
   try {
     var res = await query(
-      "SELECT date_bin('5 minutes'::INTERVAL, timestamp) AS t, " +
+      "SELECT date_bin('" + chartBucket() + "'::INTERVAL, timestamp) AS t, " +
       "SUM(json_get_float(log_attributes, 'cost_usd')) AS cost " +
       "FROM opentelemetry_logs " +
       "WHERE body = 'claude_code.api_request' AND timestamp > NOW() - INTERVAL '" + intervalSQL() + "' " +
@@ -239,7 +239,7 @@ async function cc_loadCostChart() {
 async function cc_loadLatencyChart() {
   try {
     var res = await query(
-      "SELECT date_bin('5 minutes'::INTERVAL, timestamp) AS t, " +
+      "SELECT date_bin('" + chartBucket() + "'::INTERVAL, timestamp) AS t, " +
       "ROUND(APPROX_PERCENTILE_CONT(json_get_float(log_attributes, 'duration_ms'), 0.50), 0) AS p50_ms, " +
       "ROUND(APPROX_PERCENTILE_CONT(json_get_float(log_attributes, 'duration_ms'), 0.95), 0) AS p95_ms " +
       "FROM opentelemetry_logs " +
@@ -258,7 +258,7 @@ async function cc_loadLatencyChart() {
 async function cc_loadErrorChart() {
   try {
     var res = await query(
-      "SELECT date_bin('5 minutes'::INTERVAL, timestamp) AS t, " +
+      "SELECT date_bin('" + chartBucket() + "'::INTERVAL, timestamp) AS t, " +
       "SUM(CASE WHEN body = 'claude_code.api_request' THEN 1 ELSE 0 END) AS total, " +
       "SUM(CASE WHEN body = 'claude_code.api_error' THEN 1 ELSE 0 END) AS errors " +
       "FROM opentelemetry_logs " +
@@ -1341,7 +1341,7 @@ async function cc_loadToolsTable() {
 
 async function cc_loadToolTrends() {
   try {
-    var bucket = currentTimeRange === '1h' ? '5 minutes' : (currentTimeRange === '7d' ? '1 hour' : '15 minutes');
+    var bucket = currentTimeRange === '1h' ? '5 minutes' : (currentTimeRange === '7d' || currentTimeRange === '30d' ? '1 hour' : '15 minutes');
     var res = await query(
       "SELECT date_bin('" + bucket + "'::INTERVAL, timestamp) AS t, " +
       "json_get_string(log_attributes, 'tool_name') AS tool, " +

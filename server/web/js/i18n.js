@@ -47,6 +47,7 @@ var I18N = {
     'time.6h': 'Last 6h',
     'time.24h': 'Last 24h',
     'time.7d': 'Last 7d',
+    'time.30d': 'Last 30d',
     // Auto-refresh
     'refresh.off': 'Off',
     'refresh.15s': '\u21bb 15s',
@@ -245,6 +246,7 @@ var I18N = {
     'time.6h': '\u6700\u8fd1 6 \u5c0f\u65f6',
     'time.24h': '\u6700\u8fd1 24 \u5c0f\u65f6',
     'time.7d': '\u6700\u8fd1 7 \u5929',
+    'time.30d': '\u6700\u8fd1 30 \u5929',
     'refresh.off': '\u5173\u95ed',
     'refresh.15s': '\u21bb 15s',
     'refresh.30s': '\u21bb 30s',
@@ -428,6 +430,7 @@ var I18N = {
     'time.6h': '\u00daltimas 6h',
     'time.24h': '\u00daltimas 24h',
     'time.7d': '\u00daltimos 7d',
+    'time.30d': '\u00daltimos 30d',
     'refresh.off': 'Desactivado',
     'refresh.15s': '\u21bb 15s',
     'refresh.30s': '\u21bb 30s',

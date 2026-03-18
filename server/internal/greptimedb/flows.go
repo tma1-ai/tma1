@@ -191,10 +191,52 @@ var defaultPricing = []modelPrice{
 	{"gemini-2.5-flash", 201, 0.3, 2.5},
 	{"gemini-2.0-flash", 202, 0.1, 0.4},
 	{"gemini", 299, 0.3, 2.5},
-	{"deepseek-r1", 300, 0.55, 2.19},
-	{"deepseek-chat", 301, 0.27, 1.10},
+	{"deepseek-r1", 300, 0.28, 0.42},
+	{"deepseek-chat", 301, 0.28, 0.42},
 	{"deepseek-coder", 302, 0.14, 0.28},
-	{"deepseek", 399, 0.27, 1.10},
+	{"deepseek", 399, 0.28, 0.42},
+	// Alibaba Qwen
+	{"qwen3-max", 400, 0.35, 1.39},
+	{"qwen-plus", 401, 0.11, 0.28},
+	{"qwen-turbo", 402, 0.04, 0.08},
+	{"qwen-long", 403, 0.07, 0.28},
+	{"qwen-max", 404, 0.33, 1.33},
+	{"qwen", 499, 0.11, 0.28},
+	// Zhipu AI GLM
+	{"glm-4-plus", 500, 0.69, 0.69},
+	{"glm-4-flash", 501, 0.01, 0.01},
+	{"glm-4-long", 502, 0.14, 0.14},
+	{"glm-4", 509, 0.14, 0.14},
+	{"glm", 599, 0.14, 0.14},
+	// Moonshot / Kimi
+	{"kimi-k2", 600, 0.56, 2.22},
+	{"moonshot-v1-128k", 601, 8.33, 8.33},
+	{"moonshot-v1-32k", 602, 3.33, 3.33},
+	{"moonshot-v1-8k", 603, 1.67, 1.67},
+	{"moonshot", 699, 0.56, 2.22},
+	// ByteDance Doubao
+	{"doubao-pro", 700, 0.11, 0.28},
+	{"doubao-lite", 701, 0.04, 0.08},
+	{"doubao", 799, 0.11, 0.28},
+	// Tencent Hunyuan
+	{"hunyuan-pro", 800, 0.55, 2.21},
+	{"hunyuan-turbo", 801, 0.11, 0.28},
+	{"hunyuan-standard", 802, 0.63, 0.69},
+	{"hunyuan", 899, 0.11, 0.28},
+	// Baidu ERNIE
+	{"ernie-4", 900, 2.78, 8.33},
+	{"ernie-3.5", 901, 0.11, 0.28},
+	{"ernie", 999, 0.11, 0.28},
+	// iFlytek Spark
+	{"spark", 1000, 1.39, 1.39},
+	// MiniMax
+	{"minimax", 1100, 0.30, 1.20},
+	{"abab", 1101, 0.14, 0.14},
+	// Baichuan
+	{"baichuan", 1200, 0.14, 0.14},
+	// 01.AI Yi
+	{"yi-large", 1300, 2.78, 2.78},
+	{"yi", 1399, 0.14, 0.14},
 }
 
 // SeedPricing inserts default model pricing if the table is empty.
@@ -232,6 +274,13 @@ func SeedPricing(httpPort int, logger *slog.Logger) error {
 	return nil
 }
 
+// TruncatePricing removes all rows from the pricing table so that
+// SeedPricing can re-insert the latest defaults on upgrade.
+func TruncatePricing(httpPort int) error {
+	sqlURL := fmt.Sprintf("http://localhost:%d/v1/sql", httpPort)
+	return execSQL(sqlURL, "TRUNCATE TABLE tma1_model_pricing")
+}
+
 // InitCostFlow reads pricing from tma1_model_pricing and creates/replaces
 // the cost flow with a dynamic CASE expression.
 func InitCostFlow(httpPort int, logger *slog.Logger) error {
@@ -262,8 +311,7 @@ WHERE "span_attributes.gen_ai.system" IS NOT NULL
 GROUP BY "span_attributes.gen_ai.request.model", time_window;`, costExpr)
 
 	if err := execSQL(sqlURL, flowSQL); err != nil {
-		logger.Warn("cost flow creation skipped (source table may have different schema)", "error", err)
-		return nil
+		return fmt.Errorf("cost flow creation failed: %w", err)
 	}
 	logger.Info("cost flow initialized with dynamic pricing", "models", len(prices))
 	return nil

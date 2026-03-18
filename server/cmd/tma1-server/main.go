@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -16,6 +17,9 @@ import (
 	"github.com/tma1-ai/tma1/server/internal/handler"
 	"github.com/tma1-ai/tma1/server/internal/install"
 )
+
+// Version is set at build time via -ldflags "-X main.Version=<tag>".
+var Version = "dev"
 
 func parseLogLevel(s string) slog.Level {
 	switch strings.ToLower(s) {
@@ -76,9 +80,41 @@ func main() {
 		logger.Warn("set database TTL warning", "err", err)
 	}
 
+	// Step 3.5: check for tma1-server upgrade.
+	versionFile := filepath.Join(cfg.DataDir, ".tma1-version")
+	upgraded := false
+	var truncateErr error
+	if Version != "dev" {
+		old := readVersionFile(versionFile)
+		if old != Version {
+			upgraded = true
+			if old != "" {
+				logger.Info("tma1 upgrade detected", "from", old, "to", Version)
+			}
+			truncateErr = onUpgrade(cfg.GreptimeDBHTTPPort, logger)
+			if truncateErr != nil {
+				logger.Warn("truncate pricing on upgrade failed, will retry next start", "err", truncateErr)
+			}
+		}
+	}
+
 	// Step 4: ensure pricing table exists and seed model pricing.
-	if err := greptimedb.SeedPricing(cfg.GreptimeDBHTTPPort, logger); err != nil {
-		logger.Warn("seed pricing warning", "err", err)
+	seedErr := greptimedb.SeedPricing(cfg.GreptimeDBHTTPPort, logger)
+	if seedErr != nil {
+		logger.Warn("seed pricing warning", "err", seedErr)
+	}
+
+	// Step 4.5: post-upgrade — recreate cost flow with updated pricing + write version.
+	// Only advance the version file when ALL upgrade steps succeed;
+	// otherwise next startup re-enters the upgrade path and retries.
+	if upgraded && truncateErr == nil && seedErr == nil {
+		if err := greptimedb.InitCostFlow(cfg.GreptimeDBHTTPPort, logger); err != nil {
+			logger.Warn("recreate cost flow on upgrade, will retry next start", "err", err)
+		} else {
+			if err := os.WriteFile(versionFile, []byte(Version), 0o644); err != nil {
+				logger.Warn("failed to write version file", "err", err)
+			}
+		}
 	}
 
 	// Step 5: initialize flow aggregations (background retry).
@@ -128,6 +164,19 @@ func main() {
 	logger.Info("tma1-server stopped")
 }
 
+func readVersionFile(path string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
+}
+
+func onUpgrade(httpPort int, logger *slog.Logger) error {
+	// Clear stale pricing so SeedPricing re-inserts with latest data.
+	return greptimedb.TruncatePricing(httpPort)
+}
+
 // initFlowsWithRetry attempts to create flow aggregations up to 10 times
 // (~5 minutes). Skips if all flows already exist. Only attempts creation
 // when GenAI trace data is present (flows depend on gen_ai.* columns).
@@ -144,7 +193,9 @@ func initFlowsWithRetry(ctx context.Context, httpPort int, logger *slog.Logger) 
 		if greptimedb.HasGenAITraces(httpPort) {
 			logger.Info("GenAI trace data detected, creating flows")
 			greptimedb.InitFlows(httpPort, logger)
-			greptimedb.InitCostFlow(httpPort, logger)
+			if err := greptimedb.InitCostFlow(httpPort, logger); err != nil {
+				logger.Warn("cost flow creation failed, will retry", "err", err)
+			}
 		}
 		if i < 9 {
 			select {

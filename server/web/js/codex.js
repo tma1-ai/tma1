@@ -289,7 +289,7 @@ async function cdx_loadTokenChart() {
   if (!el) return;
   try {
     var res = await query(
-      "SELECT date_bin('5 minutes'::INTERVAL, timestamp) AS t, " +
+      "SELECT date_bin('" + chartBucket() + "'::INTERVAL, timestamp) AS t, " +
       "SUM(COALESCE(json_get_int(log_attributes, 'input_token_count'), 0)) AS input_tok, " +
       "SUM(COALESCE(json_get_int(log_attributes, 'output_token_count'), 0)) AS output_tok, " +
       "SUM(COALESCE(json_get_int(log_attributes, 'cached_token_count'), 0)) AS cached_tok " +
@@ -316,7 +316,7 @@ async function cdx_loadLatencyChart() {
   if (!el) return;
   try {
     var res = await query(
-      "SELECT date_bin('5 minutes'::INTERVAL, timestamp) AS t, " +
+      "SELECT date_bin('" + chartBucket() + "'::INTERVAL, timestamp) AS t, " +
       "ROUND(APPROX_PERCENTILE_CONT(duration_nano / 1000000.0, 0.50), 0) AS p50_ms, " +
       "ROUND(APPROX_PERCENTILE_CONT(duration_nano / 1000000.0, 0.95), 0) AS p95_ms " +
       "FROM opentelemetry_traces " +
@@ -343,12 +343,12 @@ async function cdx_loadLatencyChart() {
       "SELECT durations.t, " +
       "ROUND(durations.total_ms / NULLIF(counts.cnt, 0), 2) AS avg_ms " +
       "FROM (" +
-      "  SELECT date_bin('5 minutes'::INTERVAL, greptime_timestamp) AS t, SUM(greptime_value) AS total_ms " +
+      "  SELECT date_bin('" + chartBucket() + "'::INTERVAL, greptime_timestamp) AS t, SUM(greptime_value) AS total_ms " +
       "  " + cdx_metricsFromWhere('codex_websocket_request_duration_ms_milliseconds_sum') + " " +
       "  GROUP BY t" +
       ") durations " +
       "JOIN (" +
-      "  SELECT date_bin('5 minutes'::INTERVAL, greptime_timestamp) AS t, SUM(greptime_value) AS cnt " +
+      "  SELECT date_bin('" + chartBucket() + "'::INTERVAL, greptime_timestamp) AS t, SUM(greptime_value) AS cnt " +
       "  " + cdx_metricsFromWhere('codex_websocket_request_duration_ms_milliseconds_count') + " " +
       "  GROUP BY t" +
       ") counts ON durations.t = counts.t " +
@@ -380,22 +380,22 @@ async function cdx_loadTurnStartupChart() {
   try {
     var results = await Promise.all([
       query(
-        "SELECT date_bin('5 minutes'::INTERVAL, greptime_timestamp) AS t, SUM(greptime_value) AS total_ms " +
+        "SELECT date_bin('" + chartBucket() + "'::INTERVAL, greptime_timestamp) AS t, SUM(greptime_value) AS total_ms " +
         cdx_metricsFromWhere('codex_turn_ttft_duration_ms_milliseconds_sum') + " " +
         "GROUP BY t ORDER BY t"
       ),
       query(
-        "SELECT date_bin('5 minutes'::INTERVAL, greptime_timestamp) AS t, SUM(greptime_value) AS cnt " +
+        "SELECT date_bin('" + chartBucket() + "'::INTERVAL, greptime_timestamp) AS t, SUM(greptime_value) AS cnt " +
         cdx_metricsFromWhere('codex_turn_ttft_duration_ms_milliseconds_count') + " " +
         "GROUP BY t ORDER BY t"
       ),
       query(
-        "SELECT date_bin('5 minutes'::INTERVAL, greptime_timestamp) AS t, SUM(greptime_value) AS total_ms " +
+        "SELECT date_bin('" + chartBucket() + "'::INTERVAL, greptime_timestamp) AS t, SUM(greptime_value) AS total_ms " +
         cdx_metricsFromWhere('codex_turn_ttfm_duration_ms_milliseconds_sum') + " " +
         "GROUP BY t ORDER BY t"
       ),
       query(
-        "SELECT date_bin('5 minutes'::INTERVAL, greptime_timestamp) AS t, SUM(greptime_value) AS cnt " +
+        "SELECT date_bin('" + chartBucket() + "'::INTERVAL, greptime_timestamp) AS t, SUM(greptime_value) AS cnt " +
         cdx_metricsFromWhere('codex_turn_ttfm_duration_ms_milliseconds_count') + " " +
         "GROUP BY t ORDER BY t"
       ),
@@ -1169,7 +1169,7 @@ async function cdx_loadToolsTable() {
 
 async function cdx_loadToolTrends() {
   try {
-    var bucket = currentTimeRange === '1h' ? '5 minutes' : (currentTimeRange === '7d' ? '1 hour' : '15 minutes');
+    var bucket = currentTimeRange === '1h' ? '5 minutes' : (currentTimeRange === '7d' || currentTimeRange === '30d' ? '1 hour' : '15 minutes');
     var res = await query(
       "SELECT date_bin('" + bucket + "'::INTERVAL, timestamp) AS t, " +
       "json_get_string(log_attributes, 'tool_name') AS tool, " +
