@@ -79,6 +79,8 @@ function oc_traceAttrSelect(columns, columnName, alias) {
 // OpenClaw view — Cards
 // ===================================================================
 async function oc_loadCards() {
+  // Reset column cache so each refresh cycle picks up newly created columns
+  ocTraceColumnsPromise = null;
   var iv = intervalSQL();
   try {
     await loadPricing();

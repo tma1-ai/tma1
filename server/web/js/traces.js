@@ -46,6 +46,8 @@ function updateTracePager(resultCount) {
 // Global metrics cards (Traces view)
 // ===================================================================
 async function loadMetrics() {
+  // Reset column cache so each refresh cycle picks up newly created columns
+  genaiTraceColumnsPromise = null;
   try {
     // Check which gen_ai columns exist (schema-on-write: columns only appear after first matching span)
     var colRes = await query(
