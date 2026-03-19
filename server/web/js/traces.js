@@ -4,6 +4,27 @@
 var tracePage = 0;
 var tracePageSize = 15;
 var traceHasNext = false;
+var genaiTraceColumnsPromise = null;
+
+function genai_getTraceColumns() {
+  if (!genaiTraceColumnsPromise) {
+    genaiTraceColumnsPromise = query(
+      "SELECT column_name FROM information_schema.columns " +
+      "WHERE table_schema = 'public' AND table_name = 'opentelemetry_traces' " +
+      "AND column_name LIKE 'span_attributes.gen_ai.%'"
+    ).then(function(res) {
+      var cols = {};
+      rowsToObjects(res).forEach(function(r) { cols[r.column_name] = true; });
+      return cols;
+    }).catch(function() { return {}; });
+  }
+  return genaiTraceColumnsPromise;
+}
+
+function genai_traceAttrSelect(columns, columnName, alias) {
+  if (columns && columns[columnName]) return '"' + columnName + '" AS ' + alias;
+  return 'NULL AS ' + alias;
+}
 
 function resetTracePaging() { tracePage = 0; }
 function prevTracePage() { if (tracePage <= 0) return; tracePage--; loadTraces(); }
@@ -236,6 +257,7 @@ async function loadTraces() {
   var traceIdFilter = document.getElementById('trace-id-filter').value.trim();
   var modelFilter = document.getElementById('trace-model-filter').value;
   var statusFilter = document.getElementById('trace-status-filter').value;
+  var cols = await genai_getTraceColumns();
 
   var where = "WHERE \"span_attributes.gen_ai.system\" IS NOT NULL";
   if (traceIdFilter) {
@@ -243,21 +265,27 @@ async function loadTraces() {
   } else {
     where += " AND timestamp > NOW() - INTERVAL '" + intervalSQL() + "'";
   }
-  if (modelFilter) where += " AND \"span_attributes.gen_ai.request.model\" = '" + escapeSQLString(modelFilter) + "'";
+  if (modelFilter && cols['span_attributes.gen_ai.request.model']) {
+    where += " AND \"span_attributes.gen_ai.request.model\" = '" + escapeSQLString(modelFilter) + "'";
+  }
   if (statusFilter) where += " AND span_status_code = '" + escapeSQLString(statusFilter) + "'";
 
   var limit = tracePageSize + 1;
   var offset = tracePage * tracePageSize;
 
   try {
+    var modelSel = genai_traceAttrSelect(cols, 'span_attributes.gen_ai.request.model', 'model');
+    var inputSel = genai_traceAttrSelect(cols, 'span_attributes.gen_ai.usage.input_tokens', 'input_tok');
+    var outputSel = genai_traceAttrSelect(cols, 'span_attributes.gen_ai.usage.output_tokens', 'output_tok');
+    var finishSel = genai_traceAttrSelect(cols, 'span_attributes.gen_ai.response.finish_reasons', 'finish_reason');
     var res = await query(
       "SELECT timestamp, trace_id, " +
-      "\"span_attributes.gen_ai.request.model\" AS model, " +
-      "\"span_attributes.gen_ai.usage.input_tokens\" AS input_tok, " +
-      "\"span_attributes.gen_ai.usage.output_tokens\" AS output_tok, " +
+      modelSel + ", " +
+      inputSel + ", " +
+      outputSel + ", " +
       "ROUND(duration_nano / 1000000.0, 1) AS duration_ms, " +
       "span_status_code AS status, " +
-      "\"span_attributes.gen_ai.response.finish_reasons\" AS finish_reason " +
+      finishSel + " " +
       "FROM opentelemetry_traces " +
       where + " ORDER BY timestamp DESC LIMIT " + limit + " OFFSET " + offset
     );
@@ -346,11 +374,15 @@ async function loadTraceDetailData(traceId) {
 
   // Load all spans for this trace
   try {
+    var cols = await genai_getTraceColumns();
+    var modelSel = genai_traceAttrSelect(cols, 'span_attributes.gen_ai.request.model', 'model');
+    var inputSel = genai_traceAttrSelect(cols, 'span_attributes.gen_ai.usage.input_tokens', 'input_tok');
+    var outputSel = genai_traceAttrSelect(cols, 'span_attributes.gen_ai.usage.output_tokens', 'output_tok');
     var res = await query(
       "SELECT timestamp, span_id, parent_span_id, span_name, " +
-      "\"span_attributes.gen_ai.request.model\" AS model, " +
-      "\"span_attributes.gen_ai.usage.input_tokens\" AS input_tok, " +
-      "\"span_attributes.gen_ai.usage.output_tokens\" AS output_tok, " +
+      modelSel + ", " +
+      inputSel + ", " +
+      outputSel + ", " +
       "duration_nano, span_status_code AS status " +
       "FROM opentelemetry_traces " +
       "WHERE trace_id = '" + tid + "' " +

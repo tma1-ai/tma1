@@ -164,17 +164,30 @@ async function cc_loadCards() {
     var results = await Promise.all([
       query("SELECT ROUND(SUM(json_get_float(log_attributes, 'cost_usd')), 4) AS v FROM opentelemetry_logs WHERE body = 'claude_code.api_request' AND timestamp > NOW() - INTERVAL '" + iv + "'"),
       query("SELECT SUM(COALESCE(json_get_int(log_attributes, 'input_tokens'),0) + COALESCE(json_get_int(log_attributes, 'output_tokens'),0) + COALESCE(json_get_int(log_attributes, 'cache_read_tokens'),0) + COALESCE(json_get_int(log_attributes, 'cache_creation_tokens'),0)) AS v FROM opentelemetry_logs WHERE body = 'claude_code.api_request' AND timestamp > NOW() - INTERVAL '" + iv + "'"),
+      // Card display: api_request count only
       query("SELECT COUNT(*) AS v FROM opentelemetry_logs WHERE body = 'claude_code.api_request' AND timestamp > NOW() - INTERVAL '" + iv + "'"),
       query("SELECT ROUND(AVG(json_get_float(log_attributes, 'duration_ms')), 0) AS v FROM opentelemetry_logs WHERE body = 'claude_code.api_request' AND timestamp > NOW() - INTERVAL '" + iv + "'"),
+      // Gating: count ANY claude_code event (broader than api_request)
+      query("SELECT COUNT(*) AS v FROM opentelemetry_logs WHERE (body LIKE 'claude_code.%' OR scope_name = 'com.anthropic.claude_code.events') AND timestamp > NOW() - INTERVAL '" + iv + "'"),
     ]);
     var reqCount = Number(rows(results[2])?.[0]?.[0]) || 0;
+    var anyCount = Number(rows(results[4])?.[0]?.[0]) || 0;
     document.getElementById('cc-val-cost').textContent = fmtCost(rows(results[0])?.[0]?.[0]);
     document.getElementById('cc-val-tokens').textContent = fmtNum(rows(results[1])?.[0]?.[0]);
     document.getElementById('cc-val-requests').textContent = fmtNum(reqCount);
     var latVal = rows(results[3])?.[0]?.[0];
     document.getElementById('cc-val-latency').textContent = fmtDurMs(latVal);
-    return reqCount > 0;
+    return anyCount > 0;
   } catch (err) {
+    // Fallback: check if any claude_code metric tables have data
+    if (typeof dataSources !== 'undefined' && dataSources.ccMetrics) {
+      for (var i = 0; i < dataSources.ccMetrics.length; i++) {
+        try {
+          var mr = await query("SELECT 1 FROM " + dataSources.ccMetrics[i] + " LIMIT 1");
+          if ((rows(mr) || []).length > 0) return true;
+        } catch (_) { /* table query failed */ }
+      }
+    }
     var banner = document.getElementById('error-banner');
     banner.style.display = 'block';
     banner.textContent = t('error.cc_metrics') + err.message;

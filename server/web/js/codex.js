@@ -215,7 +215,6 @@ async function cdx_loadCards() {
   var reqPred = cdx_requestPredicate();
   var estCost = cdx_estimatedCostExpr();
   try {
-    var requestSQL = "SELECT COUNT(*) AS v " + base + " AND " + reqPred;
     var latencySQL = "SELECT ROUND(AVG(duration_nano) / 1000000.0, 2) AS v " +
       "FROM opentelemetry_traces WHERE timestamp > NOW() - INTERVAL '" + intervalSQL() + "' " +
       "  AND service_name = 'codex_cli_rs' AND span_name = 'stream_request'";
@@ -233,18 +232,31 @@ async function cdx_loadCards() {
       query("SELECT ROUND(SUM(" + estCost + "), 4) AS v " + base + " AND " + reqPred),
       query("SELECT SUM(COALESCE(json_get_int(log_attributes, 'input_token_count'), 0) + " +
         "COALESCE(json_get_int(log_attributes, 'output_token_count'), 0)) AS v " + base + " AND " + reqPred),
-      query(requestSQL),
+      // Card display: request count (logs with input_token_count)
+      query("SELECT COUNT(*) AS v " + base + " AND " + reqPred),
       query(latencySQL),
       query(ttftSQL),
+      // Gating: count ANY codex log (broader than requests only)
+      query("SELECT COUNT(*) AS v " + base),
     ]);
     var reqCount = Number(rows(results[2])?.[0]?.[0]) || 0;
+    var anyCount = Number(rows(results[5])?.[0]?.[0]) || 0;
     document.getElementById('cdx-val-cost').textContent = fmtCost(rows(results[0])?.[0]?.[0]);
     document.getElementById('cdx-val-tokens').textContent = fmtNum(rows(results[1])?.[0]?.[0]);
     document.getElementById('cdx-val-requests').textContent = fmtNum(reqCount);
     document.getElementById('cdx-val-latency').textContent = fmtDurMsPrecise(rows(results[3])?.[0]?.[0]);
     document.getElementById('cdx-val-ttft').textContent = fmtDurMsPrecise(rows(results[4])?.[0]?.[0]);
-    return reqCount > 0;
+    return anyCount > 0;
   } catch (err) {
+    // Fallback: check if any codex metric tables have data
+    if (typeof dataSources !== 'undefined' && dataSources.codexMetrics) {
+      for (var i = 0; i < dataSources.codexMetrics.length; i++) {
+        try {
+          var mr = await query("SELECT 1 FROM " + dataSources.codexMetrics[i] + " LIMIT 1");
+          if ((rows(mr) || []).length > 0) return true;
+        } catch (_) { /* table query failed */ }
+      }
+    }
     var banner = document.getElementById('error-banner');
     banner.style.display = 'block';
     banner.textContent = 'Codex metrics error: ' + err.message;

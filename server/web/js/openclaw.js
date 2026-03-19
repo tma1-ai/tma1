@@ -110,19 +110,25 @@ async function oc_loadCards() {
         "WHERE " + OC_MODEL_SPAN + " AND timestamp > NOW() - INTERVAL '" + iv + "'"
       ));
     } else { queries.push(Promise.resolve(null)); }
-    // [2] Request count — only span_name filter, always safe
+    // [2] Card display: LLM request count (model.usage only)
     queries.push(query(
       "SELECT COUNT(*) AS v FROM opentelemetry_traces " +
       "WHERE " + OC_MODEL_SPAN + " AND timestamp > NOW() - INTERVAL '" + iv + "'"
     ));
-    // [3] Latency — only duration_nano, always safe
+    // [3] Card display: LLM latency (model.usage only)
     queries.push(query(
       "SELECT ROUND(AVG(duration_nano) / 1000000.0, 0) AS v FROM opentelemetry_traces " +
       "WHERE " + OC_MODEL_SPAN + " AND timestamp > NOW() - INTERVAL '" + iv + "'"
     ));
+    // [4] Gating: count ANY openclaw span (broader than model.usage)
+    queries.push(query(
+      "SELECT COUNT(*) AS v FROM opentelemetry_traces " +
+      "WHERE " + OC_ALL_SPANS + " AND timestamp > NOW() - INTERVAL '" + iv + "'"
+    ));
 
     var results = await Promise.all(queries);
     var reqCount = Number(rows(results[2])?.[0]?.[0]) || 0;
+    var anyCount = Number(rows(results[4])?.[0]?.[0]) || 0;
     document.getElementById('oc-val-cost').textContent = results[0] ? fmtCost(rows(results[0])?.[0]?.[0]) : '\u2014';
     document.getElementById('oc-val-tokens').textContent = results[1] ? fmtNum(rows(results[1])?.[0]?.[0]) : '\u2014';
     document.getElementById('oc-val-requests').textContent = fmtNum(reqCount);
@@ -132,13 +138,16 @@ async function oc_loadCards() {
     // Health indicator (5-minute window)
     oc_updateHealthIndicator(reqCount);
 
-    return reqCount > 0;
+    return anyCount > 0;
   } catch (err) {
-    // Fallback: check if metric tables have data even when trace queries fail
-    try {
-      var mr = await query("SELECT 1 FROM openclaw_tokens_total LIMIT 1");
-      if ((rows(mr) || []).length > 0) return true;
-    } catch (_) { /* metric table does not exist either */ }
+    // Fallback: check if any openclaw metric tables have data
+    var metricTables = ['openclaw_tokens_total', 'openclaw_message_processed_total'];
+    for (var i = 0; i < metricTables.length; i++) {
+      try {
+        var mr = await query("SELECT 1 FROM " + metricTables[i] + " LIMIT 1");
+        if ((rows(mr) || []).length > 0) return true;
+      } catch (_) { /* table does not exist */ }
+    }
     var banner = document.getElementById('error-banner');
     banner.style.display = 'block';
     banner.textContent = 'OpenClaw metrics error: ' + err.message;
