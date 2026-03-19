@@ -278,7 +278,7 @@ func extractBinary(r io.Reader, destPath string) error {
 			return fmt.Errorf("create binary: %w", err)
 		}
 		if _, err := io.Copy(out, tr); err != nil {
-			out.Close()
+			_ = out.Close()
 			return fmt.Errorf("write binary: %w", err)
 		}
 		return out.Close()

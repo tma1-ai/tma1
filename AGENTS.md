@@ -127,13 +127,15 @@ Source columns use GenAI semantic conventions:
 ## Commands
 
 ```bash
-make build        # Build the binary
+make build           # Build the binary
 make build-linux     # Cross-compile for Linux amd64
 make build-windows   # Cross-compile for Windows amd64
-make run          # Build and run locally
-make vet          # Run go vet
-make test         # Run tests with race detector
-# CI also runs: shellcheck site/public/install.sh + PSScriptAnalyzer on install.ps1
+make run             # Build and run locally
+make vet             # Run go vet
+make lint            # Run golangci-lint (requires golangci-lint v2)
+make lint-js         # Run ESLint on dashboard JS (requires Node.js)
+make test            # Run tests with race detector
+# CI also runs: golangci-lint + ESLint + shellcheck site/public/install.sh + PSScriptAnalyzer on install.ps1
 ```
 
 ## Go conventions

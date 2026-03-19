@@ -43,6 +43,7 @@ tma1-server-*.sha256sum
 # Site build output
 site/dist/
 site/node_modules/
+server/web/node_modules/
 site/.astro/
 
 # Synced from clawhub-skill/tma1/ via prebuild

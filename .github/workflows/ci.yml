@@ -20,6 +20,12 @@ jobs:
         working-directory: server
         run: go vet ./...
 
+      - name: Lint
+        uses: golangci/golangci-lint-action@v7
+        with:
+          version: v2
+          working-directory: server
+
       - name: Test
         working-directory: server
         run: go test -race -count=1 ./...
@@ -35,6 +41,10 @@ jobs:
           GOOS: windows
           GOARCH: amd64
         run: go build -o /dev/null ./cmd/tma1-server
+
+      - name: Lint JS
+        working-directory: server/web
+        run: npm ci && npx eslint js/
 
       - name: Lint install.sh
         run: shellcheck site/public/install.sh

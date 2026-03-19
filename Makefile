@@ -1,6 +1,6 @@
 MAKEFILE_DIR:=$(shell dirname $(realpath $(firstword $(MAKEFILE_LIST))))
 
-.PHONY: build build-linux build-windows vet test clean run dev
+.PHONY: build build-linux build-windows vet lint lint-js test clean run dev
 
 build:
 	mkdir -p $(MAKEFILE_DIR)/server/bin
@@ -16,6 +16,12 @@ build-windows:
 
 vet:
 	cd server && go vet ./...
+
+lint:
+	cd server && golangci-lint run ./...
+
+lint-js:
+	cd server/web && npx eslint js/
 
 test:
 	cd server && go test -race -count=1 ./...

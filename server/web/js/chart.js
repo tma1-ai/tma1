@@ -85,7 +85,7 @@ function renderChart(containerId, data, seriesDefs, yFmt) {
       chartInstances[containerId] = new uPlot(opts, uData, container);
     } catch (err) {
       console.error('chart render failed', containerId, err);
-      container.innerHTML = '<div class="chart-empty">Failed to render chart.</div>';
+      container.innerHTML = '<div class="chart-empty">' + t('error.render_chart') + '</div>';
     }
   }
 
@@ -194,23 +194,23 @@ function renderHeatmap(elementId, data) {
 
     html = '<div class="heatmap-grid" style="grid-template-columns:40px repeat(24, 1fr)">';
     html += '<div class="heatmap-label"></div>';
-    for (var h = 0; h < 24; h++) {
-      var hourLabel = new Date(dayStart.getTime() + h * 3600 * 1000);
-      html += '<div class="heatmap-label" style="justify-content:center">' + (h % 3 === 0 ? hourLabel.getHours() + 'h' : '') + '</div>';
+    for (var dh = 0; dh < 24; dh++) {
+      var dhLabel = new Date(dayStart.getTime() + dh * 3600 * 1000);
+      html += '<div class="heatmap-label" style="justify-content:center">' + (dh % 3 === 0 ? dhLabel.getHours() + 'h' : '') + '</div>';
     }
     html += '<div class="heatmap-label"></div>';
-    for (var h2 = 0; h2 < 24; h2++) {
-      var cnt = counts['0:' + h2] || 0;
-      var hourLabel2 = new Date(dayStart.getTime() + h2 * 3600 * 1000);
-      html += '<div class="heatmap-cell" style="background:' + cellColor(cnt) + '" title="' + hourLabel2.getHours() + ':00 \u2014 ' + cnt + '"></div>';
+    for (var dh2 = 0; dh2 < 24; dh2++) {
+      var dhCnt = counts['0:' + dh2] || 0;
+      var dhLabel2 = new Date(dayStart.getTime() + dh2 * 3600 * 1000);
+      html += '<div class="heatmap-cell" style="background:' + cellColor(dhCnt) + '" title="' + dhLabel2.getHours() + ':00 \u2014 ' + dhCnt + '"></div>';
     }
     html += '</div>';
 
   } else if (currentTimeRange === '6h') {
-    var rangeStart = new Date(now.getTime() - 6 * 3600 * 1000);
+    var rangeStart6h = new Date(now.getTime() - 6 * 3600 * 1000);
     data.forEach(function(d) {
       var dt = new Date(tsToMs(d.t));
-      var slot = Math.floor((dt.getTime() - rangeStart.getTime()) / (15 * 60 * 1000));
+      var slot = Math.floor((dt.getTime() - rangeStart6h.getTime()) / (15 * 60 * 1000));
       if (slot < 0 || slot >= 24) return;
       var key = '0:' + slot;
       var cnt = Number(d.cnt) || 0;
@@ -220,26 +220,26 @@ function renderHeatmap(elementId, data) {
 
     html = '<div class="heatmap-grid" style="grid-template-columns:40px repeat(24, 1fr)">';
     html += '<div class="heatmap-label"></div>';
-    for (var s = 0; s < 24; s++) {
-      var slotTime = new Date(rangeStart.getTime() + s * 15 * 60 * 1000);
-      var showLabel = s % 4 === 0;
+    for (var q = 0; q < 24; q++) {
+      var qTime = new Date(rangeStart6h.getTime() + q * 15 * 60 * 1000);
+      var qLabel = q % 4 === 0;
       html += '<div class="heatmap-label" style="justify-content:center;font-size:9px">' +
-        (showLabel ? slotTime.getHours() + ':' + String(slotTime.getMinutes()).padStart(2, '0') : '') + '</div>';
+        (qLabel ? qTime.getHours() + ':' + String(qTime.getMinutes()).padStart(2, '0') : '') + '</div>';
     }
     html += '<div class="heatmap-label"></div>';
-    for (var s2 = 0; s2 < 24; s2++) {
-      var cnt = counts['0:' + s2] || 0;
-      var slotTime2 = new Date(rangeStart.getTime() + s2 * 15 * 60 * 1000);
-      html += '<div class="heatmap-cell" style="background:' + cellColor(cnt) + '" title="' +
-        slotTime2.getHours() + ':' + String(slotTime2.getMinutes()).padStart(2, '0') + ' \u2014 ' + cnt + '"></div>';
+    for (var q2 = 0; q2 < 24; q2++) {
+      var qCnt = counts['0:' + q2] || 0;
+      var qTime2 = new Date(rangeStart6h.getTime() + q2 * 15 * 60 * 1000);
+      html += '<div class="heatmap-cell" style="background:' + cellColor(qCnt) + '" title="' +
+        qTime2.getHours() + ':' + String(qTime2.getMinutes()).padStart(2, '0') + ' \u2014 ' + qCnt + '"></div>';
     }
     html += '</div>';
 
   } else {
-    var rangeStart = new Date(now.getTime() - 3600 * 1000);
+    var rangeStart1h = new Date(now.getTime() - 3600 * 1000);
     data.forEach(function(d) {
       var dt = new Date(tsToMs(d.t));
-      var slot = Math.floor((dt.getTime() - rangeStart.getTime()) / (5 * 60 * 1000));
+      var slot = Math.floor((dt.getTime() - rangeStart1h.getTime()) / (5 * 60 * 1000));
       if (slot < 0 || slot >= 12) return;
       var key = '0:' + slot;
       var cnt = Number(d.cnt) || 0;
@@ -249,18 +249,18 @@ function renderHeatmap(elementId, data) {
 
     html = '<div class="heatmap-grid" style="grid-template-columns:40px repeat(12, 1fr)">';
     html += '<div class="heatmap-label"></div>';
-    for (var s = 0; s < 12; s++) {
-      var slotTime = new Date(rangeStart.getTime() + s * 5 * 60 * 1000);
-      var showLabel = s % 2 === 0;
+    for (var m = 0; m < 12; m++) {
+      var mTime = new Date(rangeStart1h.getTime() + m * 5 * 60 * 1000);
+      var mLabel = m % 2 === 0;
       html += '<div class="heatmap-label" style="justify-content:center;font-size:9px">' +
-        (showLabel ? ':' + String(slotTime.getMinutes()).padStart(2, '0') : '') + '</div>';
+        (mLabel ? ':' + String(mTime.getMinutes()).padStart(2, '0') : '') + '</div>';
     }
     html += '<div class="heatmap-label"></div>';
-    for (var s2 = 0; s2 < 12; s2++) {
-      var cnt = counts['0:' + s2] || 0;
-      var slotTime2 = new Date(rangeStart.getTime() + s2 * 5 * 60 * 1000);
-      html += '<div class="heatmap-cell" style="background:' + cellColor(cnt) + '" title="' +
-        slotTime2.getHours() + ':' + String(slotTime2.getMinutes()).padStart(2, '0') + ' \u2014 ' + cnt + '"></div>';
+    for (var m2 = 0; m2 < 12; m2++) {
+      var mCnt = counts['0:' + m2] || 0;
+      var mTime2 = new Date(rangeStart1h.getTime() + m2 * 5 * 60 * 1000);
+      html += '<div class="heatmap-cell" style="background:' + cellColor(mCnt) + '" title="' +
+        mTime2.getHours() + ':' + String(mTime2.getMinutes()).padStart(2, '0') + ' \u2014 ' + mCnt + '"></div>';
     }
     html += '</div>';
   }

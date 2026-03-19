@@ -432,7 +432,7 @@ async function checkDataFreshness() {
   try {
     var res = await query(sql);
     var r = rows(res);
-    var lastTs = r && r[0] && r[0][0];
+    lastTs = r && r[0] && r[0][0];
     renderFreshness(el, lastTs);
   } catch {
     el.textContent = '';

@@ -74,18 +74,18 @@ function cdx_updateEventsPager(resultCount) {
   prevBtn.disabled = cdxEventsPage <= 0;
   nextBtn.disabled = !cdxEventsHasNext;
   if (cdxPinnedEventTimestamp) {
-    info.textContent = resultCount ? 'Focused event' : 'No focused event';
+    info.textContent = resultCount ? t('ui.focused_event') : t('ui.no_focused_event');
     prevBtn.disabled = true;
     nextBtn.disabled = true;
     return;
   }
   if (!resultCount) {
-    info.textContent = 'No results';
+    info.textContent = t('pager.no_results');
     return;
   }
   var start = cdxEventsPage * cdxEventsPageSize + 1;
   var end = start + resultCount - 1;
-  info.textContent = 'Page ' + (cdxEventsPage + 1) + ' · ' + start + '-' + end;
+  info.textContent = t('pager.page') + ' ' + (cdxEventsPage + 1) + ' \u00b7 ' + start + '-' + end;
 }
 
 function cdx_parseAttrs(raw) {
@@ -107,16 +107,16 @@ function cdx_toggleEventDetail(clickedRow, idx) {
   if (prev) {
     var prevIdx = prev.dataset.idx;
     prev.remove();
-    if (prevIdx == idx) return;
+    if (String(prevIdx) === String(idx)) return;
   }
   var attrs = clickedRow.dataset.attrs;
   var formatted = attrs;
-  try { formatted = JSON.stringify(JSON.parse(attrs), null, 2); } catch (e) {}
+  try { formatted = JSON.stringify(JSON.parse(attrs), null, 2); } catch (_) { /* ignore parse error */ }
   var detailRow = document.createElement('tr');
   detailRow.className = 'cdx-event-detail-row trace-detail-row';
   detailRow.dataset.idx = idx;
   detailRow.innerHTML = '<td colspan="7"><div class="trace-detail-inner">' +
-    '<div class="detail-header"><h3>Event Details</h3>' +
+    '<div class="detail-header"><h3>' + t('detail.event_details') + '</h3>' +
     '<button class="close-btn" onclick="this.closest(\'.cdx-event-detail-row\').remove()">&times;</button></div>' +
     '<pre style="font-size:12px;color:var(--text-muted);overflow-x:auto;white-space:pre-wrap;word-break:break-all">' +
     escapeHTML(formatted) + '</pre></div></td>';
@@ -849,12 +849,12 @@ function cdx_updateSessionsPager(shownCount) {
   prevBtn.disabled = cdxSessionsPage <= 0;
   nextBtn.disabled = !cdxSessionsHasNext;
   if (!shownCount) {
-    info.textContent = 'No results';
+    info.textContent = t('pager.no_results');
     return;
   }
   var start = cdxSessionsPage * cdxSessionsPageSize + 1;
   var end = start + shownCount - 1;
-  info.textContent = 'Page ' + (cdxSessionsPage + 1) + ' \u00b7 ' + start + '-' + end + ' of ' + total;
+  info.textContent = t('pager.page') + ' ' + (cdxSessionsPage + 1) + ' \u00b7 ' + start + '-' + end + ' ' + t('pager.of') + ' ' + total;
 }
 
 async function cdx_loadSessions() {

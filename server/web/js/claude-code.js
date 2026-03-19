@@ -58,12 +58,12 @@ function cc_updateEventsPager(resultCount) {
   prevBtn.disabled = ccEventsPage <= 0;
   nextBtn.disabled = !ccEventsHasNext;
   if (!resultCount) {
-    info.textContent = 'No results';
+    info.textContent = t('pager.no_results');
     return;
   }
   var start = ccEventsPage * ccEventsPageSize + 1;
   var end = start + resultCount - 1;
-  info.textContent = 'Page ' + (ccEventsPage + 1) + ' · ' + start + '-' + end;
+  info.textContent = t('pager.page') + ' ' + (ccEventsPage + 1) + ' \u00b7 ' + start + '-' + end;
 }
 
 function cc_focusPendingEvent() {
@@ -454,11 +454,11 @@ function cc_toggleEventDetail(clickedRow, idx) {
   if (prev) {
     var prevIdx = prev.dataset.idx;
     prev.remove();
-    if (prevIdx == idx) return;
+    if (String(prevIdx) === String(idx)) return;
   }
   var attrs = clickedRow.dataset.attrs;
   var formatted = attrs;
-  try { formatted = JSON.stringify(JSON.parse(attrs), null, 2); } catch(e) {}
+  try { formatted = JSON.stringify(JSON.parse(attrs), null, 2); } catch (_) { /* ignore parse error */ }
   var detailRow = document.createElement('tr');
   detailRow.className = 'cc-event-detail-row trace-detail-row';
   detailRow.dataset.idx = idx;
@@ -978,7 +978,7 @@ function cc_toggleAnomalyDetail(item, idx) {
   document.querySelectorAll('#cc-anomaly-list .anomaly-detail').forEach(function(d) { d.style.display = 'none'; });
   var attrs = item.dataset.attrs;
   var formatted = attrs;
-  try { formatted = JSON.stringify(JSON.parse(attrs), null, 2); } catch(e) {}
+  try { formatted = JSON.stringify(JSON.parse(attrs), null, 2); } catch (_) { /* ignore parse error */ }
   detail.innerHTML = '<pre style="font-size:12px;color:var(--text-muted);margin-top:8px;overflow-x:auto;white-space:pre-wrap;word-break:break-all">' + escapeHTML(formatted) + '</pre>';
   detail.style.display = 'block';
 }
@@ -1009,12 +1009,12 @@ function cc_updateSessionsPager(shownCount) {
   prevBtn.disabled = ccSessionsPage <= 0;
   nextBtn.disabled = !ccSessionsHasNext;
   if (!shownCount) {
-    info.textContent = 'No results';
+    info.textContent = t('pager.no_results');
     return;
   }
   var start = ccSessionsPage * ccSessionsPageSize + 1;
   var end = start + shownCount - 1;
-  info.textContent = 'Page ' + (ccSessionsPage + 1) + ' \u00b7 ' + start + '-' + end + ' of ' + total;
+  info.textContent = t('pager.page') + ' ' + (ccSessionsPage + 1) + ' \u00b7 ' + start + '-' + end + ' ' + t('pager.of') + ' ' + total;
 }
 
 async function cc_loadSessions() {

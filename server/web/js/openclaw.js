@@ -1,5 +1,5 @@
 // openclaw.js — OpenClaw view: all oc_* functions
-// Depends on: core.js, chart.js, i18n.js, metrics-explorer.js, traces.js (renderWaterfall)
+// Depends on: core.js (setHealthFromData), chart.js, i18n.js, metrics-explorer.js, traces.js (renderWaterfall)
 
 // OpenClaw span filters
 var OC_MODEL_SPAN = "span_name = 'openclaw.model.usage'";
@@ -48,12 +48,12 @@ function oc_updateTracePager(resultCount) {
   prevBtn.disabled = ocTracePage <= 0;
   nextBtn.disabled = !ocTraceHasNext;
   if (!resultCount) {
-    info.textContent = 'No results';
+    info.textContent = t('pager.no_results');
     return;
   }
   var start = ocTracePage * ocTracePageSize + 1;
   var end = start + resultCount - 1;
-  info.textContent = 'Page ' + (ocTracePage + 1) + ' · ' + start + '-' + end;
+  info.textContent = t('pager.page') + ' ' + (ocTracePage + 1) + ' \u00b7 ' + start + '-' + end;
 }
 
 async function oc_getTraceColumns() {
@@ -527,10 +527,10 @@ function oc_updateSessionsPager(resultCount) {
   if (!prevBtn || !nextBtn || !info) return;
   prevBtn.disabled = ocSessionsPage <= 0;
   nextBtn.disabled = !ocSessionsHasNext;
-  if (!resultCount) { info.textContent = 'No results'; return; }
+  if (!resultCount) { info.textContent = t('pager.no_results'); return; }
   var start = ocSessionsPage * ocSessionsPageSize + 1;
   var end = start + resultCount - 1;
-  info.textContent = 'Page ' + (ocSessionsPage + 1) + ' \u00b7 ' + start + '-' + end;
+  info.textContent = t('pager.page') + ' ' + (ocSessionsPage + 1) + ' \u00b7 ' + start + '-' + end;
 }
 
 async function oc_loadSessions() {
@@ -832,7 +832,7 @@ async function oc_toggleSessionDetail(clickedRow, idx) {
     if (hasSessionKey) {
       html += '<div style="margin-top:8px">' +
         '<button class="filter-btn primary" onclick="oc_filterBySession(\'' + escapeJSString(session.session_key) + '\')">' +
-        'View in Traces tab</button></div>';
+        t('ui.view_in_traces') + '</button></div>';
     }
 
     inner.innerHTML = html;
@@ -1335,16 +1335,16 @@ async function oc_loadAnomalies() {
       var reason;
       var severity = '';
       if (d.span_name === 'openclaw.webhook.error') {
-        reason = 'Webhook Error';
+        reason = t('anomaly.webhook_error');
         severity = 'badge-error';
       } else if (d.span_name === 'openclaw.session.stuck') {
-        reason = 'Session Stuck';
+        reason = t('anomaly.session_stuck');
         severity = 'badge-error';
       } else if (d.span_status_code === 'STATUS_CODE_ERROR') {
-        reason = 'Span Error (' + oc_shortSpanName(d.span_name) + ')';
+        reason = t('anomaly.span_error') + ' (' + oc_shortSpanName(d.span_name) + ')';
         severity = 'badge-error';
       } else if (d.outcome && d.outcome !== 'completed') {
-        reason = 'Outcome: ' + d.outcome;
+        reason = t('anomaly.outcome') + ': ' + d.outcome;
         severity = 'warn';
       } else {
         reason = t('anomaly.high_token');
@@ -1518,7 +1518,7 @@ async function oc_loadWebhookTimeline() {
     if (!data.length) { el.innerHTML = '<div class="chart-empty">' + t('empty.no_webhook_errors') + '</div>'; return; }
     el.innerHTML = data.map(function(d) {
       return '<div class="anomaly-item badge-error" onclick="oc_switchToTrace(\'' + escapeJSString(d.trace_id) + '\')">' +
-        '<div class="anomaly-reason">Webhook Error</div>' +
+        '<div class="anomaly-reason">' + t('anomaly.webhook_error') + '</div>' +
         '<div style="font-size:13px">' +
         (d.channel ? escapeHTML(d.channel) + ' &middot; ' : '') +
         (d.session_key ? 'session: ' + escapeHTML(d.session_key) + ' &middot; ' : '') +

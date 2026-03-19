@@ -1,5 +1,5 @@
 // traces.js — Traces view: all load* functions
-// Depends on: core.js, chart.js, i18n.js
+// Depends on: core.js (setHealthFromData), chart.js, i18n.js
 
 var tracePage = 0;
 var tracePageSize = 15;
@@ -15,10 +15,10 @@ function updateTracePager(resultCount) {
   if (!prevBtn || !nextBtn || !info) return;
   prevBtn.disabled = tracePage <= 0;
   nextBtn.disabled = !traceHasNext;
-  if (!resultCount) { info.textContent = 'No results'; return; }
+  if (!resultCount) { info.textContent = t('pager.no_results'); return; }
   var start = tracePage * tracePageSize + 1;
   var end = start + resultCount - 1;
-  info.textContent = 'Page ' + (tracePage + 1) + ' \u00b7 ' + start + '-' + end;
+  info.textContent = t('pager.page') + ' ' + (tracePage + 1) + ' \u00b7 ' + start + '-' + end;
 }
 
 // ===================================================================
@@ -108,30 +108,6 @@ async function updateHealthIndicator(elementId, reqCount) {
   }
 }
 
-function setHealthFromData(el, data) {
-  var total = Number(data.total) || 0;
-  var errors = Number(data.errors) || 0;
-  var p95 = Number(data.p95_ms) || 0;
-  var errRate = total > 0 ? (errors / total * 100) : 0;
-
-  var level, label;
-  if (total === 0) {
-    level = 'na'; label = 'N/A';
-  } else if (errRate > 5 || p95 > 5000) {
-    level = 'red'; label = 'Unhealthy';
-  } else if (errRate > 1 || p95 > 2000) {
-    level = 'yellow'; label = 'Degraded';
-  } else {
-    level = 'green'; label = 'Healthy';
-  }
-
-  var detail = total > 0
-    ? ' (err ' + errRate.toFixed(1) + '%, p95 ' + fmtDurMs(p95) + ')'
-    : '';
-  el.className = 'health-indicator health-' + level;
-  el.innerHTML = '<span class="health-dot"></span><span class="health-text">' +
-    escapeHTML(label + detail) + '</span>';
-}
 
 // ===================================================================
 // Overview tab — uPlot charts
@@ -327,7 +303,7 @@ function toggleTraceDetail(clickedRow, traceId) {
     '<div class="conversation-section">' +
     '<div class="conv-tabs">' +
     '<button class="conv-tab active" onclick="switchConvTab(this, \x27conv\x27)">' + t('detail.conversation') + '</button>' +
-    '<button class="conv-tab" onclick="switchConvTab(this, \x27rawlogs\x27)">Raw Logs</button>' +
+    '<button class="conv-tab" onclick="switchConvTab(this, \x27rawlogs\x27)">' + t('detail.raw_logs') + '</button>' +
     '</div>' +
     '<div id="conv-tab-conv" class="conv-tab-content active">' +
     '<div id="conversation-messages" class="loading">' + t('empty.loading') + '</div></div>' +
@@ -394,6 +370,7 @@ async function loadTraceDetailData(traceId) {
     );
     var messages = parseConversation(rowsToObjects(convRes));
     if (messages.length > 0) {
+      convEl.classList.remove('loading');
       convEl.innerHTML = messages.map(function(m) {
         var cls = m.role === 'assistant' ? 'assistant' :
                   m.role === 'system' ? 'system' :
@@ -486,7 +463,7 @@ function renderWaterfall(container, spans) {
     container.appendChild(summary);
   }
 
-  flat.forEach(function(item, fi) {
+  flat.forEach(function(item) {
     var s = item.span;
     var startMs = new Date(s.timestamp).getTime() - traceStart;
     var durMs = (Number(s.duration_nano) || 0) / 1e6;
@@ -511,6 +488,9 @@ function renderWaterfall(container, spans) {
 
     var row = document.createElement('div');
     row.className = 'waterfall-row waterfall-row-clickable';
+    row.setAttribute('role', 'button');
+    row.setAttribute('tabindex', '0');
+    row.setAttribute('aria-expanded', 'false');
     row.innerHTML =
       '<div class="waterfall-label" style="width:' + labelWidth + 'px;padding-left:' + indent + 'px" title="' + escapeHTML(name) + '">' +
         (item.depth > 0 ? '<span style="color:var(--text-dim);margin-right:4px">\u2514</span>' : '') +
@@ -523,17 +503,21 @@ function renderWaterfall(container, spans) {
       '</div>' +
       '<div class="waterfall-dur">' + fmtDurMs(durMs) + '</div>';
 
-    // Click to expand span detail
+    // Click/keyboard to expand span detail
     (function(spanData, rowEl) {
-      rowEl.addEventListener('click', function(e) {
-        e.stopPropagation();
+      function toggleDetail() {
         var existing = rowEl.nextElementSibling;
         if (existing && existing.classList.contains('waterfall-span-detail')) {
           existing.remove();
+          rowEl.setAttribute('aria-expanded', 'false');
           return;
         }
         // Remove any other open detail
-        container.querySelectorAll('.waterfall-span-detail').forEach(function(d) { d.remove(); });
+        container.querySelectorAll('.waterfall-span-detail').forEach(function(d) {
+          d.remove();
+          var prev = d.previousElementSibling;
+          if (prev) prev.setAttribute('aria-expanded', 'false');
+        });
 
         var detail = document.createElement('div');
         detail.className = 'waterfall-span-detail';
@@ -558,6 +542,17 @@ function renderWaterfall(container, spans) {
         var json = '{\n' + pairs.map(function(p) { return '  "' + p[0] + '": ' + JSON.stringify(p[1]); }).join(',\n') + '\n}';
         detail.innerHTML = '<pre class="waterfall-span-json">' + escapeHTML(json) + '</pre>';
         rowEl.after(detail);
+        rowEl.setAttribute('aria-expanded', 'true');
+      }
+      rowEl.addEventListener('click', function(e) {
+        e.stopPropagation();
+        toggleDetail();
+      });
+      rowEl.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          toggleDetail();
+        }
       });
     })(s, row);
 
@@ -607,7 +602,7 @@ async function loadRawLogs(traceId, el) {
     );
     var data = rowsToObjects(res);
     if (!data.length) {
-      el.innerHTML = '<div class="loading">No raw logs found for this trace.</div>';
+      el.innerHTML = '<div class="loading">' + t('empty.no_raw_logs') + '</div>';
       el.classList.remove('loading');
       return;
     }
@@ -624,7 +619,7 @@ async function loadRawLogs(traceId, el) {
         '</div>';
     }).join('') + '</div>';
   } catch {
-    el.innerHTML = '<div class="loading">Could not load raw logs.</div>';
+    el.innerHTML = '<div class="loading">' + t('error.load_raw_logs') + '</div>';
     el.classList.remove('loading');
   }
 }
@@ -649,7 +644,7 @@ function parseConversation(logRows) {
     try {
       var p = JSON.parse(logRows[i].body);
       if (Array.isArray(p)) { lastArrayIdx = i; lastArray = p; }
-    } catch (e) {}
+    } catch (_) { /* ignore parse error */ }
   }
 
   var messages = [];
@@ -673,7 +668,7 @@ function parseConversation(logRows) {
           var ct = typeof q.message.content === 'string' ? q.message.content : '';
           if (ct) messages.push({ role: (q.message.role || 'assistant').toLowerCase(), content: ct });
         }
-      } catch (e) {}
+      } catch (_) { /* ignore parse error */ }
     }
   } else {
     // Individual event mode: completion outputs always kept, inputs deduplicated
@@ -681,7 +676,7 @@ function parseConversation(logRows) {
     logRows.forEach(function(row) {
       if (!row.body) return;
       var parsed;
-      try { parsed = JSON.parse(row.body); } catch (e) { return; }
+      try { parsed = JSON.parse(row.body); } catch (_) { return; }
       if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return;
 
       // Completion output (has finish_reason) — unique per span, always keep
@@ -743,7 +738,7 @@ function parseSearchBody(body) {
         return { role: r.toLowerCase(), content: c };
       }
     }
-  } catch (e) { /* not JSON */ }
+  } catch (_) { /* not JSON */ }
   return { role: 'unknown', content: body };
 }
 
@@ -945,7 +940,7 @@ async function doSearch() {
       '<div class="search-result-content">' + escapeHTML(preview) + '</div>' +
       '</div>';
     }).join('');
-  } catch (err) {
+  } catch (_err) {
     // Table may not exist or matches_term not supported
     el.innerHTML = '<div class="loading">' + t('error.conv_search') + '</div>';
   }
@@ -1257,7 +1252,7 @@ async function loadInjectionAlerts() {
     data.forEach(function(d) {
       if (!d.body) return;
       var parsed;
-      try { parsed = JSON.parse(d.body); } catch (e) { return; }
+      try { parsed = JSON.parse(d.body); } catch (_) { return; }
 
       // Extract user message content only
       var texts = [];
@@ -1316,7 +1311,7 @@ async function loadInjectionAlerts() {
         fmtTime(a.timestamp) + ' &middot; ' + escapeHTML(preview) +
         '</div></div>';
     }).join('');
-  } catch (err) {
+  } catch (_err) {
     countEl.textContent = '\u2014';
     el.innerHTML = '<div class="loading">' + t('empty.injection_na') + '</div>';
   }

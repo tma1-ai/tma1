@@ -111,7 +111,7 @@ func (p *Process) waitHealthy(url string, timeout time.Duration) error {
 		resp, err := client.Get(url) //nolint:gosec
 		if err == nil {
 			_, _ = io.Copy(io.Discard, resp.Body)
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			if resp.StatusCode == http.StatusOK {
 				return nil
 			}

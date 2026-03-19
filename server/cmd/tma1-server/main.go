@@ -200,7 +200,9 @@ func initFlowsWithRetry(ctx context.Context, httpPort int, logger *slog.Logger) 
 		}
 		if greptimedb.HasGenAITraces(httpPort) {
 			logger.Info("GenAI trace data detected, creating flows")
-			greptimedb.InitFlows(httpPort, logger)
+			if err := greptimedb.InitFlows(httpPort, logger); err != nil {
+				logger.Warn("flow creation failed, will retry", "err", err)
+			}
 			if err := greptimedb.InitCostFlow(httpPort, logger); err != nil {
 				logger.Warn("cost flow creation failed, will retry", "err", err)
 			}

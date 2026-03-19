@@ -107,7 +107,7 @@ function deepParseAttrs(obj) {
   Object.keys(obj).forEach(function(k) {
     var v = obj[k];
     if (typeof v === 'string' && v.length > 1 && (v[0] === '{' || v[0] === '[')) {
-      try { out[k] = JSON.parse(v); return; } catch {}
+      try { out[k] = JSON.parse(v); return; } catch (_) { /* not JSON */ }
     }
     out[k] = v;
   });
@@ -178,4 +178,29 @@ function costCaseSQL(modelExpr, inputExpr, outputExpr) {
   return "(CASE " + parts.join(" ") +
     " ELSE CAST(" + inputExpr + " AS DOUBLE)*" + defaultPrice.i + "/1000000.0+" +
     "CAST(" + outputExpr + " AS DOUBLE)*" + defaultPrice.o + "/1000000.0 END)";
+}
+
+function setHealthFromData(el, data) {
+  var total = Number(data.total) || 0;
+  var errors = Number(data.errors) || 0;
+  var p95 = Number(data.p95_ms) || 0;
+  var errRate = total > 0 ? (errors / total * 100) : 0;
+
+  var level, label;
+  if (total === 0) {
+    level = 'na'; label = 'N/A';
+  } else if (errRate > 5 || p95 > 5000) {
+    level = 'red'; label = 'Unhealthy';
+  } else if (errRate > 1 || p95 > 2000) {
+    level = 'yellow'; label = 'Degraded';
+  } else {
+    level = 'green'; label = 'Healthy';
+  }
+
+  var detail = total > 0
+    ? ' (err ' + errRate.toFixed(1) + '%, p95 ' + fmtDurMs(p95) + ')'
+    : '';
+  el.className = 'health-indicator health-' + level;
+  el.innerHTML = '<span class="health-dot"></span><span class="health-text">' +
+    escapeHTML(label + detail) + '</span>';
 }

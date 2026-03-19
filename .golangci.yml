@@ -1,0 +1,14 @@
+version: "2"
+
+linters:
+  default: standard
+  exclusions:
+    rules:
+      # Deferred Close/Remove — error not actionable
+      - linters: [errcheck]
+        source: "defer .+\\.(Close|Remove)\\("
+
+      # fmt.Fprint/Fprintf/Sscanf in tests — mock writers, port parsing
+      - linters: [errcheck]
+        path: _test\.go
+        source: "fmt\\.(Fprint|Fprintf|Sscanf)\\("
