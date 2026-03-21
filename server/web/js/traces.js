@@ -29,7 +29,7 @@ function genai_traceAttrSelect(columns, columnName, alias) {
 // Build a SQL WHERE fragment that identifies GenAI spans.
 // Checks both the deprecated gen_ai.system and the new gen_ai.provider.name,
 // depending on which columns exist in the schema.
-function genai_systemWhere(cols) {
+function genaiSpanWhere(cols) {
   var hasSys = cols && cols['span_attributes.gen_ai.system'];
   var hasProv = cols && cols['span_attributes.gen_ai.provider.name'];
   if (hasSys && hasProv)
@@ -41,7 +41,7 @@ function genai_systemWhere(cols) {
 }
 
 // Inverse: WHERE fragment that excludes GenAI spans (for tool-only queries).
-function genai_systemWhereNull(cols) {
+function genaiSpanWhereNull(cols) {
   var hasSys = cols && cols['span_attributes.gen_ai.system'];
   var hasProv = cols && cols['span_attributes.gen_ai.provider.name'];
   if (hasSys && hasProv)
@@ -82,6 +82,8 @@ async function loadMetrics() {
     );
     var colSet = {};
     rowsToObjects(colRes).forEach(function(r) { colSet[r.column_name] = true; });
+    // Share with genai_getTraceColumns() to avoid a redundant query this cycle
+    genaiTraceColumnsPromise = Promise.resolve(colSet);
     var hasSystem = !!colSet['span_attributes.gen_ai.system'];
     var hasProvider = !!colSet['span_attributes.gen_ai.provider.name'];
     var hasModel = !!colSet['span_attributes.gen_ai.request.model'];
@@ -91,7 +93,7 @@ async function loadMetrics() {
     // No gen_ai columns at all — no data yet, clean exit
     if (!hasSystem && !hasProvider) return false;
 
-    var genaiWhere = genai_systemWhere(colSet);
+    var genaiWhere = genaiSpanWhere(colSet);
     var iv = intervalSQL();
     var queries = [];
 
@@ -157,7 +159,7 @@ async function loadMetrics() {
 }
 
 async function updateHealthIndicator(elementId, reqCount) {
-  var genaiWhere = genai_systemWhere(await genai_getTraceColumns());
+  var genaiWhere = genaiSpanWhere(await genai_getTraceColumns());
   var el = document.getElementById(elementId);
   if (!el) return;
   if (!reqCount) {
@@ -198,7 +200,7 @@ async function loadOverviewCharts() {
 }
 
 async function loadTokenChart() {
-  var genaiWhere = genai_systemWhere(await genai_getTraceColumns());
+  var genaiWhere = genaiSpanWhere(await genai_getTraceColumns());
   try {
     var res = await query(
       "SELECT date_bin('" + chartBucket() + "'::INTERVAL, timestamp) AS t, " +
@@ -219,7 +221,7 @@ async function loadTokenChart() {
 }
 
 async function loadCostChart() {
-  var genaiWhere = genai_systemWhere(await genai_getTraceColumns());
+  var genaiWhere = genaiSpanWhere(await genai_getTraceColumns());
   try {
     var res = await query(
       "SELECT date_bin('" + chartBucket() + "'::INTERVAL, timestamp) AS t, " +
@@ -242,7 +244,7 @@ async function loadCostChart() {
 }
 
 async function loadLatencyChart() {
-  var genaiWhere = genai_systemWhere(await genai_getTraceColumns());
+  var genaiWhere = genaiSpanWhere(await genai_getTraceColumns());
   try {
     var res = await query(
       "SELECT date_bin('" + chartBucket() + "'::INTERVAL, timestamp) AS t, " +
@@ -264,7 +266,7 @@ async function loadLatencyChart() {
 }
 
 async function loadErrorChart() {
-  var genaiWhere = genai_systemWhere(await genai_getTraceColumns());
+  var genaiWhere = genaiSpanWhere(await genai_getTraceColumns());
   try {
     var res = await query(
       "SELECT date_bin('" + chartBucket() + "'::INTERVAL, timestamp) AS t, " +
@@ -293,7 +295,7 @@ async function loadTraces() {
   var statusFilter = document.getElementById('trace-status-filter').value;
   var cols = await genai_getTraceColumns();
 
-  var where = "WHERE " + genai_systemWhere(cols);
+  var where = "WHERE " + genaiSpanWhere(cols);
   if (traceIdFilter) {
     where += " AND trace_id = '" + escapeSQLString(traceIdFilter) + "'";
   } else {
@@ -846,7 +848,7 @@ async function loadCostTab() {
 }
 
 async function loadCostByModel() {
-  var genaiWhere = genai_systemWhere(await genai_getTraceColumns());
+  var genaiWhere = genaiSpanWhere(await genai_getTraceColumns());
   try {
     var costExpr = costCaseSQL(
       '"span_attributes.gen_ai.request.model"',
@@ -878,7 +880,7 @@ async function loadCostByModel() {
 }
 
 async function loadExpensiveConversations() {
-  var genaiWhere = genai_systemWhere(await genai_getTraceColumns());
+  var genaiWhere = genaiSpanWhere(await genai_getTraceColumns());
   try {
     var costExpr = costCaseSQL(
       '"span_attributes.gen_ai.request.model"',
@@ -915,7 +917,7 @@ async function loadExpensiveConversations() {
 }
 
 async function loadFinishReasons() {
-  var genaiWhere = genai_systemWhere(await genai_getTraceColumns());
+  var genaiWhere = genaiSpanWhere(await genai_getTraceColumns());
   try {
     var res = await query(
       "SELECT \"span_attributes.gen_ai.response.finish_reasons\" AS reason, " +
@@ -944,7 +946,7 @@ async function loadFinishReasons() {
 }
 
 async function loadModelComparison() {
-  var genaiWhere = genai_systemWhere(await genai_getTraceColumns());
+  var genaiWhere = genaiSpanWhere(await genai_getTraceColumns());
   try {
     var costExpr = costCaseSQL(
       '"span_attributes.gen_ai.request.model"',
@@ -1040,7 +1042,7 @@ async function doSearch() {
 }
 
 async function loadAnomalies() {
-  var genaiWhere = genai_systemWhere(await genai_getTraceColumns());
+  var genaiWhere = genaiSpanWhere(await genai_getTraceColumns());
   var el = document.getElementById('anomaly-list');
   el.innerHTML = '<div class="loading">' + t('empty.loading_anomalies') + '</div>';
 
@@ -1121,7 +1123,7 @@ async function loadToolDistribution() {
 // Per-Question Cost (Cost tab)
 // ===================================================================
 async function loadPerQuestionCost() {
-  var genaiWhere = genai_systemWhere(await genai_getTraceColumns());
+  var genaiWhere = genaiSpanWhere(await genai_getTraceColumns());
   try {
     var costExpr = costCaseSQL(
       '"span_attributes.gen_ai.request.model"',
@@ -1164,7 +1166,7 @@ async function loadPerQuestionCost() {
 // Context Window Snowball (Cost tab)
 // ===================================================================
 async function loadContextSnowball() {
-  var genaiWhere = genai_systemWhere(await genai_getTraceColumns());
+  var genaiWhere = genaiSpanWhere(await genai_getTraceColumns());
   try {
     var res = await query(
       "SELECT trace_id, " +
@@ -1421,7 +1423,7 @@ async function loadToolTimeline() {
       "SELECT timestamp, trace_id, span_name, span_status_code, " +
       "ROUND(duration_nano / 1000000.0, 1) AS duration_ms " +
       "FROM opentelemetry_traces " +
-      "WHERE " + genai_systemWhereNull(cols) + " " +
+      "WHERE " + genaiSpanWhereNull(cols) + " " +
       "  AND span_name IS NOT NULL " +
       "  AND timestamp > NOW() - INTERVAL '" + intervalSQL() + "' " +
       "ORDER BY timestamp DESC LIMIT 30"

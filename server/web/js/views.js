@@ -424,7 +424,7 @@ async function checkDataFreshness() {
     sql = "SELECT MAX(timestamp) AS last_ts FROM opentelemetry_traces WHERE span_name LIKE 'openclaw.%'";
   } else if (currentView === 'traces') {
     var cols = await genai_getTraceColumns();
-    sql = "SELECT MAX(timestamp) AS last_ts FROM opentelemetry_traces WHERE " + genai_systemWhere(cols);
+    sql = "SELECT MAX(timestamp) AS last_ts FROM opentelemetry_traces WHERE " + genaiSpanWhere(cols);
   } else {
     el.textContent = '';
     return;
