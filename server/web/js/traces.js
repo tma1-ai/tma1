@@ -26,6 +26,31 @@ function genai_traceAttrSelect(columns, columnName, alias) {
   return 'NULL AS ' + alias;
 }
 
+// Build a SQL WHERE fragment that identifies GenAI spans.
+// Checks both the deprecated gen_ai.system and the new gen_ai.provider.name,
+// depending on which columns exist in the schema.
+function genai_systemWhere(cols) {
+  var hasSys = cols && cols['span_attributes.gen_ai.system'];
+  var hasProv = cols && cols['span_attributes.gen_ai.provider.name'];
+  if (hasSys && hasProv)
+    return '("span_attributes.gen_ai.system" IS NOT NULL OR "span_attributes.gen_ai.provider.name" IS NOT NULL)';
+  if (hasProv)
+    return '"span_attributes.gen_ai.provider.name" IS NOT NULL';
+  // Fall back to deprecated column (or no data at all)
+  return '"span_attributes.gen_ai.system" IS NOT NULL';
+}
+
+// Inverse: WHERE fragment that excludes GenAI spans (for tool-only queries).
+function genai_systemWhereNull(cols) {
+  var hasSys = cols && cols['span_attributes.gen_ai.system'];
+  var hasProv = cols && cols['span_attributes.gen_ai.provider.name'];
+  if (hasSys && hasProv)
+    return '("span_attributes.gen_ai.system" IS NULL AND "span_attributes.gen_ai.provider.name" IS NULL)';
+  if (hasProv)
+    return '"span_attributes.gen_ai.provider.name" IS NULL';
+  return '"span_attributes.gen_ai.system" IS NULL';
+}
+
 function resetTracePaging() { tracePage = 0; }
 function prevTracePage() { if (tracePage <= 0) return; tracePage--; loadTraces(); }
 function nextTracePage() { if (!traceHasNext) return; tracePage++; loadTraces(); }
@@ -58,13 +83,15 @@ async function loadMetrics() {
     var colSet = {};
     rowsToObjects(colRes).forEach(function(r) { colSet[r.column_name] = true; });
     var hasSystem = !!colSet['span_attributes.gen_ai.system'];
+    var hasProvider = !!colSet['span_attributes.gen_ai.provider.name'];
     var hasModel = !!colSet['span_attributes.gen_ai.request.model'];
     var hasInputTok = !!colSet['span_attributes.gen_ai.usage.input_tokens'];
     var hasOutputTok = !!colSet['span_attributes.gen_ai.usage.output_tokens'];
 
     // No gen_ai columns at all — no data yet, clean exit
-    if (!hasSystem) return false;
+    if (!hasSystem && !hasProvider) return false;
 
+    var genaiWhere = genai_systemWhere(colSet);
     var iv = intervalSQL();
     var queries = [];
 
@@ -77,7 +104,7 @@ async function loadMetrics() {
           '"span_attributes.gen_ai.usage.output_tokens"'
         ) + "), 4) AS total " +
         "FROM opentelemetry_traces " +
-        "WHERE \"span_attributes.gen_ai.system\" IS NOT NULL " +
+        "WHERE " + genaiWhere + " " +
         "AND timestamp > NOW() - INTERVAL '" + iv + "'"
       ));
     } else { queries.push(Promise.resolve(null)); }
@@ -88,7 +115,7 @@ async function loadMetrics() {
         "SELECT SUM(CAST(\"span_attributes.gen_ai.usage.input_tokens\" AS DOUBLE) + " +
         "CAST(\"span_attributes.gen_ai.usage.output_tokens\" AS DOUBLE)) AS total " +
         "FROM opentelemetry_traces " +
-        "WHERE \"span_attributes.gen_ai.system\" IS NOT NULL " +
+        "WHERE " + genaiWhere + " " +
         "AND timestamp > NOW() - INTERVAL '" + iv + "'"
       ));
     } else { queries.push(Promise.resolve(null)); }
@@ -97,7 +124,7 @@ async function loadMetrics() {
     queries.push(query(
       "SELECT COUNT(1) AS total " +
       "FROM opentelemetry_traces " +
-      "WHERE \"span_attributes.gen_ai.system\" IS NOT NULL " +
+      "WHERE " + genaiWhere + " " +
       "AND timestamp > NOW() - INTERVAL '" + iv + "'"
     ));
 
@@ -105,7 +132,7 @@ async function loadMetrics() {
     queries.push(query(
       "SELECT AVG(duration_nano) AS avg_lat " +
       "FROM opentelemetry_traces " +
-      "WHERE \"span_attributes.gen_ai.system\" IS NOT NULL " +
+      "WHERE " + genaiWhere + " " +
       "AND timestamp > NOW() - INTERVAL '" + iv + "'"
     ));
 
@@ -130,6 +157,7 @@ async function loadMetrics() {
 }
 
 async function updateHealthIndicator(elementId, reqCount) {
+  var genaiWhere = genai_systemWhere(await genai_getTraceColumns());
   var el = document.getElementById(elementId);
   if (!el) return;
   if (!reqCount) {
@@ -143,7 +171,7 @@ async function updateHealthIndicator(elementId, reqCount) {
       "SUM(CASE WHEN span_status_code = 'STATUS_CODE_ERROR' THEN 1 ELSE 0 END) AS errors, " +
       "ROUND(APPROX_PERCENTILE_CONT(duration_nano, 0.95) / 1000000.0, 0) AS p95_ms " +
       "FROM opentelemetry_traces " +
-      "WHERE \"span_attributes.gen_ai.system\" IS NOT NULL " +
+      "WHERE " + genaiWhere + " " +
       "AND timestamp > NOW() - INTERVAL '5 minutes'"
     );
     var r = rowsToObjects(res)[0] || {};
@@ -170,13 +198,14 @@ async function loadOverviewCharts() {
 }
 
 async function loadTokenChart() {
+  var genaiWhere = genai_systemWhere(await genai_getTraceColumns());
   try {
     var res = await query(
       "SELECT date_bin('" + chartBucket() + "'::INTERVAL, timestamp) AS t, " +
       "SUM(CAST(\"span_attributes.gen_ai.usage.input_tokens\" AS DOUBLE)) AS inp, " +
       "SUM(CAST(\"span_attributes.gen_ai.usage.output_tokens\" AS DOUBLE)) AS outp " +
       "FROM opentelemetry_traces " +
-      "WHERE \"span_attributes.gen_ai.system\" IS NOT NULL " +
+      "WHERE " + genaiWhere + " " +
       "  AND timestamp > NOW() - INTERVAL '" + intervalSQL() + "' " +
       "GROUP BY t ORDER BY t"
     );
@@ -190,6 +219,7 @@ async function loadTokenChart() {
 }
 
 async function loadCostChart() {
+  var genaiWhere = genai_systemWhere(await genai_getTraceColumns());
   try {
     var res = await query(
       "SELECT date_bin('" + chartBucket() + "'::INTERVAL, timestamp) AS t, " +
@@ -199,7 +229,7 @@ async function loadCostChart() {
         '"span_attributes.gen_ai.usage.output_tokens"'
       ) + ") AS cost " +
       "FROM opentelemetry_traces " +
-      "WHERE \"span_attributes.gen_ai.system\" IS NOT NULL " +
+      "WHERE " + genaiWhere + " " +
       "  AND timestamp > NOW() - INTERVAL '" + intervalSQL() + "' " +
       "GROUP BY t ORDER BY t"
     );
@@ -212,13 +242,14 @@ async function loadCostChart() {
 }
 
 async function loadLatencyChart() {
+  var genaiWhere = genai_systemWhere(await genai_getTraceColumns());
   try {
     var res = await query(
       "SELECT date_bin('" + chartBucket() + "'::INTERVAL, timestamp) AS t, " +
       "APPROX_PERCENTILE_CONT(duration_nano, 0.50) AS p50, " +
       "APPROX_PERCENTILE_CONT(duration_nano, 0.95) AS p95 " +
       "FROM opentelemetry_traces " +
-      "WHERE \"span_attributes.gen_ai.system\" IS NOT NULL " +
+      "WHERE " + genaiWhere + " " +
       "AND timestamp > NOW() - INTERVAL '" + intervalSQL() + "' " +
       "GROUP BY t ORDER BY t"
     );
@@ -233,13 +264,14 @@ async function loadLatencyChart() {
 }
 
 async function loadErrorChart() {
+  var genaiWhere = genai_systemWhere(await genai_getTraceColumns());
   try {
     var res = await query(
       "SELECT date_bin('" + chartBucket() + "'::INTERVAL, timestamp) AS t, " +
       "COUNT(1) AS total, " +
       "SUM(CASE WHEN span_status_code = 'STATUS_CODE_ERROR' THEN 1 ELSE 0 END) AS errors " +
       "FROM opentelemetry_traces " +
-      "WHERE \"span_attributes.gen_ai.system\" IS NOT NULL " +
+      "WHERE " + genaiWhere + " " +
       "  AND timestamp > NOW() - INTERVAL '" + intervalSQL() + "' " +
       "GROUP BY t ORDER BY t"
     );
@@ -261,7 +293,7 @@ async function loadTraces() {
   var statusFilter = document.getElementById('trace-status-filter').value;
   var cols = await genai_getTraceColumns();
 
-  var where = "WHERE \"span_attributes.gen_ai.system\" IS NOT NULL";
+  var where = "WHERE " + genai_systemWhere(cols);
   if (traceIdFilter) {
     where += " AND trace_id = '" + escapeSQLString(traceIdFilter) + "'";
   } else {
@@ -814,6 +846,7 @@ async function loadCostTab() {
 }
 
 async function loadCostByModel() {
+  var genaiWhere = genai_systemWhere(await genai_getTraceColumns());
   try {
     var costExpr = costCaseSQL(
       '"span_attributes.gen_ai.request.model"',
@@ -824,7 +857,7 @@ async function loadCostByModel() {
       "SELECT \"span_attributes.gen_ai.request.model\" AS model, ROUND(SUM(" + costExpr +
       "), 4) AS total_cost " +
       "FROM opentelemetry_traces " +
-      "WHERE \"span_attributes.gen_ai.system\" IS NOT NULL " +
+      "WHERE " + genaiWhere + " " +
       "  AND timestamp > NOW() - INTERVAL '" + intervalSQL() + "' " +
       "GROUP BY model ORDER BY total_cost DESC LIMIT 10"
     );
@@ -845,6 +878,7 @@ async function loadCostByModel() {
 }
 
 async function loadExpensiveConversations() {
+  var genaiWhere = genai_systemWhere(await genai_getTraceColumns());
   try {
     var costExpr = costCaseSQL(
       '"span_attributes.gen_ai.request.model"',
@@ -858,7 +892,7 @@ async function loadExpensiveConversations() {
       "\"span_attributes.gen_ai.usage.output_tokens\" AS output_tok, " +
       "ROUND(" + costExpr + ", 4) AS est_cost_usd " +
       "FROM opentelemetry_traces " +
-      "WHERE \"span_attributes.gen_ai.system\" IS NOT NULL " +
+      "WHERE " + genaiWhere + " " +
       "  AND timestamp > NOW() - INTERVAL '" + intervalSQL() + "' " +
       "ORDER BY est_cost_usd DESC LIMIT 10"
     );
@@ -881,12 +915,13 @@ async function loadExpensiveConversations() {
 }
 
 async function loadFinishReasons() {
+  var genaiWhere = genai_systemWhere(await genai_getTraceColumns());
   try {
     var res = await query(
       "SELECT \"span_attributes.gen_ai.response.finish_reasons\" AS reason, " +
       "COUNT(1) AS cnt " +
       "FROM opentelemetry_traces " +
-      "WHERE \"span_attributes.gen_ai.system\" IS NOT NULL " +
+      "WHERE " + genaiWhere + " " +
       "  AND timestamp > NOW() - INTERVAL '" + intervalSQL() + "' " +
       "GROUP BY reason ORDER BY cnt DESC"
     );
@@ -909,6 +944,7 @@ async function loadFinishReasons() {
 }
 
 async function loadModelComparison() {
+  var genaiWhere = genai_systemWhere(await genai_getTraceColumns());
   try {
     var costExpr = costCaseSQL(
       '"span_attributes.gen_ai.request.model"',
@@ -922,7 +958,7 @@ async function loadModelComparison() {
       "ROUND(AVG(duration_nano) / 1000000.0, 0) AS avg_latency_ms, " +
       "SUM(" + costExpr + ") AS total_cost " +
       "FROM opentelemetry_traces " +
-      "WHERE \"span_attributes.gen_ai.system\" IS NOT NULL " +
+      "WHERE " + genaiWhere + " " +
       "  AND timestamp > NOW() - INTERVAL '" + intervalSQL() + "' " +
       "GROUP BY model ORDER BY reqs DESC"
     );
@@ -1004,6 +1040,7 @@ async function doSearch() {
 }
 
 async function loadAnomalies() {
+  var genaiWhere = genai_systemWhere(await genai_getTraceColumns());
   var el = document.getElementById('anomaly-list');
   el.innerHTML = '<div class="loading">' + t('empty.loading_anomalies') + '</div>';
 
@@ -1016,7 +1053,7 @@ async function loadAnomalies() {
       "span_status_code AS status, " +
       "ROUND(duration_nano / 1000000.0, 1) AS duration_ms " +
       "FROM opentelemetry_traces " +
-      "WHERE \"span_attributes.gen_ai.system\" IS NOT NULL " +
+      "WHERE " + genaiWhere + " " +
       "  AND timestamp > NOW() - INTERVAL '" + intervalSQL() + "' " +
       "  AND (span_status_code = 'STATUS_CODE_ERROR' " +
       "    OR \"span_attributes.gen_ai.usage.input_tokens\" > 10000) " +
@@ -1084,6 +1121,7 @@ async function loadToolDistribution() {
 // Per-Question Cost (Cost tab)
 // ===================================================================
 async function loadPerQuestionCost() {
+  var genaiWhere = genai_systemWhere(await genai_getTraceColumns());
   try {
     var costExpr = costCaseSQL(
       '"span_attributes.gen_ai.request.model"',
@@ -1098,7 +1136,7 @@ async function loadPerQuestionCost() {
       "ROUND(SUM(" + costExpr + "), 4) AS est_cost_usd, " +
       "MIN(timestamp) AS started " +
       "FROM opentelemetry_traces " +
-      "WHERE \"span_attributes.gen_ai.system\" IS NOT NULL " +
+      "WHERE " + genaiWhere + " " +
       "  AND timestamp > NOW() - INTERVAL '" + intervalSQL() + "' " +
       "GROUP BY trace_id " +
       "ORDER BY est_cost_usd DESC LIMIT 20"
@@ -1126,13 +1164,14 @@ async function loadPerQuestionCost() {
 // Context Window Snowball (Cost tab)
 // ===================================================================
 async function loadContextSnowball() {
+  var genaiWhere = genai_systemWhere(await genai_getTraceColumns());
   try {
     var res = await query(
       "SELECT trace_id, " +
       "CAST(\"span_attributes.gen_ai.usage.input_tokens\" AS DOUBLE) AS input_tok, " +
       "timestamp " +
       "FROM opentelemetry_traces " +
-      "WHERE \"span_attributes.gen_ai.system\" IS NOT NULL " +
+      "WHERE " + genaiWhere + " " +
       "  AND timestamp > NOW() - INTERVAL '" + intervalSQL() + "' " +
       "ORDER BY trace_id, timestamp"
     );
@@ -1376,12 +1415,13 @@ async function loadInjectionAlerts() {
 
 async function loadToolTimeline() {
   var tbody = document.getElementById('tool-timeline-body');
+  var cols = await genai_getTraceColumns();
   try {
     var res = await query(
       "SELECT timestamp, trace_id, span_name, span_status_code, " +
       "ROUND(duration_nano / 1000000.0, 1) AS duration_ms " +
       "FROM opentelemetry_traces " +
-      "WHERE \"span_attributes.gen_ai.system\" IS NULL " +
+      "WHERE " + genai_systemWhereNull(cols) + " " +
       "  AND span_name IS NOT NULL " +
       "  AND timestamp > NOW() - INTERVAL '" + intervalSQL() + "' " +
       "ORDER BY timestamp DESC LIMIT 30"

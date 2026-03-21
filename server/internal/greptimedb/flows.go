@@ -110,13 +110,19 @@ func FlowsReady(httpPort int) bool {
 }
 
 // HasGenAITraces returns true if opentelemetry_traces contains at least one
-// GenAI span (i.e. gen_ai.system is set). Returns false if the table does
-// not exist or has no GenAI data.
+// GenAI span (gen_ai.system or gen_ai.provider.name is set).
+// Returns false if the table does not exist or has no GenAI data.
 func HasGenAITraces(httpPort int) bool {
 	sqlURL := fmt.Sprintf("http://localhost:%d/v1/sql", httpPort)
-	n, err := queryScalarInt(sqlURL,
-		`SELECT 1 FROM opentelemetry_traces WHERE "span_attributes.gen_ai.system" IS NOT NULL LIMIT 1`)
-	return err == nil && n > 0
+	// Try the current attribute first, then fall back to the deprecated one.
+	for _, col := range []string{"span_attributes.gen_ai.provider.name", "span_attributes.gen_ai.system"} {
+		n, err := queryScalarInt(sqlURL,
+			fmt.Sprintf(`SELECT 1 FROM opentelemetry_traces WHERE "%s" IS NOT NULL LIMIT 1`, col))
+		if err == nil && n > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // isFlowStatement returns true if the SQL statement is a CREATE FLOW statement.
@@ -312,7 +318,7 @@ SELECT
     SUM(%s) AS cost_usd,
     date_bin('1 minute'::INTERVAL, "timestamp") AS time_window
 FROM opentelemetry_traces
-WHERE "span_attributes.gen_ai.system" IS NOT NULL
+WHERE "span_attributes.gen_ai.request.model" IS NOT NULL
 GROUP BY "span_attributes.gen_ai.request.model", time_window;`, costExpr)
 
 	if err := execSQL(sqlURL, flowSQL); err != nil {

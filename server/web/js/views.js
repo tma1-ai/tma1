@@ -423,7 +423,8 @@ async function checkDataFreshness() {
   } else if (currentView === 'openclaw') {
     sql = "SELECT MAX(timestamp) AS last_ts FROM opentelemetry_traces WHERE span_name LIKE 'openclaw.%'";
   } else if (currentView === 'traces') {
-    sql = "SELECT MAX(timestamp) AS last_ts FROM opentelemetry_traces WHERE \"span_attributes.gen_ai.system\" IS NOT NULL";
+    var cols = await genai_getTraceColumns();
+    sql = "SELECT MAX(timestamp) AS last_ts FROM opentelemetry_traces WHERE " + genai_systemWhere(cols);
   } else {
     el.textContent = '';
     return;
