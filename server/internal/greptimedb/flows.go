@@ -9,11 +9,16 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 )
 
 var httpClient = &http.Client{Timeout: 30 * time.Second}
+
+// validTTL matches GreptimeDB TTL values: a positive integer followed by a
+// time unit (s/m/h/d/w/M/y) or the literal "forever".
+var validTTL = regexp.MustCompile(`^\d+[smhdwMy]$|^forever$`)
 
 //go:embed flows.sql
 var flowsSQL string
@@ -22,6 +27,9 @@ var flowsSQL string
 // auto-created tables (OTel traces, logs, metrics) inherit it.
 // Idempotent — safe to call on every startup.
 func SetDatabaseTTL(httpPort int, ttl string, logger *slog.Logger) error {
+	if !validTTL.MatchString(ttl) {
+		return fmt.Errorf("set database TTL: invalid TTL format %q (expected e.g. 60d, 24h, forever)", ttl)
+	}
 	sqlURL := fmt.Sprintf("http://localhost:%d/v1/sql", httpPort)
 	stmt := fmt.Sprintf("ALTER DATABASE public SET 'ttl'='%s'", ttl)
 	if err := execSQL(sqlURL, stmt); err != nil {

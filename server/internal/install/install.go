@@ -80,10 +80,6 @@ func EnsureGreptimeDB(dataDir, version string, logger *slog.Logger) (binPath str
 		return "", fmt.Errorf("install: download %s: %w", downloadURL, err)
 	}
 
-	if _, err := tmpFile.Seek(0, io.SeekStart); err != nil {
-		return "", err
-	}
-
 	if err := verifyChecksum(tmpFile, resolvedVersion, logger); err != nil {
 		return "", fmt.Errorf("install: %w", err)
 	}

@@ -5,6 +5,22 @@ import (
 	"testing"
 )
 
+func TestValidTTL(t *testing.T) {
+	valid := []string{"60d", "30d", "7d", "1h", "24h", "1m", "1s", "1w", "1M", "1y", "forever"}
+	for _, v := range valid {
+		if !validTTL.MatchString(v) {
+			t.Errorf("validTTL.MatchString(%q) = false, want true", v)
+		}
+	}
+
+	invalid := []string{"", "d", "60", "60 d", "60days", "60D", "'60d'", "60d; DROP TABLE foo", "-1d"}
+	for _, v := range invalid {
+		if validTTL.MatchString(v) {
+			t.Errorf("validTTL.MatchString(%q) = true, want false", v)
+		}
+	}
+}
+
 func TestSplitSQL(t *testing.T) {
 	tests := []struct {
 		name  string

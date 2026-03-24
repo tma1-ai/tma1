@@ -390,6 +390,7 @@ async function checkDataFreshness() {
   if (!el || !currentView) { if (el) el.textContent = ''; return; }
 
   var sql;
+  var lastTs;
   if (currentView === 'claude-code') {
     // Check both logs and metrics — use whichever is newer
     try {
@@ -399,7 +400,7 @@ async function checkDataFreshness() {
       ]);
       var ts1 = ccResults[0] && rows(ccResults[0])?.[0]?.[0];
       var ts2 = ccResults[1] && rows(ccResults[1])?.[0]?.[0];
-      var lastTs = null;
+      lastTs = null;
       if (ts1 && ts2) lastTs = parseTimestamp(ts1) > parseTimestamp(ts2) ? ts1 : ts2;
       else lastTs = ts1 || ts2;
       renderFreshness(el, lastTs);

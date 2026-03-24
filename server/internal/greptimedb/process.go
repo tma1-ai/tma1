@@ -15,9 +15,8 @@ import (
 
 // Process wraps a running GreptimeDB child process.
 type Process struct {
-	cmd     *exec.Cmd
-	dataDir string
-	logger  *slog.Logger
+	cmd    *exec.Cmd
+	logger *slog.Logger
 }
 
 // Config holds the parameters needed to launch GreptimeDB.
@@ -60,7 +59,7 @@ func Start(cfg Config) (*Process, error) {
 		return nil, fmt.Errorf("greptimedb: start process: %w", err)
 	}
 
-	p := &Process{cmd: cmd, dataDir: cfg.DataDir, logger: cfg.Logger}
+	p := &Process{cmd: cmd, logger: cfg.Logger}
 
 	healthURL := fmt.Sprintf("http://localhost:%d/health", cfg.HTTPPort)
 	if err := p.waitHealthy(healthURL, 30*time.Second); err != nil {

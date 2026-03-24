@@ -106,6 +106,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 // Request body: {"sql": "SELECT ..."}
 // Response: raw GreptimeDB JSON response.
 func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // 1 MB limit
 	var req struct {
 		SQL string `json:"sql"`
 	}

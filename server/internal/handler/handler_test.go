@@ -91,6 +91,22 @@ func TestQueryEndpointRequiresSQL(t *testing.T) {
 	}
 }
 
+func TestQueryEndpointBodySizeLimit(t *testing.T) {
+	srv := newTestServer()
+	r := srv.Router()
+
+	// Send a body larger than 1 MB — should be rejected before proxying.
+	bigBody := strings.Repeat("x", 2<<20) // 2 MB
+	req := httptest.NewRequest(http.MethodPost, "/api/query", strings.NewReader(bigBody))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d (oversized body should be rejected)", w.Code, http.StatusBadRequest)
+	}
+}
+
 func TestQueryEndpointBadGateway(t *testing.T) {
 	// Use a port that's not listening to get a connection error.
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
