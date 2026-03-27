@@ -464,6 +464,28 @@ GROUP BY model
 ORDER BY p95_ms DESC
 ```
 
+### Sessions (from hooks + JSONL transcripts)
+
+```sql
+-- List recent sessions with tool counts
+SELECT session_id, agent_source, MIN(ts) AS start_ts, MAX(ts) AS end_ts,
+  SUM(CASE WHEN event_type = 'PreToolUse' THEN 1 ELSE 0 END) AS tool_calls,
+  SUM(CASE WHEN event_type = 'SubagentStart' THEN 1 ELSE 0 END) AS subagents
+FROM tma1_hook_events WHERE ts > NOW() - INTERVAL '24 hours'
+GROUP BY session_id, agent_source ORDER BY MIN(ts) DESC
+
+-- Search conversation content
+SELECT session_id, ts, message_type, content FROM tma1_messages
+WHERE matches_term(content, 'search keyword')
+  AND ts > NOW() - INTERVAL '7 days'
+ORDER BY ts DESC LIMIT 20
+
+-- Session tool breakdown
+SELECT tool_name, COUNT(*) AS calls FROM tma1_hook_events
+WHERE session_id = '<session_id>' AND event_type = 'PreToolUse'
+GROUP BY tool_name ORDER BY calls DESC
+```
+
 ---
 
 ## Step 4: Execute and format

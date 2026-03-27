@@ -95,11 +95,34 @@ Tell the user to set the OTel exporter endpoint. The exact method depends on the
     "OTEL_EXPORTER_OTLP_PROTOCOL": "http/protobuf",
     "OTEL_METRICS_EXPORTER": "otlp",
     "OTEL_LOGS_EXPORTER": "otlp"
+  },
+  "hooks": {
+    "PreToolUse": [
+      { "hooks": [{ "type": "command", "command": "~/.tma1/hooks/tma1-hook.sh", "timeout": 2 }] }
+    ],
+    "PostToolUse": [
+      { "hooks": [{ "type": "command", "command": "~/.tma1/hooks/tma1-hook.sh", "timeout": 2 }] }
+    ],
+    "PostToolUseFailure": [
+      { "hooks": [{ "type": "command", "command": "~/.tma1/hooks/tma1-hook.sh", "timeout": 2 }] }
+    ],
+    "SubagentStart": [
+      { "hooks": [{ "type": "command", "command": "~/.tma1/hooks/tma1-hook.sh", "timeout": 2 }] }
+    ],
+    "SubagentStop": [
+      { "hooks": [{ "type": "command", "command": "~/.tma1/hooks/tma1-hook.sh", "timeout": 2 }] }
+    ],
+    "Notification": [
+      { "hooks": [{ "type": "command", "command": "~/.tma1/hooks/tma1-hook.sh", "timeout": 2 }] }
+    ],
+    "Stop": [
+      { "hooks": [{ "type": "command", "command": "~/.tma1/hooks/tma1-hook.sh", "timeout": 2 }] }
+    ]
   }
 }
 ```
 
-Claude Code exports metrics and logs (not traces). The metrics/logs exporters must be explicitly enabled.
+Claude Code exports metrics and logs (not traces). The metrics/logs exporters must be explicitly enabled. The `hooks` section enables session-level conversation tracking in the Sessions view. If existing hooks are present, merge — do not replace them.
 
 **Codex** — add to `~/.codex/config.toml` (Windows: `%USERPROFILE%\.codex\config.toml`):
 ```toml
@@ -154,7 +177,7 @@ curl -s -X POST http://localhost:14318/api/query \
   -d '{"sql": "SHOW TABLES"}' 2>/dev/null | python3 -m json.tool
 ```
 
-If you see `opentelemetry_logs`, `opentelemetry_traces`, `openclaw_*`, or `claude_code_*` tables, data is flowing.
+If you see `opentelemetry_logs`, `opentelemetry_traces`, `openclaw_*`, `claude_code_*`, or `tma1_hook_events` tables, data is flowing.
 
 ## Handoff
 

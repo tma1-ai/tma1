@@ -36,8 +36,7 @@
         <button data-theme="dark" onclick="setTheme('dark')" title="Dark" data-i18n-title="ui.dark">&#9790;</button>
         <button data-theme="system" onclick="setTheme('system')" title="System" data-i18n-title="ui.system">&#9881;</button>
       </div>
-      <select class="time-select" id="view-select" onchange="switchView(this.value)" style="display:none">
-      </select>
+      <div class="view-tabs" id="view-tabs" style="display:none"></div>
       <select class="time-select" id="time-range" onchange="onTimeRangeChange()">
         <option value="1h" data-i18n="time.1h">Last 1h</option>
         <option value="6h" data-i18n="time.6h">Last 6h</option>
@@ -1132,6 +1131,86 @@
   </div>
   </div><!-- /view-traces -->
 
+  <!-- ========================= SESSIONS VIEW ========================= -->
+  <div id="view-sessions" style="display:none">
+    <div class="cards">
+      <div class="card">
+        <div class="label" data-i18n="sessions.total_sessions">Sessions</div>
+        <div class="value" id="sess-val-total">&mdash;</div>
+      </div>
+      <div class="card">
+        <div class="label" data-i18n="sessions.tool_calls">Tool Calls</div>
+        <div class="value" id="sess-val-tools">&mdash;</div>
+      </div>
+      <div class="card">
+        <div class="label" data-i18n="sessions.subagents">Subagents</div>
+        <div class="value" id="sess-val-subagents">&mdash;</div>
+      </div>
+      <div class="card">
+        <div class="label" data-i18n="sessions.avg_duration">Avg Duration</div>
+        <div class="value" id="sess-val-duration">&mdash;</div>
+      </div>
+    </div>
+
+    <div class="tabs" id="sess-tabs">
+      <button class="tab active" data-sesstab="sess-list" data-i18n="sessions.tab_sessions">Sessions</button>
+      <button class="tab" data-sesstab="sess-search" data-i18n="tab.search">Search</button>
+    </div>
+
+    <div class="tab-content active" id="tab-sess-list">
+      <div class="filters" id="sess-filter-bar">
+        <select class="time-select" id="sess-source-filter" onchange="sessPage=0;sess_loadList()">
+          <option value="" data-i18n="sessions.source_all">All</option>
+          <option value="claude_code" data-i18n="sessions.source_cc">Claude Code</option>
+          <option value="codex" data-i18n="sessions.source_codex">Codex</option>
+        </select>
+        <input class="filter-input" id="sess-keyword-filter" type="text"
+               placeholder="Filter by tool or keyword..."
+               data-i18n-placeholder="sessions.filter_keyword"
+               oninput="sess_debouncedFilter()" style="max-width:240px" />
+        <button class="filter-btn" onclick="AgentCanvas.open('live',{})" style="margin-left:auto" data-i18n="sessions.btn_live_canvas">&#x25B6; Live</button>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th data-i18n="sessions.col_session">Session</th>
+              <th data-i18n="sessions.col_time">Time</th>
+              <th data-i18n="sessions.col_source">Source</th>
+              <th data-i18n="sessions.col_duration">Duration</th>
+              <th data-i18n="sessions.col_tools">Tools</th>
+              <th data-i18n="sessions.col_subagents">Subagents</th>
+              <th data-i18n="sessions.col_cost">Est. Cost</th>
+              <th data-i18n="sessions.col_cwd">Working Dir</th>
+            </tr>
+          </thead>
+          <tbody id="sess-table-body">
+            <tr><td colspan="8" class="loading" data-i18n="empty.loading">Loading...</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="pagination" id="sess-pagination"></div>
+      <div id="sess-detail" style="display:none"></div>
+    </div>
+
+    <div class="tab-content" id="tab-sess-search">
+      <div class="filters">
+        <input class="filter-input" id="sess-search-input" type="text"
+               placeholder="Search conversations..."
+               data-i18n-placeholder="sessions.search_placeholder"
+               onkeydown="if(event.key==='Enter')sess_search()" />
+        <button class="filter-btn primary" onclick="sess_search()" data-i18n="btn.search">Search</button>
+      </div>
+      <div class="search-results" id="sess-search-results"></div>
+    </div>
+  </div><!-- /view-sessions -->
+
+  <!-- Agent Canvas Overlay -->
+  <div id="agent-canvas-overlay" class="ac-overlay" style="display:none">
+    <canvas id="agent-canvas"></canvas>
+    <div id="agent-canvas-controls" class="ac-controls"></div>
+  </div>
+
   <script src="/js/i18n.js"></script>
   <script src="/js/core.js"></script>
   <script src="/js/chart.js"></script>
@@ -1140,6 +1219,8 @@
   <script src="/js/claude-code.js"></script>
   <script src="/js/codex.js"></script>
   <script src="/js/openclaw.js"></script>
+  <script src="/js/sessions.js"></script>
+  <script src="/js/agent-canvas.js"></script>
   <script src="/js/views.js"></script>
 </body>
 </html>

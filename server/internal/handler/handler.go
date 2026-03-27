@@ -13,27 +13,33 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+
+	"github.com/tma1-ai/tma1/server/internal/transcript"
 )
 
 // Server holds shared state for all HTTP handlers.
 type Server struct {
-	greptimeHTTPPort int
-	tma1Port         string
-	logger           *slog.Logger
-	webFS            http.FileSystem
-	httpClient       *http.Client
-	otlpClient       *http.Client
+	greptimeHTTPPort  int
+	tma1Port          string
+	logger            *slog.Logger
+	webFS             http.FileSystem
+	httpClient        *http.Client
+	otlpClient        *http.Client
+	transcriptWatcher *transcript.Watcher
+	hookBroadcast     *hookBroadcaster
 }
 
 // New creates a new Server.
-func New(greptimeHTTPPort int, tma1Port string, webFS http.FileSystem, logger *slog.Logger) *Server {
+func New(greptimeHTTPPort int, tma1Port string, webFS http.FileSystem, logger *slog.Logger, tw *transcript.Watcher) *Server {
 	return &Server{
-		greptimeHTTPPort: greptimeHTTPPort,
-		tma1Port:         tma1Port,
-		logger:           logger,
-		webFS:            webFS,
-		httpClient:       &http.Client{Timeout: 30 * time.Second},
-		otlpClient:       &http.Client{Timeout: 60 * time.Second},
+		greptimeHTTPPort:  greptimeHTTPPort,
+		tma1Port:          tma1Port,
+		logger:            logger,
+		webFS:             webFS,
+		httpClient:        &http.Client{Timeout: 30 * time.Second},
+		otlpClient:        &http.Client{Timeout: 60 * time.Second},
+		transcriptWatcher: tw,
+		hookBroadcast:     newHookBroadcaster(),
 	}
 }
 
@@ -53,6 +59,10 @@ func (s *Server) Router() http.Handler {
 
 	// Prometheus API proxy — browser JS calls this for PromQL queries.
 	r.HandleFunc("/api/prom/*", s.handlePromProxy)
+
+	// Hook events from Claude Code / Codex.
+	r.Post("/api/hooks", s.handleHooks)
+	r.Get("/api/hooks/stream", s.handleHookStream)
 
 	// OTLP proxy — agents send OTel data here; tma1-server injects
 	// the x-greptime-pipeline-name header for trace requests.

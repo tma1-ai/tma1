@@ -80,8 +80,8 @@ TMA1 captures different data depending on the agent:
 
 | Agent | Data path | What it captures |
 | --- | --- | --- |
-| **Claude Code** | OTel metrics + logs | Token usage, cost, active time, tool decisions, API requests, user prompts |
-| **Codex** | OTel logs + traces + metrics | User prompts, LLM calls, tool executions, token usage (separate exporters for logs/traces/metrics) |
+| **Claude Code** | OTel metrics + logs + hooks | Token usage, cost, active time, tool decisions, API requests, user prompts, session conversations |
+| **Codex** | OTel logs + traces + metrics + hooks | User prompts, LLM calls, tool executions, token usage, session conversations |
 | **OpenClaw** | OTel traces + metrics | LLM calls (model, tokens, cache), messages, webhooks, sessions, queue depth |
 | **Other (GenAI SDK)** | OTel traces + logs | Token usage, cost, latency, conversation replay, prompt injection detection (GenAI semantic conventions) |
 
@@ -201,11 +201,36 @@ Add to `~/.claude/settings.json` (Windows: `%USERPROFILE%\.claude\settings.json`
     "OTEL_EXPORTER_OTLP_PROTOCOL": "http/protobuf",
     "OTEL_METRICS_EXPORTER": "otlp",
     "OTEL_LOGS_EXPORTER": "otlp"
+  },
+  "hooks": {
+    "PreToolUse": [
+      { "hooks": [{ "type": "command", "command": "~/.tma1/hooks/tma1-hook.sh", "timeout": 2 }] }
+    ],
+    "PostToolUse": [
+      { "hooks": [{ "type": "command", "command": "~/.tma1/hooks/tma1-hook.sh", "timeout": 2 }] }
+    ],
+    "PostToolUseFailure": [
+      { "hooks": [{ "type": "command", "command": "~/.tma1/hooks/tma1-hook.sh", "timeout": 2 }] }
+    ],
+    "SubagentStart": [
+      { "hooks": [{ "type": "command", "command": "~/.tma1/hooks/tma1-hook.sh", "timeout": 2 }] }
+    ],
+    "SubagentStop": [
+      { "hooks": [{ "type": "command", "command": "~/.tma1/hooks/tma1-hook.sh", "timeout": 2 }] }
+    ],
+    "Notification": [
+      { "hooks": [{ "type": "command", "command": "~/.tma1/hooks/tma1-hook.sh", "timeout": 2 }] }
+    ],
+    "Stop": [
+      { "hooks": [{ "type": "command", "command": "~/.tma1/hooks/tma1-hook.sh", "timeout": 2 }] }
+    ]
   }
 }
 ```
 
 Claude Code exports metrics and logs (not traces). The metrics/logs exporters must be explicitly enabled.
+
+The `hooks` section enables session-level conversation tracking (tool calls, subagent hierarchy, conversation replay) in the Sessions view. The hook script is auto-installed by tma1-server at `~/.tma1/hooks/tma1-hook.sh` (Unix) or `%USERPROFILE%\.tma1\hooks\tma1-hook.ps1` (Windows). On Windows, use `powershell -File %USERPROFILE%\.tma1\hooks\tma1-hook.ps1` as the command. If existing hooks are present, merge — do not replace them.
 
 #### Codex
 
@@ -229,6 +254,8 @@ protocol = "binary"
 ```
 
 Codex uses separate exporters for logs, traces, and metrics. Restart Codex after config changes.
+
+Codex session logs are automatically stored at `~/.codex/sessions/` in JSONL format. TMA1 can parse these for conversation replay in the Sessions view — no additional configuration needed beyond OTel setup above.
 
 #### Any OTel SDK
 
@@ -282,7 +309,7 @@ curl -s -X POST http://localhost:14318/api/query \
   | python3 -m json.tool
 ```
 
-If you see `opentelemetry_logs`, `opentelemetry_traces`, `openclaw_*`, or `claude_code_*` tables, data is flowing.
+If you see `opentelemetry_logs`, `opentelemetry_traces`, `openclaw_*`, `claude_code_*`, or `tma1_hook_events` tables, data is flowing.
 
 ---
 

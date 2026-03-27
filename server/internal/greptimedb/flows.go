@@ -38,6 +38,55 @@ func SetDatabaseTTL(httpPort int, ttl string, logger *slog.Logger) error {
 	return nil
 }
 
+// sessionTableDDLs are created unconditionally on startup (no dependency on trace data).
+// sessionTableDDLs v2: append-only tables with proper indexes.
+// - No PRIMARY KEY: avoids high-cardinality tag penalty (session_id is UUID).
+// - append_mode=true: skips merge/dedup, faster scans for log-like data.
+// - SKIPPING INDEX on session_id: Bloom filter for high-cardinality equality lookups.
+// - INVERTED INDEX on low-cardinality filter columns.
+// - FULLTEXT INDEX on content: accelerates keyword search.
+var sessionTableDDLs = []string{
+	`CREATE TABLE IF NOT EXISTS tma1_hook_events (
+    ts                TIMESTAMP TIME INDEX,
+    session_id        STRING SKIPPING INDEX,
+    event_type        STRING INVERTED INDEX,
+    agent_source      STRING INVERTED INDEX,
+    tool_name         STRING NULL,
+    tool_input        STRING NULL,
+    tool_result       STRING NULL,
+    tool_use_id       STRING NULL,
+    agent_id          STRING NULL,
+    agent_type        STRING NULL,
+    notification_type STRING NULL,
+    "message"         STRING NULL,
+    cwd               STRING NULL,
+    transcript_path   STRING NULL
+) WITH ('append_mode'='true')`,
+	`CREATE TABLE IF NOT EXISTS tma1_messages (
+    ts              TIMESTAMP TIME INDEX,
+    session_id      STRING SKIPPING INDEX,
+    message_type    STRING INVERTED INDEX,
+    "role"          STRING INVERTED INDEX,
+    content         STRING NULL FULLTEXT INDEX WITH (backend='bloom', analyzer='English', case_sensitive='false'),
+    model           STRING NULL INVERTED INDEX,
+    tool_name       STRING NULL,
+    tool_use_id     STRING NULL
+) WITH ('append_mode'='true')`,
+}
+
+// InitSessionTables creates the session tables.
+// Uses append-only mode with proper indexes for optimal performance.
+func InitSessionTables(httpPort int, logger *slog.Logger) error {
+	sqlURL := fmt.Sprintf("http://localhost:%d/v1/sql", httpPort)
+	for _, ddl := range sessionTableDDLs {
+		if err := execSQL(sqlURL, ddl); err != nil {
+			return fmt.Errorf("init session tables: %w", err)
+		}
+	}
+	logger.Info("session tables initialized")
+	return nil
+}
+
 // InitFlows runs the flows.sql DDL against the GreptimeDB HTTP SQL API.
 // It is idempotent (all statements use IF NOT EXISTS).
 // Flow creation (CREATE FLOW) failures are non-fatal — they are logged as warnings

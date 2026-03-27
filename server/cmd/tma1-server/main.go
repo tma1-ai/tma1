@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -15,7 +16,9 @@ import (
 	"github.com/tma1-ai/tma1/server/internal/config"
 	"github.com/tma1-ai/tma1/server/internal/greptimedb"
 	"github.com/tma1-ai/tma1/server/internal/handler"
+	"github.com/tma1-ai/tma1/server/internal/hooks"
 	"github.com/tma1-ai/tma1/server/internal/install"
+	"github.com/tma1-ai/tma1/server/internal/transcript"
 )
 
 // Version is set at build time via -ldflags "-X main.Version=<tag>".
@@ -80,6 +83,11 @@ func main() {
 		logger.Warn("set database TTL warning", "err", err)
 	}
 
+	// Step 3.1: create session tables (hooks + transcript — no dependency on trace data).
+	if err := greptimedb.InitSessionTables(cfg.GreptimeDBHTTPPort, logger); err != nil {
+		logger.Warn("session table creation failed", "err", err)
+	}
+
 	// Step 3.5: check for tma1-server upgrade.
 	// No version file (old == "") covers both fresh install and old-version upgrade;
 	// we cannot distinguish the two, so we always attempt truncate+reseed.
@@ -134,8 +142,28 @@ func main() {
 	defer flowCancel()
 	go initFlowsWithRetry(flowCtx, cfg.GreptimeDBHTTPPort, logger)
 
-	// Step 6: start HTTP server (dashboard + API proxy).
-	srv := handler.New(cfg.GreptimeDBHTTPPort, cfg.Port, webFileSystem(), logger)
+	// Step 6: install hook script + create transcript watcher.
+	portNum := 14318
+	if p, err := parsePort(cfg.Port); err == nil {
+		portNum = p
+	}
+	hookPath, err := hooks.EnsureHookScript(cfg.DataDir, portNum, logger)
+	if err != nil {
+		logger.Warn("hook script install failed", "err", err)
+	} else {
+		logger.Info("hook script ready — configure in ~/.claude/settings.json", "path", hookPath)
+	}
+
+	tw := transcript.NewWatcher(cfg.GreptimeDBHTTPPort, logger)
+	defer tw.StopAll()
+
+	// Start Codex session scanner (discovers ~/.codex/sessions/ JSONL files).
+	codexCtx, codexCancel := context.WithCancel(context.Background())
+	defer codexCancel()
+	go tw.StartCodexScanner(codexCtx)
+
+	// Step 7: start HTTP server (dashboard + API proxy).
+	srv := handler.New(cfg.GreptimeDBHTTPPort, cfg.Port, webFileSystem(), logger, tw)
 	httpSrv := &http.Server{
 		Addr:         cfg.Host + ":" + cfg.Port,
 		Handler:      srv.Router(),
@@ -152,6 +180,8 @@ func main() {
 		logger.Info("received signal, shutting down", "signal", sig)
 
 		flowCancel()
+		codexCancel()
+		tw.StopAll()
 
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
@@ -178,6 +208,10 @@ func readVersionFile(path string) string {
 		return ""
 	}
 	return strings.TrimSpace(string(data))
+}
+
+func parsePort(s string) (int, error) {
+	return strconv.Atoi(s)
 }
 
 func onUpgrade(httpPort int, logger *slog.Logger) error {

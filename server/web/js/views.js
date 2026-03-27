@@ -1,8 +1,8 @@
 // views.js — view management, theme, tab navigation, init
-// Depends on: core.js, chart.js, i18n.js, traces.js, claude-code.js, codex.js
+// Depends on: core.js, chart.js, i18n.js, traces.js, claude-code.js, codex.js, openclaw.js, sessions.js, agent-canvas.js
 // Must be loaded LAST. Calls initViews() at the bottom.
 
-var currentView = null; // 'claude-code', 'codex', 'openclaw', or 'traces'
+var currentView = null; // 'claude-code', 'codex', 'openclaw', 'traces', or 'sessions'
 var autoRefreshTimer = null;
 var refreshInFlight = false;
 var dataSources = {
@@ -14,6 +14,7 @@ var dataSources = {
   hasCodex: false,
   ccMetrics: [],
   codexMetrics: [],
+  hasHookEvents: false,
 };
 
 async function detectDataSources() {
@@ -32,6 +33,7 @@ async function detectDataSources() {
       ccMetrics: tables.filter(function(t) { return t.startsWith('claude_code_'); }),
       codexMetrics: tables.filter(function(t) { return t.startsWith('codex_'); }),
       ocMetrics: tables.filter(function(t) { return t.startsWith('openclaw_'); }),
+      hasHookEvents: tables.includes('tma1_hook_events'),
     };
     result.hasCodex = result.codexMetrics.length > 0;
     result.hasOpenClaw = result.ocMetrics.length > 0;
@@ -109,6 +111,10 @@ function updateHash() {
     var tab3 = document.querySelector('#oc-tabs .tab.active');
     var tabName3 = tab3 ? tab3.dataset.octab : null;
     if (tabName3 && tabName3 !== 'oc-overview') hash += '/' + tabName3;
+  } else if (currentView === 'sessions') {
+    var sessTab = document.querySelector('#sess-tabs .tab.active');
+    var sessTabName = sessTab ? sessTab.dataset.sesstab : null;
+    if (sessTabName && sessTabName !== 'sess-list') hash += '/' + sessTabName;
   } else if (currentView === 'traces') {
     var tab2 = document.querySelector('#view-traces .tab.active');
     var tabName2 = tab2 ? tab2.dataset.tab : null;
@@ -135,9 +141,16 @@ async function switchView(viewId, skipHash) {
   document.getElementById('view-codex').style.display = 'none';
   document.getElementById('view-openclaw').style.display = 'none';
   document.getElementById('view-traces').style.display = 'none';
+  document.getElementById('view-sessions').style.display = 'none';
   document.getElementById('setup-notice').style.display = 'none';
 
   currentView = viewId;
+
+  // Highlight active view tab.
+  document.querySelectorAll('#view-tabs .view-tab').forEach(function(btn) {
+    btn.classList.toggle('active', btn.dataset.view === viewId);
+  });
+
   var viewEl = document.getElementById('view-' + viewId);
   if (viewEl) {
     var hasData = true;
@@ -150,6 +163,9 @@ async function switchView(viewId, skipHash) {
     } else if (viewId === 'openclaw') {
       hasData = await oc_loadCards();
       if (hasData) oc_loadOverview();
+    } else if (viewId === 'sessions') {
+      hasData = await sess_loadCards();
+      if (hasData) sess_loadList();
     } else if (viewId === 'traces') {
       await loadPricing();
       hasData = await loadMetrics();
@@ -168,33 +184,32 @@ async function switchView(viewId, skipHash) {
 async function initViews() {
   dataSources = await detectDataSources();
   var hasCCView = dataSources.hasClaudeLogs || dataSources.ccMetrics.length > 0;
-  var viewSelect = document.getElementById('view-select');
+  var viewTabsEl = document.getElementById('view-tabs');
 
-  viewSelect.innerHTML = '';
+  viewTabsEl.innerHTML = '';
   var views = [];
   if (hasCCView) views.push({ id: 'claude-code', label: 'Claude Code' });
   if (dataSources.hasCodex) views.push({ id: 'codex', label: 'Codex' });
   if (dataSources.hasOpenClaw) views.push({ id: 'openclaw', label: 'OpenClaw' });
   if (dataSources.hasGenAITraces) views.push({ id: 'traces', label: 'OTel GenAI' });
+  if (dataSources.hasHookEvents) views.push({ id: 'sessions', label: 'Sessions' });
 
   if (views.length === 0) {
     document.getElementById('setup-notice').style.display = 'block';
-    viewSelect.style.display = 'none';
+    viewTabsEl.style.display = 'none';
     return;
   }
 
   views.forEach(function(v) {
-    var opt = document.createElement('option');
-    opt.value = v.id;
-    opt.textContent = v.label;
-    viewSelect.appendChild(opt);
+    var btn = document.createElement('button');
+    btn.className = 'view-tab';
+    btn.textContent = v.label;
+    btn.dataset.view = v.id;
+    btn.addEventListener('click', function() { switchView(v.id); });
+    viewTabsEl.appendChild(btn);
   });
 
-  if (views.length > 1) {
-    viewSelect.style.display = '';
-  } else {
-    viewSelect.style.display = 'none';
-  }
+  viewTabsEl.style.display = views.length > 1 ? '' : 'none';
 
   // Restore view + tab + time range from URL hash
   var hash = parseHash();
@@ -204,7 +219,6 @@ async function initViews() {
   }
   var viewIds = views.map(function(v) { return v.id; });
   var targetView = hash.view && viewIds.includes(hash.view) ? hash.view : views[0].id;
-  viewSelect.value = targetView;
   switchView(targetView, true);
 
   // Restore tab within view
@@ -218,6 +232,9 @@ async function initViews() {
     } else if (targetView === 'openclaw') {
       var tabBtn3 = document.querySelector('#oc-tabs .tab[data-octab="' + hash.tab + '"]');
       if (tabBtn3) tabBtn3.click();
+    } else if (targetView === 'sessions') {
+      var tabBtnSess = document.querySelector('#sess-tabs .tab[data-sesstab="' + hash.tab + '"]');
+      if (tabBtnSess) tabBtnSess.click();
     } else if (targetView === 'traces') {
       var tabBtn2 = document.querySelector('#view-traces .tab[data-tab="' + hash.tab + '"]');
       if (tabBtn2) tabBtn2.click();
@@ -280,6 +297,18 @@ function cc_onTabChange(tab) {
   else if (tab === 'cc-cost') cc_loadCostTab();
   else if (tab === 'cc-search') cc_loadAnomalies();
 }
+
+// Tab navigation (Sessions view)
+document.querySelectorAll('#sess-tabs .tab').forEach(function(btn) {
+  btn.addEventListener('click', function() {
+    document.querySelectorAll('#sess-tabs .tab').forEach(function(t) { t.classList.remove('active'); });
+    document.querySelectorAll('#view-sessions .tab-content').forEach(function(t) { t.classList.remove('active'); });
+    btn.classList.add('active');
+    document.getElementById('tab-' + btn.dataset.sesstab).classList.add('active');
+    sess_onTabChange(btn.dataset.sesstab);
+    updateHash();
+  });
+});
 
 // Tab navigation (Codex view)
 document.querySelectorAll('#cdx-tabs .tab').forEach(function(btn) {
@@ -351,6 +380,12 @@ async function refreshCurrentView() {
       var activeCodexTab = document.querySelector('#cdx-tabs .tab.active');
       if (activeCodexTab) cdx_onTabChange(activeCodexTab.dataset.cdxtab);
     }
+  } else if (currentView === 'sessions') {
+    hasData = await sess_loadCards();
+    if (hasData) {
+      var activeSessTab = document.querySelector('#sess-tabs .tab.active');
+      if (activeSessTab) sess_onTabChange(activeSessTab.dataset.sesstab);
+    }
   }
   var viewEl = document.getElementById('view-' + currentView);
   var setupEl = document.getElementById('setup-notice');
@@ -421,6 +456,8 @@ async function checkDataFreshness() {
     return;
   } else if (currentView === 'openclaw') {
     sql = "SELECT MAX(timestamp) AS last_ts FROM opentelemetry_traces WHERE span_name LIKE 'openclaw.%'";
+  } else if (currentView === 'sessions') {
+    sql = "SELECT MAX(ts) AS last_ts FROM tma1_hook_events";
   } else if (currentView === 'traces') {
     var cols = await genai_getTraceColumns();
     sql = "SELECT MAX(timestamp) AS last_ts FROM opentelemetry_traces WHERE " + genaiSpanWhere(cols);
@@ -443,9 +480,10 @@ async function checkDataFreshness() {
 function parseTimestamp(val) {
   if (!val) return NaN;
   if (typeof val === 'number') {
-    if (val > 1e15) return val / 1e6;
-    if (val > 1e12) return val / 1e3;
-    return val;
+    if (val > 1e18) return val / 1e6;  // nanoseconds → ms
+    if (val > 1e15) return val / 1e3;  // microseconds → ms
+    if (val > 1e12) return val;         // milliseconds (already ms)
+    return val * 1000;                  // seconds → ms
   }
   var s = String(val).replace(' ', 'T');
   s = s.replace(/(\.\d{3})\d+/, '$1');

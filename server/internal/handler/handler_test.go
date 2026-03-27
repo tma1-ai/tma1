@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -10,11 +11,12 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 func newTestServer() *Server {
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
-	return New(14000, "14318", http.Dir("."), logger)
+	return New(14000, "14318", http.Dir("."), logger, nil)
 }
 
 func TestHealthEndpoint(t *testing.T) {
@@ -94,7 +96,7 @@ func TestQueryEndpointRequiresSQL(t *testing.T) {
 func TestQueryEndpointBadGateway(t *testing.T) {
 	// Use a port that's not listening to get a connection error.
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
-	srv := New(19999, "14318", http.Dir("."), logger)
+	srv := New(19999, "14318", http.Dir("."), logger, nil)
 	r := srv.Router()
 
 	req := httptest.NewRequest(http.MethodPost, "/api/query",
@@ -128,7 +130,7 @@ func TestPromProxyGETPassesQueryString(t *testing.T) {
 	fmt.Sscanf(port, "%d", &portNum)
 
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
-	srv := New(portNum, "14318", http.Dir("."), logger)
+	srv := New(portNum, "14318", http.Dir("."), logger, nil)
 	router := srv.Router()
 
 	req := httptest.NewRequest(http.MethodGet, "/api/prom/label/__name__/values?match[]=up", nil)
@@ -169,7 +171,7 @@ func TestPromProxyPOSTPassesBody(t *testing.T) {
 	fmt.Sscanf(port, "%d", &portNum)
 
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
-	srv := New(portNum, "14318", http.Dir("."), logger)
+	srv := New(portNum, "14318", http.Dir("."), logger, nil)
 	router := srv.Router()
 
 	req := httptest.NewRequest(http.MethodPost, "/api/prom/query_range",
@@ -196,7 +198,7 @@ func TestPromProxyPassesNon200Status(t *testing.T) {
 	fmt.Sscanf(port, "%d", &portNum)
 
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
-	srv := New(portNum, "14318", http.Dir("."), logger)
+	srv := New(portNum, "14318", http.Dir("."), logger, nil)
 	router := srv.Router()
 
 	req := httptest.NewRequest(http.MethodGet, "/api/prom/query?query=invalid{", nil)
@@ -210,7 +212,7 @@ func TestPromProxyPassesNon200Status(t *testing.T) {
 
 func TestPromProxyBadGateway(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
-	srv := New(19999, "14318", http.Dir("."), logger)
+	srv := New(19999, "14318", http.Dir("."), logger, nil)
 	router := srv.Router()
 
 	req := httptest.NewRequest(http.MethodGet, "/api/prom/query", nil)
@@ -244,7 +246,7 @@ func TestOTLPProxyTraces(t *testing.T) {
 	fmt.Sscanf(port, "%d", &portNum)
 
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
-	srv := New(portNum, "14318", http.Dir("."), logger)
+	srv := New(portNum, "14318", http.Dir("."), logger, nil)
 	router := srv.Router()
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/otlp/v1/traces", strings.NewReader("trace-payload"))
@@ -276,7 +278,7 @@ func TestOTLPProxyMetrics(t *testing.T) {
 	fmt.Sscanf(port, "%d", &portNum)
 
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
-	srv := New(portNum, "14318", http.Dir("."), logger)
+	srv := New(portNum, "14318", http.Dir("."), logger, nil)
 	router := srv.Router()
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/otlp/v1/metrics", strings.NewReader("metrics-payload"))
@@ -307,7 +309,7 @@ func TestOTLPDirectProxyTraces(t *testing.T) {
 	fmt.Sscanf(port, "%d", &portNum)
 
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
-	srv := New(portNum, "14318", http.Dir("."), logger)
+	srv := New(portNum, "14318", http.Dir("."), logger, nil)
 	router := srv.Router()
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/traces", strings.NewReader("trace-payload"))
@@ -338,7 +340,7 @@ func TestOTLPDirectProxyLogs(t *testing.T) {
 	fmt.Sscanf(port, "%d", &portNum)
 
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
-	srv := New(portNum, "14318", http.Dir("."), logger)
+	srv := New(portNum, "14318", http.Dir("."), logger, nil)
 	router := srv.Router()
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/logs", strings.NewReader("log-payload"))
@@ -369,7 +371,7 @@ func TestOTLPDirectProxyMetrics(t *testing.T) {
 	fmt.Sscanf(port, "%d", &portNum)
 
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
-	srv := New(portNum, "14318", http.Dir("."), logger)
+	srv := New(portNum, "14318", http.Dir("."), logger, nil)
 	router := srv.Router()
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/metrics", strings.NewReader("metrics-payload"))
@@ -403,7 +405,7 @@ func TestOTLPProxyPassthrough(t *testing.T) {
 	fmt.Sscanf(port, "%d", &portNum)
 
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
-	srv := New(portNum, "14318", http.Dir("."), logger)
+	srv := New(portNum, "14318", http.Dir("."), logger, nil)
 	router := srv.Router()
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/otlp/v1/logs", strings.NewReader("test-body"))
@@ -422,7 +424,7 @@ func TestOTLPProxyPassthrough(t *testing.T) {
 
 func TestOTLPProxyBadGateway(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
-	srv := New(19999, "14318", http.Dir("."), logger)
+	srv := New(19999, "14318", http.Dir("."), logger, nil)
 	router := srv.Router()
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/otlp/v1/traces", nil)
@@ -437,7 +439,7 @@ func TestOTLPProxyBadGateway(t *testing.T) {
 func TestStatusEndpointDegraded(t *testing.T) {
 	// Use a port that's not listening.
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
-	srv := New(19999, "14318", http.Dir("."), logger)
+	srv := New(19999, "14318", http.Dir("."), logger, nil)
 	r := srv.Router()
 
 	req := httptest.NewRequest(http.MethodGet, "/status", nil)
@@ -454,5 +456,106 @@ func TestStatusEndpointDegraded(t *testing.T) {
 	}
 	if body["status"] != "degraded" {
 		t.Errorf("status = %q, want %q", body["status"], "degraded")
+	}
+}
+
+func TestHooksEndpointValid(t *testing.T) {
+	srv := newTestServer()
+	r := srv.Router()
+
+	payload := `{"session_id":"test-123","hook_event_name":"PreToolUse","tool_name":"Read"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/hooks", strings.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+	// Body must be empty (Claude Code expects no JSON response).
+	if w.Body.Len() != 0 {
+		t.Errorf("body = %q, want empty", w.Body.String())
+	}
+}
+
+func TestHooksEndpointInvalidJSON(t *testing.T) {
+	srv := newTestServer()
+	r := srv.Router()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/hooks", strings.NewReader("not json"))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	// Still returns 200 — never block Claude Code.
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+}
+
+func TestHooksEndpointMissingFields(t *testing.T) {
+	srv := newTestServer()
+	r := srv.Router()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/hooks",
+		strings.NewReader(`{"session_id":"abc"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+}
+
+func TestHookStreamSSE(t *testing.T) {
+	srv := newTestServer()
+	r := srv.Router()
+
+	// Use a cancelable context so the SSE goroutine terminates cleanly.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/hooks/stream", nil)
+	req = req.WithContext(ctx)
+	w := httptest.NewRecorder()
+
+	done := make(chan struct{})
+	go func() {
+		r.ServeHTTP(w, req)
+		close(done)
+	}()
+
+	// Give SSE handler time to subscribe.
+	time.Sleep(50 * time.Millisecond)
+
+	// Broadcast an event.
+	srv.hookBroadcast.Broadcast([]byte(`{"session_id":"s1","hook_event_name":"PreToolUse"}`))
+	time.Sleep(50 * time.Millisecond)
+
+	// Stop the SSE handler.
+	cancel()
+	<-done
+
+	if srv.hookBroadcast == nil {
+		t.Fatal("hookBroadcast is nil")
+	}
+}
+
+func TestHookStreamSessionFilter(t *testing.T) {
+	srv := newTestServer()
+
+	// Subscribe manually to verify filter logic.
+	ch := srv.hookBroadcast.Subscribe()
+	defer srv.hookBroadcast.Unsubscribe(ch)
+
+	srv.hookBroadcast.Broadcast([]byte(`{"session_id":"abc","hook_event_name":"PreToolUse"}`))
+	select {
+	case data := <-ch:
+		if !strings.Contains(string(data), `"session_id":"abc"`) {
+			t.Errorf("unexpected data: %s", string(data))
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("timed out waiting for broadcast")
 	}
 }
