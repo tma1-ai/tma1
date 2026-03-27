@@ -606,8 +606,6 @@ tr.active-trace td { background: var(--bg-hover); }
 .tl-item { display: flex; align-items: flex-start; gap: 8px; padding: 6px 12px; border-radius: 6px; font-size: 13px; line-height: 1.5; }
 .tl-time { color: var(--text-dim); font-size: 11px; min-width: 72px; flex-shrink: 0; font-variant-numeric: tabular-nums; }
 .tl-role { font-weight: 600; min-width: 56px; flex-shrink: 0; font-size: 11px; text-transform: uppercase; letter-spacing: 0.03em; }
-.tl-role-user { color: var(--blue); }
-.tl-role-assistant { color: var(--green); }
 .tl-content { flex: 1; white-space: pre-wrap; word-break: break-word; font-size: 13px; }
 .tl-thinking-content { opacity: 0.5; font-style: italic; font-size: 12px; }
 .tl-tool-name { font-weight: 600; color: var(--blue); }
@@ -634,6 +632,12 @@ tr.active-trace td { background: var(--bg-hover); }
 .tl-tool-card-result { margin-top: 6px; }
 .tl-tool-card-result summary { color: var(--text-dim); font-size: 11px; cursor: pointer; user-select: none; }
 .tl-tool-card-result pre { color: var(--text-dim); font-size: 11px; margin: 4px 0 0; white-space: pre-wrap; word-break: break-word; max-height: 200px; overflow-y: auto; }
+.tl-result-structured { font-size: 12px; }
+.tl-result-field { margin: 4px 0; }
+.tl-result-key { display: inline-block; font-size: 10px; font-weight: 600; color: var(--blue); text-transform: uppercase; letter-spacing: 0.03em; margin-right: 6px; min-width: 40px; }
+.tl-result-field pre { margin: 2px 0 0; padding: 6px 8px; background: rgba(0,0,0,0.15); border-radius: 4px; font-size: 11px; color: var(--text-dim); white-space: pre-wrap; word-break: break-word; max-height: 200px; overflow-y: auto; }
+[data-theme="light"] .tl-result-field pre { background: rgba(0,0,0,0.04); }
+.tl-result-err { color: var(--red) !important; }
 
 /* --- Message items --- */
 .tl-msg-user { background: rgba(240,136,62,0.06); border: 1px solid rgba(240,136,62,0.12); border-radius: 8px; }
@@ -712,14 +716,14 @@ tr.active-trace td { background: var(--bg-hover); }
 .sess-gantt-time-axis { display: flex; justify-content: space-between; padding-left: 80px; font-size: 10px; color: var(--text-dim); margin-top: 4px; font-variant-numeric: tabular-nums; }
 
 /* --- Agent Canvas Overlay --- */
-.ac-overlay { position: fixed; inset: 0; z-index: 9999; background: #0d1117; display: flex; flex-direction: column; }
+.ac-overlay { position: fixed; inset: 0; z-index: 9999; background: #050510; display: flex; flex-direction: column; }
 .ac-overlay canvas { flex: 1; }
-.ac-controls { position: absolute; top: 16px; right: 16px; display: flex; gap: 8px; align-items: center; background: rgba(22,27,34,0.85); backdrop-filter: blur(8px); padding: 6px 14px; border-radius: 8px; border: 1px solid rgba(139,148,158,0.15); color: #e6edf3; font-size: 13px; }
-.ac-controls button, .ac-controls select { background: rgba(22,27,34,0.9); border: 1px solid rgba(139,148,158,0.2); color: #e6edf3; padding: 4px 10px; border-radius: 6px; cursor: pointer; font-size: 12px; }
-.ac-controls button:hover { background: rgba(139,148,158,0.15); }
+.ac-controls { position: absolute; top: 16px; right: 16px; display: flex; gap: 8px; align-items: center; background: rgba(8,12,24,0.75); backdrop-filter: blur(12px); padding: 8px 16px; border-radius: 10px; border: 1px solid rgba(102,204,255,0.12); color: #e6edf3; font-size: 13px; box-shadow: 0 4px 20px rgba(0,0,0,0.4); }
+.ac-controls button, .ac-controls select { background: rgba(8,12,24,0.8); border: 1px solid rgba(102,204,255,0.15); color: #aaeeff; padding: 5px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; transition: all 0.15s; }
+.ac-controls button:hover, .ac-controls select:hover { background: rgba(102,204,255,0.1); border-color: rgba(102,204,255,0.3); }
 .ac-close { font-size: 16px !important; padding: 2px 8px !important; }
-.ac-live-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #3fb950; animation: ac-pulse 1.5s ease-in-out infinite; margin-right: 4px; }
-@keyframes ac-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+.ac-live-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #66ffaa; animation: ac-pulse 1.5s ease-in-out infinite; margin-right: 4px; box-shadow: 0 0 6px rgba(102,255,170,0.5); }
+@keyframes ac-pulse { 0%, 100% { opacity: 1; box-shadow: 0 0 6px rgba(102,255,170,0.5); } 50% { opacity: 0.3; box-shadow: 0 0 2px rgba(102,255,170,0.2); } }
 
 /* --- Responsive --- */
 @media (max-width: 768px) {

@@ -40,8 +40,9 @@ type Watcher struct {
 }
 
 type sessionWatch struct {
-	cancel context.CancelFunc
-	seen   map[string]struct{} // content hashes for dedup
+	cancel  context.CancelFunc
+	seen    map[string]struct{} // content hashes for dedup
+	stopped bool               // true after watcher goroutine exits (can be restarted)
 }
 
 // NewWatcher creates a transcript watcher that writes to the given GreptimeDB instance.

@@ -76,10 +76,20 @@ func (w *Watcher) scanCodexSessions(baseDir string) {
 // "rollout-2026-03-27T18-10-59-019d2ec6-958f-..." → "rollout-2026-03-27T18-10-59"
 // This groups main session + subagent files into one session.
 func codexSessionGroup(baseName string) string {
-	// The timestamp part is "rollout-YYYY-MM-DDTHH-MM-SS" (27 chars).
-	// After that comes a hyphen + UUID.
-	if len(baseName) > 27 && baseName[27] == '-' {
-		return baseName[:27]
+	// Extract timestamp prefix by finding the 3rd hyphen after 'T'.
+	// "rollout-2026-03-27T18-10-59-<uuid>" → "rollout-2026-03-27T18-10-59"
+	tIdx := strings.IndexByte(baseName, 'T')
+	if tIdx == -1 {
+		return baseName
+	}
+	dashCount := 0
+	for i := tIdx + 1; i < len(baseName); i++ {
+		if baseName[i] == '-' {
+			dashCount++
+			if dashCount == 3 {
+				return baseName[:i]
+			}
+		}
 	}
 	return baseName
 }
@@ -88,24 +98,35 @@ func (w *Watcher) watchCodex(watcherKey, sessionID, filePath string) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	if _, ok := w.sessions[watcherKey]; ok {
+	existing, ok := w.sessions[watcherKey]
+	if ok && !existing.stopped {
 		return // already watching this file
 	}
 
+	// Reuse existing seen map to avoid re-inserting previously processed lines.
+	var seen map[string]struct{}
+	if ok && existing.seen != nil {
+		seen = existing.seen
+	} else {
+		seen = make(map[string]struct{})
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
-	sw := &sessionWatch{cancel: cancel, seen: make(map[string]struct{})}
+	sw := &sessionWatch{cancel: cancel, seen: seen}
 	w.sessions[watcherKey] = sw
 
-	go w.tailCodexFile(ctx, watcherKey, sessionID, filePath, sw.seen)
+	go w.tailCodexFile(ctx, watcherKey, sessionID, filePath, seen)
 	w.logger.Info("watching codex session", "session", sessionID, "file", filePath)
 }
 
 // tailCodexFile reads a Codex JSONL session file and inserts events into GreptimeDB.
 func (w *Watcher) tailCodexFile(ctx context.Context, watcherKey, sessionID, filePath string, seen map[string]struct{}) {
-	// Clean up watcher registration on exit so scanner can retry later.
+	// Mark as stopped on exit so scanner can restart with preserved seen map.
 	defer func() {
 		w.mu.Lock()
-		delete(w.sessions, watcherKey)
+		if sw, ok := w.sessions[watcherKey]; ok {
+			sw.stopped = true
+		}
 		w.mu.Unlock()
 	}()
 	var f *os.File
@@ -128,7 +149,7 @@ func (w *Watcher) tailCodexFile(ctx context.Context, watcherKey, sessionID, file
 
 	reader := bufio.NewReader(f)
 	var buf strings.Builder
-	fctx := &codexFileContext{} // populated by session_meta event
+	fctx := &codexFileContext{fileID: watcherKey} // populated by session_meta event
 	idleCount := 0
 	const maxIdlePolls = 600 // 5 minutes at 500ms interval
 	for {
@@ -186,6 +207,7 @@ type codexResponseItem struct {
 
 // codexFileContext tracks per-file agent identity (main vs subagent).
 type codexFileContext struct {
+	fileID    string
 	agentID   string
 	agentType string
 }
@@ -214,9 +236,9 @@ func (w *Watcher) processCodexLine(sessionID, line string, seen map[string]struc
 				Subagent string `json:"subagent"`
 			}
 			if json.Unmarshal(meta.Source, &subSource) == nil && subSource.Subagent != "" {
-				fctx.agentID = subSource.Subagent
+				fctx.agentID = codexSubagentID(fctx.fileID, subSource.Subagent)
 				fctx.agentType = subSource.Subagent
-				w.insertCodexSubagentEvent(sessionID, ts, subSource.Subagent)
+				w.insertCodexSubagentEvent(sessionID, ts, fctx.agentID, fctx.agentType)
 				break
 			}
 		}
@@ -380,7 +402,14 @@ func (w *Watcher) insertCodexSessionStart(sessionID string, ts time.Time, cwd st
 	go w.execSQL(sql)
 }
 
-func (w *Watcher) insertCodexSubagentEvent(sessionID string, ts time.Time, agentType string) {
+func codexSubagentID(fileID, agentType string) string {
+	if fileID != "" {
+		return fileID
+	}
+	return agentType
+}
+
+func (w *Watcher) insertCodexSubagentEvent(sessionID string, ts time.Time, agentID, agentType string) {
 	msTs := ts.UnixMilli()
 	for {
 		prev := lastInsertTS.Load()
@@ -401,7 +430,7 @@ func (w *Watcher) insertCodexSubagentEvent(sessionID string, ts time.Time, agent
 			"VALUES (%d, '%s', 'SubagentStart', 'codex', '', '', '', '', '%s', '%s', '', '', '', '')",
 		msTs,
 		escapeSQLString(sessionID),
-		escapeSQLString(agentType), // agent_id = agentType as identifier
+		escapeSQLString(agentID),
 		escapeSQLString(agentType),
 	)
 	go w.execSQL(sql)

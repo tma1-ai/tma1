@@ -1160,9 +1160,9 @@
     <div class="tab-content active" id="tab-sess-list">
       <div class="filters" id="sess-filter-bar">
         <select class="time-select" id="sess-source-filter" onchange="sessPage=0;sess_loadList()">
-          <option value="">All</option>
-          <option value="claude_code">Claude Code</option>
-          <option value="codex">Codex</option>
+          <option value="" data-i18n="sessions.source_all">All</option>
+          <option value="claude_code" data-i18n="sessions.source_cc">Claude Code</option>
+          <option value="codex" data-i18n="sessions.source_codex">Codex</option>
         </select>
         <input class="filter-input" id="sess-keyword-filter" type="text"
                placeholder="Filter by tool or keyword..."
@@ -1174,7 +1174,7 @@
         <table>
           <thead>
             <tr>
-              <th>Session</th>
+              <th data-i18n="sessions.col_session">Session</th>
               <th data-i18n="sessions.col_time">Time</th>
               <th data-i18n="sessions.col_source">Source</th>
               <th data-i18n="sessions.col_duration">Duration</th>

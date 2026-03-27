@@ -7,8 +7,12 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"time"
 )
+
+// lastHookTS ensures each hook event gets a unique, monotonically increasing timestamp.
+var lastHookTS atomic.Int64
 
 const (
 	maxHookBody    = 1 << 20 // 1 MB
@@ -95,6 +99,17 @@ func (s *Server) handleHooks(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) insertHookEvent(p hookPayload, agentSource, toolInput, toolResult string) {
 	now := time.Now().UnixMilli()
+	for {
+		prev := lastHookTS.Load()
+		next := now
+		if next <= prev {
+			next = prev + 1
+		}
+		if lastHookTS.CompareAndSwap(prev, next) {
+			now = next
+			break
+		}
+	}
 	sql := fmt.Sprintf(
 		"INSERT INTO tma1_hook_events "+
 			"(ts, session_id, event_type, agent_source, tool_name, tool_input, tool_result, "+

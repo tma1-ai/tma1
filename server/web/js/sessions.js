@@ -309,11 +309,12 @@ function sess_computeStats(hookEvents, messages, timeline) {
       stats.toolCount++;
       var tc = item.data;
       stats.gantt.push(tc);
-      // Extract file path.
-      var fp = extractFilePath(tc.tool_name, tc.tool_input);
-      if (fp) {
+      // Extract file paths (may be multiple for apply_patch).
+      var fps = extractAllFilePaths(tc.tool_name, tc.tool_input);
+      for (var fi = 0; fi < fps.length; fi++) {
+        var fp = fps[fi];
         if (!stats.files[fp]) stats.files[fp] = { reads: 0, writes: 0 };
-        if (tc.tool_name === 'Write' || tc.tool_name === 'Edit') stats.files[fp].writes++;
+        if (tc.tool_name === 'Write' || tc.tool_name === 'Edit' || tc.tool_name === 'apply_patch') stats.files[fp].writes++;
         else stats.files[fp].reads++;
       }
       // Tool result tokens for context breakdown.
@@ -371,12 +372,32 @@ function sess_computeStats(hookEvents, messages, timeline) {
 
 function extractFilePath(toolName, inputStr) {
   if (!inputStr) return null;
+  // Claude Code tools.
   try {
     var obj = JSON.parse(inputStr);
     if (toolName === 'Read' || toolName === 'Write' || toolName === 'Edit') return obj.file_path || obj.path || null;
     if (toolName === 'Grep') return obj.path || null;
   } catch (e) { /* not JSON */ }
+  // Codex: apply_patch — extract file path from "*** Update File: /path" lines.
+  if (toolName === 'apply_patch') {
+    var m = inputStr.match(/\*\*\* (?:Update|Add|Delete) File: (.+)/);
+    return m ? m[1].trim() : null;
+  }
   return null;
+}
+
+// Extract ALL file paths from a tool input (for file heatmap — multiple files per apply_patch).
+function extractAllFilePaths(toolName, inputStr) {
+  if (!inputStr) return [];
+  if (toolName === 'apply_patch') {
+    var paths = [];
+    var re = /\*\*\* (?:Update|Add|Delete) File: (.+)/g;
+    var match;
+    while ((match = re.exec(inputStr)) !== null) paths.push(match[1].trim());
+    return paths;
+  }
+  var single = extractFilePath(toolName, inputStr);
+  return single ? [single] : [];
 }
 
 // ── Render Session Detail ──────────────────────────────────────────────
@@ -392,7 +413,7 @@ function renderSessionDetail(timeline, stats) {
 
   // 1. KPI row.
   html += '<div class="sess-detail-kpi">';
-  html += '<div class="sess-kpi"><span class="sess-kpi-label">Session</span><span class="sess-kpi-value" style="font-size:11px;font-family:monospace;word-break:break-all">' + escapeHTML(sessExpandedId || '') + '</span></div>';
+  html += '<div class="sess-kpi"><span class="sess-kpi-label">' + t('sessions.kpi_session') + '</span><span class="sess-kpi-value" style="font-size:11px;font-family:monospace;word-break:break-all">' + escapeHTML(sessExpandedId || '') + '</span></div>';
   html += '<div class="sess-kpi"><span class="sess-kpi-label">' + t('sessions.kpi_duration') + '</span><span class="sess-kpi-value">' + fmtDurSec(stats.duration) + '</span></div>';
   html += '<div class="sess-kpi"><span class="sess-kpi-label">' + t('sessions.kpi_tools') + '</span><span class="sess-kpi-value">' + stats.toolCount + '</span></div>';
   var costLabel = stats.costSource === 'otel' ? t('sessions.kpi_cost') : t('sessions.kpi_cost') + ' ~';
@@ -528,16 +549,16 @@ function sess_renderAgentTree(agents, agentToolCounts) {
   var html = '<details class="sess-section">';
   html += '<summary>' + t('sessions.agent_hierarchy') + ' (' + (agents.length + 1) + ')</summary>';
   html += '<div class="sess-agent-tree">';
-  html += '<div class="sess-agent-node"><span class="sess-agent-icon">\u25B6</span><span class="sess-agent-type">main</span>';
-  html += '<span class="sess-agent-tools">' + mainTools + ' tools</span></div>';
+  html += '<div class="sess-agent-node"><span class="sess-agent-icon">\u25B6</span><span class="sess-agent-type">' + t('sessions.agent_main') + '</span>';
+  html += '<span class="sess-agent-tools">' + mainTools + ' ' + t('sessions.tools_suffix') + '</span></div>';
   if (agents.length > 0) {
     html += '<div class="sess-agent-children">';
     for (var i = 0; i < agents.length; i++) {
       var a = agents[i];
       var aTools = agentToolCounts[a.agent_id] || 0;
       html += '<div class="sess-agent-node"><span class="sess-agent-icon">\u25B6</span>';
-      html += '<span class="sess-agent-type">' + escapeHTML(a.agent_type || 'subagent') + '</span>';
-      html += '<span class="sess-agent-tools">' + aTools + ' tools';
+      html += '<span class="sess-agent-type">' + escapeHTML(a.agent_type || t('canvas.subagent')) + '</span>';
+      html += '<span class="sess-agent-tools">' + aTools + ' ' + t('sessions.tools_suffix');
       if (a.agent_id) html += ' \u00B7 ' + escapeHTML(a.agent_id.slice(0, 8));
       html += '</span></div>';
     }
@@ -658,7 +679,6 @@ function renderToolPair(tc, ts) {
   var statusIcon = tc.failed ? '\u2717' : '\u2713';
   var result = tc.tool_result || '';
   var argsSummary = summarizeToolArgs(tc.tool_name, tc.tool_input);
-  if (result.length > 300) result = result.slice(0, 300) + '\u2026';
 
   var html = '<div class="tl-tool-card ' + statusClass + '">';
   html += '<div class="tl-tool-card-header">';
@@ -670,10 +690,59 @@ function renderToolPair(tc, ts) {
   if (argsSummary) html += '<div class="tl-tool-card-args">' + escapeHTML(argsSummary) + '</div>';
   if (result) {
     html += '<details class="tl-tool-card-result"><summary>' + t('sessions.result') + '</summary>';
-    html += '<pre>' + escapeHTML(result) + '</pre></details>';
+    html += formatToolResult(tc.tool_name, result);
+    html += '</details>';
   }
   html += '</div>';
   return html;
+}
+
+function formatToolResult(toolName, result) {
+  if (!result) return '';
+  // Try parsing as JSON for structured display.
+  try {
+    var obj = JSON.parse(result);
+    if (typeof obj !== 'object' || obj === null) throw new Error('not an object');
+    return '<div class="tl-result-structured">' + formatResultObj(toolName, obj) + '</div>';
+  } catch (e) {
+    // Not JSON — show as plain text.
+    var text = result.length > 2000 ? result.slice(0, 2000) + '\u2026' : result;
+    return '<pre>' + escapeHTML(text) + '</pre>';
+  }
+}
+
+function formatResultObj(toolName, obj) {
+  var html = '';
+  // Bash: show stdout/stderr.
+  if (obj.stdout != null || obj.stderr != null) {
+    if (obj.stdout) html += '<div class="tl-result-field"><span class="tl-result-key">stdout</span><pre>' + escapeHTML(truncResultText(obj.stdout)) + '</pre></div>';
+    if (obj.stderr) html += '<div class="tl-result-field"><span class="tl-result-key">stderr</span><pre class="tl-result-err">' + escapeHTML(truncResultText(obj.stderr)) + '</pre></div>';
+    if (!html) html = '<div class="tl-result-field"><span class="tl-result-key">stdout</span><pre>' + t('sessions.no_data_result') + '</pre></div>';
+    return html;
+  }
+  // Read: show file content snippet.
+  if (obj.file && obj.file.content != null) {
+    html += '<div class="tl-result-field"><span class="tl-result-key">content</span><pre>' + escapeHTML(truncResultText(obj.file.content)) + '</pre></div>';
+    return html;
+  }
+  // Edit: show filePath + newString preview.
+  if (obj.filePath) {
+    html += '<div class="tl-result-field"><span class="tl-result-key">file</span> ' + escapeHTML(obj.filePath) + '</div>';
+    if (obj.newString) html += '<div class="tl-result-field"><span class="tl-result-key">new</span><pre>' + escapeHTML(truncResultText(obj.newString)) + '</pre></div>';
+    return html;
+  }
+  // Codex exec_command output.
+  if (obj.output != null) {
+    html += '<div class="tl-result-field"><span class="tl-result-key">output</span><pre>' + escapeHTML(truncResultText(typeof obj.output === 'string' ? obj.output : JSON.stringify(obj.output))) + '</pre></div>';
+    return html;
+  }
+  // Generic: pretty-print JSON.
+  var pretty = JSON.stringify(obj, null, 2);
+  return '<pre>' + escapeHTML(truncResultText(pretty)) + '</pre>';
+}
+
+function truncResultText(s) {
+  return s.length > 2000 ? s.slice(0, 2000) + '\u2026' : s;
 }
 
 function summarizeToolArgs(toolName, argsStr) {
