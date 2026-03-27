@@ -230,7 +230,7 @@ Add to `~/.claude/settings.json` (Windows: `%USERPROFILE%\.claude\settings.json`
 
 Claude Code exports metrics and logs (not traces). The metrics/logs exporters must be explicitly enabled.
 
-The `hooks` section enables session-level conversation tracking (tool calls, subagent hierarchy, conversation replay) in the Sessions view. The hook script is auto-installed by tma1-server at `~/.tma1/hooks/tma1-hook.sh`. If existing hooks are present, merge — do not replace them.
+The `hooks` section enables session-level conversation tracking (tool calls, subagent hierarchy, conversation replay) in the Sessions view. The hook script is auto-installed by tma1-server at `~/.tma1/hooks/tma1-hook.sh` (Unix) or `%USERPROFILE%\.tma1\hooks\tma1-hook.ps1` (Windows). On Windows, use `powershell -File %USERPROFILE%\.tma1\hooks\tma1-hook.ps1` as the command. If existing hooks are present, merge — do not replace them.
 
 #### Codex
 

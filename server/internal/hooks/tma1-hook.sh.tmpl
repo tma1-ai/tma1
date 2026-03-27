@@ -1,0 +1,5 @@
+#!/bin/bash
+# TMA1 hook — forward Claude Code / Codex events to tma1-server.
+# Reads JSON from stdin, POSTs to localhost. Exits silently on failure.
+curl -s -m 2 -X POST -H 'Content-Type: application/json' \
+  -d @- "http://127.0.0.1:{{PORT}}/api/hooks" </dev/stdin >/dev/null 2>&1 || true

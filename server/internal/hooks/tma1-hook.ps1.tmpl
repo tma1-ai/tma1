@@ -1,0 +1,7 @@
+# TMA1 hook — forward Claude Code / Codex events to tma1-server.
+# Reads JSON from stdin, POSTs to localhost. Exits silently on failure.
+$ErrorActionPreference = 'SilentlyContinue'
+$body = [Console]::In.ReadToEnd()
+try {
+    Invoke-WebRequest -Uri 'http://127.0.0.1:{{PORT}}/api/hooks' -Method POST -ContentType 'application/json' -Body $body -TimeoutSec 2 | Out-Null
+} catch {}

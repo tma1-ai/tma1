@@ -49,8 +49,17 @@ jobs:
       - name: Lint install.sh
         run: shellcheck site/public/install.sh
 
-      - name: Lint install.ps1
+      - name: Lint hook script (bash)
+        run: |
+          # Template uses {{PORT}} placeholder — replace for shellcheck validation.
+          sed 's/{{PORT}}/14318/g' server/internal/hooks/tma1-hook.sh.tmpl > /tmp/tma1-hook.sh
+          shellcheck /tmp/tma1-hook.sh
+
+      - name: Lint install.ps1 + hook script (PowerShell)
         shell: pwsh
         run: |
           Install-Module -Name PSScriptAnalyzer -Force -Scope CurrentUser
           Invoke-ScriptAnalyzer -Path site/public/install.ps1 -EnableExit -Severity Error
+          # Template uses {{PORT}} placeholder — replace for PSScriptAnalyzer validation.
+          (Get-Content server/internal/hooks/tma1-hook.ps1.tmpl) -replace '\{\{PORT\}\}', '14318' | Set-Content $env:TEMP/tma1-hook.ps1
+          Invoke-ScriptAnalyzer -Path $env:TEMP/tma1-hook.ps1 -EnableExit -Severity Error

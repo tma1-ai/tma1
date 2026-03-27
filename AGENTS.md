@@ -26,8 +26,10 @@ Tagline: *"Your agent runs. TMA1 remembers."*
 | `server/internal/config/` | Env var config loading |
 | `server/internal/install/` | Download and verify GreptimeDB binary |
 | `server/internal/greptimedb/` | Start, stop, health-check GreptimeDB process + Flow init |
-| `server/internal/handler/` | HTTP handlers: /health, /status, /api/query, /v1/otlp/*, dashboard UI |
-| `server/web/` | Embedded dashboard (HTML + JS + CSS via embed.FS), 4 views: Claude Code, Codex, OpenClaw, OTel GenAI |
+| `server/internal/handler/` | HTTP handlers: /health, /status, /api/query, /api/hooks, /api/hooks/stream (SSE), /v1/otlp/*, dashboard UI |
+| `server/internal/hooks/` | Hook script installer for Claude Code integration |
+| `server/internal/transcript/` | JSONL transcript watcher (Claude Code) + Codex session log parser |
+| `server/web/` | Embedded dashboard (HTML + JS + CSS via embed.FS), 5 views: Claude Code, Codex, OpenClaw, OTel GenAI, Sessions + Agent Canvas |
 | `site/` | Astro landing page → GitHub Pages → tma1.ai |
 | `.claude-plugin/` | Claude Code Marketplace registration |
 | `claude-plugin/` | Claude Code plugin: skills for setup + inline queries |
@@ -38,29 +40,38 @@ Tagline: *"Your agent runs. TMA1 remembers."*
 ```
 Agent (Claude Code / Codex / OpenClaw / any GenAI app)
     │  OTLP/HTTP → http://localhost:14318/v1/otlp
+    │  Hook events → http://localhost:14318/api/hooks (Claude Code)
+    │  JSONL transcripts → ~/.claude/projects/ (CC) / ~/.codex/sessions/ (Codex)
     ▼
 tma1-server  port 14318
     │  reverse-proxies OTLP to GreptimeDB
     │  auto-injects x-greptime-pipeline-name for trace requests
+    │  receives hook events → tma1_hook_events + SSE broadcast
+    │  watches JSONL transcripts → tma1_messages
     ▼
 GreptimeDB  (managed by tma1-server)
     │  Flow engine → tma1_*_1m aggregation tables
     │  HTTP SQL API  port 14000
     ▼
 Browser dashboard (served by tma1-server)
-    ├── Claude Code view: Overview, Events, Cost, Search (from OTel metrics + logs)
+    ├── Claude Code view: Overview, Sessions, Tools, Cost, Search (from OTel metrics + logs)
     ├── Codex view: Overview, Events, Cost, Search (from OTel logs with scope_name codex_*)
     ├── OpenClaw view: Overview, Traces, Cost, Search (from openclaw.* trace attrs)
-    └── OTel GenAI view: Overview, Traces, Cost, Security, Search (from gen_ai.* trace attrs)
+    ├── OTel GenAI view: Overview, Traces, Cost, Security, Search (from gen_ai.* trace attrs)
+    └── Sessions view: Session list, detail timeline, file heatmap, agent hierarchy, gantt, canvas animation
+        ├── Replay mode: replay past sessions as agent orchestration animation
+        └── Live mode: real-time SSE streaming of hook events → canvas visualization
 ```
 
 OTel data goes through tma1-server's OTLP proxy (`/v1/otlp/*`), which forwards to GreptimeDB (port 14000) and auto-injects the `x-greptime-pipeline-name: greptime_trace_v1` header for trace requests. Agents should send OTLP to `http://localhost:14318/v1/otlp`.
 
+Hook events from Claude Code arrive via `POST /api/hooks` (configured in `~/.claude/settings.json`). The hook script is auto-installed at `~/.tma1/hooks/tma1-hook.sh`. Codex session logs are auto-discovered from `~/.codex/sessions/` without any hook configuration.
+
 ## Data sources
 
-Four data paths, depending on the agent:
+Five data paths, depending on the agent:
 
-**Claude Code** → OTel metrics + logs (no traces):
+**Claude Code** → OTel metrics + logs + hooks + JSONL transcripts:
 
 | Table | Type | Content |
 |-------|------|---------|
@@ -74,7 +85,9 @@ Four data paths, depending on the agent:
 
 Log attributes are JSON. Use `json_get_string()`, `json_get_int()`, `json_get_float()` to extract fields (GreptimeDB does not support `->` / `->>`). Keys with dots (e.g., `session.id`) are interpreted as nested paths and cannot be extracted.
 
-**Codex** → OTel logs + metrics (no traces):
+Additionally, Claude Code hooks (configured in `~/.claude/settings.json`) send tool call events to `/api/hooks`, stored in `tma1_hook_events`. The JSONL transcript at `~/.claude/projects/<encoded>/<session>.jsonl` is watched for conversation content, stored in `tma1_messages`.
+
+**Codex** → OTel logs + metrics + JSONL session logs:
 
 | Table | Type | Content |
 |-------|------|---------|
@@ -83,6 +96,8 @@ Log attributes are JSON. Use `json_get_string()`, `json_get_int()`, `json_get_fl
 | Other `codex_*` tables | Metrics | Various counters/histograms auto-created from OTel metrics |
 
 Codex logs use `scope_name` (not `body`) as the event discriminator. Extract fields via `json_get_string(log_attributes, 'model')`, `json_get_int(log_attributes, 'input_token_count')`, etc.
+
+Additionally, Codex session logs at `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` are auto-discovered and parsed by tma1-server. Tool calls, messages, and subagent hierarchy are extracted and stored in `tma1_hook_events` and `tma1_messages` (agent_source = 'codex'). No hook configuration needed.
 
 **OpenClaw** → OTel traces + metrics:
 
@@ -123,6 +138,15 @@ Key trace columns: `span_attributes.openclaw.{model,channel,provider,sessionKey,
 
 Source columns use GenAI semantic conventions:
 `span_attributes.gen_ai.request.model`, `span_attributes.gen_ai.usage.input_tokens`, etc.
+
+## Session tables (from hooks + JSONL transcripts)
+
+2 tables for session-level conversation tracking, created by `InitSessionTables()` on startup:
+
+| Table | Content |
+|-------|---------|
+| `tma1_hook_events` | Tool calls, subagent lifecycle, session events (from CC hooks + Codex JSONL parsing). append-only, SKIPPING INDEX on session_id, INVERTED INDEX on event_type/agent_source. |
+| `tma1_messages` | Conversation content: user/assistant/thinking messages, tool_use/tool_result (from JSONL transcripts). append-only, FULLTEXT INDEX on content for keyword search via `matches_term()`. |
 
 ## Commands
 
@@ -185,7 +209,14 @@ On first start, tma1 writes a default GreptimeDB config to `~/.tma1/config/stand
 | Flow SQL (aggregations) | `server/internal/greptimedb/flows.sql` |
 | Flow init logic | `server/internal/greptimedb/flows.go` |
 | HTTP routes | `server/internal/handler/handler.go` |
+| Hook event handler | `server/internal/handler/hooks.go` |
+| SSE streaming + broadcast | `server/internal/handler/sse.go`, `broadcast.go` |
+| Hook script installer | `server/internal/hooks/hooks.go` |
+| Transcript watcher (CC JSONL) | `server/internal/transcript/watcher.go` |
+| Codex session parser | `server/internal/transcript/codex.go` |
 | Dashboard UI | `server/web/index.html` |
+| Sessions view JS | `server/web/js/sessions.js` |
+| Agent Canvas animation | `server/web/js/agent-canvas.js` |
 | Codex view JS | `server/web/js/codex.js` |
 | OpenClaw view JS | `server/web/js/openclaw.js` |
 | Embedded FS declaration | `server/web/web.go` |
