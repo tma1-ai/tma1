@@ -1,6 +1,7 @@
 package greptimedb
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -9,7 +10,7 @@ func TestSplitSQL(t *testing.T) {
 	tests := []struct {
 		name  string
 		input string
-		want  int    // expected number of statements
+		want  int                   // expected number of statements
 		check func([]string) string // optional: return error message
 	}{
 		{
@@ -48,7 +49,7 @@ CREATE TABLE bar (id INT);
 			want: 2,
 		},
 		{
-			name: "statements without trailing newline",
+			name:  "statements without trailing newline",
 			input: "SELECT 1;\nSELECT 2;",
 			want:  2,
 		},
@@ -215,5 +216,26 @@ func TestDefaultPricing(t *testing.T) {
 		if p.OutputPrice <= 0 {
 			t.Errorf("pattern %s: output_price should be > 0", p.Pattern)
 		}
+	}
+}
+
+func TestIsIgnorableSchemaUpgradeError(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "nil", err: nil, want: false},
+		{name: "already exists", err: fmt.Errorf("column conversation_id already exists"), want: true},
+		{name: "duplicate", err: fmt.Errorf("duplicate column name"), want: true},
+		{name: "real failure", err: fmt.Errorf("HTTP 500: connection refused"), want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isIgnorableSchemaUpgradeError(tt.err); got != tt.want {
+				t.Fatalf("isIgnorableSchemaUpgradeError(%v) = %v, want %v", tt.err, got, tt.want)
+			}
+		})
 	}
 }

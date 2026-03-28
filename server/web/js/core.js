@@ -5,12 +5,12 @@ var API = '/api/query';
 var currentTimeRange = '24h';
 
 function intervalSQL() {
-  var m = { '1h': '1 hour', '6h': '6 hours', '24h': '1 day', '7d': '7 days', '30d': '30 days' };
+  var m = { '15m': '15 minutes', '30m': '30 minutes', '1h': '1 hour', '6h': '6 hours', '24h': '1 day', '7d': '7 days', '30d': '30 days' };
   return m[currentTimeRange] || '1 day';
 }
 
 function chartBucket() {
-  var m = { '1h': '5 minutes', '6h': '5 minutes', '24h': '5 minutes', '7d': '15 minutes', '30d': '1 hour' };
+  var m = { '15m': '1 minute', '30m': '1 minute', '1h': '5 minutes', '6h': '5 minutes', '24h': '5 minutes', '7d': '15 minutes', '30d': '1 hour' };
   return m[currentTimeRange] || '5 minutes';
 }
 

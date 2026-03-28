@@ -1,5 +1,5 @@
-/* Sessions view — session list, conversation timeline, search. */
-/* globals: query, rows, rowsToObjects, intervalSQL, fmtNum, fmtCost, escapeHTML, escapeJSString, escapeSQLString, tsToMs, t, loadPricing, modelPricing */
+/* Sessions view — session list, conversation timeline, search, full-screen detail overlay. */
+/* globals: query, rows, rowsToObjects, intervalSQL, fmtNum, fmtCost, escapeHTML, escapeJSString, escapeSQLString, tsToMs, t, loadPricing, modelPricing, AgentCanvas */
 
 var sessFilterTimer = null;
 function sess_debouncedFilter() {
@@ -43,15 +43,19 @@ async function sess_loadCards() {
   if (total > 0) {
     try {
       var dRes = await query(
-        "SELECT AVG(dur) AS v FROM (" +
-        "  SELECT (MAX(ts) - MIN(ts)) / 1000 AS dur FROM tma1_hook_events" +
-        "  WHERE ts > NOW() - INTERVAL '" + iv + "'" +
-        "  GROUP BY session_id" +
-        ") sub"
+        "SELECT MIN(ts) AS start_ts, MAX(ts) AS end_ts FROM tma1_hook_events" +
+        " WHERE ts > NOW() - INTERVAL '" + iv + "' GROUP BY session_id"
       );
-      var dr = rows(dRes);
-      if (dr.length && dr[0][0] != null) {
-        document.getElementById('sess-val-duration').textContent = fmtDurSec(Number(dr[0][0]));
+      var dRows = rowsToObjects(dRes);
+      if (dRows.length > 0) {
+        var sumSec = 0, count = 0;
+        for (var di = 0; di < dRows.length; di++) {
+          var s = tsToMs(dRows[di].start_ts), e = tsToMs(dRows[di].end_ts);
+          if (s && e && e > s) { sumSec += (e - s) / 1000; count++; }
+        }
+        if (count > 0) {
+          document.getElementById('sess-val-duration').textContent = fmtDurSec(sumSec / count);
+        }
       }
     } catch (e) { /* ignore */ }
   }
@@ -129,7 +133,6 @@ async function sess_loadList() {
   var tbody = document.getElementById('sess-table-body');
   if (!data.length) {
     tbody.innerHTML = '<tr><td colspan="8" class="loading">' + t('empty.no_data') + '</td></tr>';
-    document.getElementById('sess-detail').style.display = 'none';
     renderSessPagination();
     return;
   }
@@ -143,13 +146,14 @@ async function sess_loadList() {
     var durSec = (endMs && startMs) ? (endMs - startMs) / 1000 : 0;
     var cwd = d.cwd || '';
     var shortCwd = cwd.length > 40 ? '\u2026' + cwd.slice(-39) : cwd;
-    var sourceBadge = (d.agent_source === 'codex')
+    var agentSrc = d.agent_source || '';
+    var sourceBadge = (agentSrc === 'codex')
       ? '<span class="badge badge-codex">Codex</span>'
       : '<span class="badge badge-cc">CC</span>';
     var costStr = costMap[sid] != null ? fmtCost(costMap[sid]) : '\u2014';
 
     var shortSid = sid.length > 8 ? sid.slice(0, 8) : sid;
-    html += '<tr class="sess-row clickable" onclick="sess_toggleDetail(\x27' + escapeJSString(sid) + '\x27)">';
+    html += '<tr class="sess-row clickable" onclick="sess_openDetail(\x27' + escapeJSString(sid) + '\x27,\x27' + escapeJSString(agentSrc) + '\x27)">';
     html += '<td><code title="' + escapeHTML(sid) + '" style="font-size:11px;color:var(--text-dim)">' + escapeHTML(shortSid) + '</code></td>';
     html += '<td>' + (startMs ? new Date(startMs).toLocaleString() : '\u2014') + '</td>';
     html += '<td>' + sourceBadge + '</td>';
@@ -165,7 +169,6 @@ async function sess_loadList() {
 }
 
 function sess_lookupPrice(model) {
-  // modelPricing from core.js uses keys: { p: pattern, i: inputPrice, o: outputPrice }
   if (!model || !modelPricing || !modelPricing.length) return { input: 3, output: 15 };
   for (var i = 0; i < modelPricing.length; i++) {
     if (model.indexOf(modelPricing[i].p) !== -1) {
@@ -185,28 +188,54 @@ function renderSessPagination() {
   el.innerHTML = html;
 }
 
-// ── Session Detail ─────────────────────────────────────────────────────
+// ── Session Detail Overlay ────────────────────────────────────────────
 
-function sess_toggleDetail(sessionId) {
-  var detail = document.getElementById('sess-detail');
-  if (sessExpandedId === sessionId) {
-    sessExpandedId = null;
-    detail.style.display = 'none';
-    detail.innerHTML = '';
-    return;
-  }
-  sessExpandedId = sessionId;
-  detail.style.display = 'block';
-  detail.innerHTML = '<div class="loading">' + t('empty.loading') + '</div>';
-  sess_loadDetail(sessionId);
+function sess_escHandler(e) {
+  if (e.key === 'Escape') sess_closeDetail();
 }
 
-async function sess_loadDetail(sessionId) {
+var sessTargetTs = 0;          // timestamp (ms) for timeline scroll
+var sessApiCallFP = '';        // fingerprint string for API call highlight (e.g. "3,1035,698172" or nanosecond ts)
+
+function sess_openDetail(sessionId, agentSource, targetTs, apiCallFP) {
+  sessExpandedId = sessionId;
+  sessTargetTs = targetTs || 0;
+  sessApiCallFP = apiCallFP || '';
+  var overlay = document.getElementById('sess-detail-overlay');
+  var content = document.getElementById('sess-detail-content');
+  content.innerHTML = '<div class="loading" style="padding:40px;text-align:center">' + t('empty.loading') + '</div>';
+  overlay.style.display = 'flex';
+  document.addEventListener('keydown', sess_escHandler);
+  sess_loadDetail(sessionId, agentSource || '');
+}
+
+function sess_closeDetail() {
+  sessExpandedId = null;
+  sessTimelineData = [];
+  sessCurrentStats = null;
+  var overlay = document.getElementById('sess-detail-overlay');
+  overlay.style.display = 'none';
+  document.getElementById('sess-detail-content').innerHTML = '';
+  document.removeEventListener('keydown', sess_escHandler);
+}
+
+function sess_toggleErrors() {
+  var panel = document.getElementById('sess-error-panel');
+  if (panel) panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+}
+
+// ── Load Detail Data ──────────────────────────────────────────────────
+
+async function sess_loadDetail(sessionId, agentSource) {
   var sid = escapeSQLString(sessionId);
+
+  // Phase 1: hook events + messages (always available).
   var results = await Promise.all([
     query(
       "SELECT ts, event_type, tool_name, tool_input, tool_result, " +
-      "tool_use_id, agent_id, agent_type, notification_type, \"message\" " +
+      "tool_use_id, agent_id, agent_type, notification_type, \"message\", " +
+      "conversation_id, " +
+      "agent_source " +
       "FROM tma1_hook_events WHERE session_id = '" + sid + "' ORDER BY ts ASC"
     ),
     query(
@@ -217,6 +246,11 @@ async function sess_loadDetail(sessionId) {
 
   var hookEvents = rowsToObjects(results[0]);
   var messages = results[1] ? rowsToObjects(results[1]) : [];
+
+  // Determine agent source if not provided.
+  if (!agentSource && hookEvents.length > 0) {
+    agentSource = hookEvents[0].agent_source || '';
+  }
 
   // Pair PreToolUse + PostToolUse.
   var pendingTools = {};
@@ -259,47 +293,182 @@ async function sess_loadDetail(sessionId) {
     if ((msg.message_type === 'tool_use' || msg.message_type === 'tool_result') && msg.tool_use_id && pairedIds[msg.tool_use_id]) continue;
     timeline.push({ source: 'message', ts: tsToMs(msg.ts), data: msg });
   }
-  timeline.sort(function (a, b) { return a.ts - b.ts; });
+  timeline.sort(function(a, b) { return a.ts - b.ts; });
 
   sessTimelineData = timeline;
   await loadPricing();
-  sessCurrentStats = sess_computeStats(hookEvents, messages, timeline);
 
-  // Try to get actual cost from OTel logs (more accurate than content-length estimate).
-  if (timeline.length > 0) try {
-    var costRes = await query(
-      "SELECT ROUND(SUM(json_get_float(log_attributes, 'cost_usd')), 4) AS cost " +
-      "FROM opentelemetry_logs WHERE body = 'claude_code.api_request' " +
-      "AND timestamp BETWEEN " +
-      "'" + new Date(timeline[0].ts).toISOString() + "'::TIMESTAMP " +
-      "AND '" + new Date(timeline[timeline.length - 1].ts + 60000).toISOString() + "'::TIMESTAMP"
-    );
-    var cr = rows(costRes);
-    if (cr.length && cr[0][0] != null && Number(cr[0][0]) > 0) {
-      sessCurrentStats.cost = Number(cr[0][0]);
-      sessCurrentStats.costSource = 'otel';
-    }
-  } catch (e) { /* OTel logs not available, use estimate */ }
+  // Phase 2: API call enrichment data.
+  var apiCalls = [];
+  var apiErrors = [];
+  if (timeline.length > 0) {
+    try {
+      if (agentSource === 'codex') {
+        var conversationIds = sess_collectConversationIds(hookEvents);
+        // Codex: API calls from OTel logs (JSONL has no usage data).
+        var startISO = new Date(timeline[0].ts).toISOString();
+        var endISO = new Date(timeline[timeline.length - 1].ts + 60000).toISOString();
+        var tsBetween = "timestamp BETWEEN '" + startISO + "'::TIMESTAMP AND '" + endISO + "'::TIMESTAMP";
+        var cdxRes = await query(
+          "SELECT timestamp, log_attributes FROM opentelemetry_logs " +
+          "WHERE scope_name LIKE 'codex_%' " +
+          "AND json_get_int(log_attributes, 'input_token_count') IS NOT NULL " +
+          "AND " + tsBetween + " ORDER BY timestamp ASC"
+        ).catch(function() { return null; });
+        if (cdxRes) apiCalls = sess_parseCodexOTel(rowsToObjects(cdxRes), conversationIds);
+      } else {
+        // CC: API calls from OTel (reliable, no context compression duplicates).
+        // JSONL messages have usage but context compression replays inflate the count.
+        if (timeline.length > 0) {
+          var ccStart = new Date(timeline[0].ts).toISOString();
+          var ccEnd = new Date(timeline[timeline.length - 1].ts + 60000).toISOString();
+          var ccBetween = "timestamp BETWEEN '" + ccStart + "'::TIMESTAMP AND '" + ccEnd + "'::TIMESTAMP";
+          var ccResults = await Promise.all([
+            query(
+              "SELECT timestamp, log_attributes FROM opentelemetry_logs " +
+              "WHERE body = 'claude_code.api_request' " +
+              "AND " + ccBetween + " ORDER BY timestamp ASC"
+            ).catch(function() { return null; }),
+            query(
+              "SELECT timestamp, log_attributes FROM opentelemetry_logs " +
+              "WHERE body = 'claude_code.api_error' " +
+              "AND " + ccBetween + " ORDER BY timestamp ASC"
+            ).catch(function() { return null; }),
+          ]);
+          if (ccResults[0]) apiCalls = sess_parseCCOTel(rowsToObjects(ccResults[0]), sessionId);
+          if (ccResults[1]) apiErrors = sess_filterBySessionId(rowsToObjects(ccResults[1]), sessionId);
+        }
+      }
+    } catch (e) { /* enrichment data not available */ }
+  }
 
+  sessCurrentStats = sess_computeStats(hookEvents, messages, timeline, apiCalls, apiErrors);
   renderSessionDetail(timeline, sessCurrentStats);
 }
 
-// ── Compute Stats (single pass) ────────────────────────────────────────
+// Fallback OTel parser for CC sessions without usage data in messages (old data).
+function sess_parseCCOTel(rows, sessionId) {
+  var calls = [];
+  for (var i = 0; i < rows.length; i++) {
+    var a = sess_parseAttrs(rows[i].log_attributes);
+    if (!a) continue;
+    var rowSessionId = sess_attr(a, 'session.id');
+    if (sessionId && rowSessionId && rowSessionId !== sessionId) continue;
+    calls.push({
+      ts: tsToMs(rows[i].timestamp),
+      model: a.model || '',
+      inputTokens: Number(a.input_tokens) || 0,
+      outputTokens: Number(a.output_tokens) || 0,
+      cacheTokens: Number(a.cache_read_tokens) || 0,
+      cacheCreationTokens: Number(a.cache_creation_tokens) || 0,
+      cost: parseFloat(a.cost_usd) || 0,
+      durationMs: parseFloat(a.duration_ms) || 0,
+      toolUseIds: [],
+    });
+  }
+  return calls;
+}
 
-function sess_computeStats(hookEvents, messages, timeline) {
+function sess_parseCodexOTel(rows, conversationIds) {
+  var allowedConversations = null;
+  if (conversationIds && conversationIds.length) {
+    allowedConversations = {};
+    for (var ci = 0; ci < conversationIds.length; ci++) {
+      allowedConversations[conversationIds[ci]] = true;
+    }
+  }
+
+  var calls = [];
+  for (var i = 0; i < rows.length; i++) {
+    var a = sess_parseAttrs(rows[i].log_attributes);
+    if (!a) continue;
+    if (allowedConversations) {
+      var conversationId = sess_attr(a, 'conversation.id');
+      if (!conversationId || !allowedConversations[conversationId]) continue;
+    }
+    var inputTok = Number(a.input_token_count) || 0;
+    var outputTok = Number(a.output_token_count) || 0;
+    var model = a.model || '';
+    var price = sess_lookupPrice(model);
+    calls.push({
+      ts: tsToMs(rows[i].timestamp),
+      model: model,
+      inputTokens: inputTok,
+      outputTokens: outputTok,
+      cacheTokens: Number(a.cached_token_count) || 0,
+      cacheCreationTokens: 0,
+      cost: inputTok * price.input / 1000000 + outputTok * price.output / 1000000,
+      durationMs: parseFloat(a.duration_ms) || 0,
+    });
+  }
+  return calls;
+}
+
+function sess_collectConversationIds(hookEvents) {
+  var ids = [];
+  var seen = {};
+  for (var i = 0; i < hookEvents.length; i++) {
+    var id = hookEvents[i].conversation_id;
+    if (!id || seen[id]) continue;
+    seen[id] = true;
+    ids.push(id);
+  }
+  return ids;
+}
+
+function sess_attr(attrs, key) {
+  if (!attrs) return null;
+  if (Object.prototype.hasOwnProperty.call(attrs, key)) return attrs[key];
+  var parts = key.split('.');
+  var curr = attrs;
+  for (var i = 0; i < parts.length; i++) {
+    if (curr == null || typeof curr !== 'object' || !Object.prototype.hasOwnProperty.call(curr, parts[i])) {
+      return null;
+    }
+    curr = curr[parts[i]];
+  }
+  return curr;
+}
+
+function sess_filterBySessionId(rows, sessionId) {
+  if (!sessionId) return rows;
+  return rows.filter(function(r) {
+    var a = sess_parseAttrs(r.log_attributes);
+    var rowSessionId = sess_attr(a, 'session.id');
+    return !rowSessionId || rowSessionId === sessionId;
+  });
+}
+
+// Parse log_attributes once per row (avoids redundant JSON.parse per field).
+function sess_parseAttrs(la) {
+  if (!la) return null;
+  try { return typeof la === 'string' ? JSON.parse(la) : la; } catch (e) { return null; }
+}
+
+// ── Compute Stats ─────────────────────────────────────────────────────
+
+function sess_computeStats(hookEvents, messages, timeline, apiCalls, apiErrors) {
   var stats = {
     duration: 0, toolCount: 0, primaryModel: '', cost: 0,
-    files: {},      // { path: { reads: N, writes: N } }
+    files: {},
     context: { system: 5000, user: 0, tools: 0, reasoning: 0, subagent: 0 },
-    agents: [],     // SubagentStart events
-    gantt: [],      // { tool_name, start_ts, end_ts, failed }
+    agents: [],
+    gantt: [],
+    // OTel enrichment.
+    apiCalls: apiCalls || [],
+    totalInputTokens: 0,
+    totalOutputTokens: 0,
+    totalCacheTokens: 0,
+    cacheHitRatio: 0,
+    apiErrors: apiErrors || [],
+    errorCount: (apiErrors || []).length,
+    hasOTel: false,
+    costSource: 'estimate',
   };
 
   // Duration from timeline bounds.
   if (timeline.length > 0) {
-    var first = timeline[0].ts;
-    var last = timeline[timeline.length - 1].ts;
-    stats.duration = (last - first) / 1000;
+    stats.duration = (timeline[timeline.length - 1].ts - timeline[0].ts) / 1000;
   }
 
   // Tool pairs → file attention + gantt + tool count.
@@ -309,7 +478,6 @@ function sess_computeStats(hookEvents, messages, timeline) {
       stats.toolCount++;
       var tc = item.data;
       stats.gantt.push(tc);
-      // Extract file paths (may be multiple for apply_patch).
       var fps = extractAllFilePaths(tc.tool_name, tc.tool_input);
       for (var fi = 0; fi < fps.length; fi++) {
         var fp = fps[fi];
@@ -317,7 +485,6 @@ function sess_computeStats(hookEvents, messages, timeline) {
         if (tc.tool_name === 'Write' || tc.tool_name === 'Edit' || tc.tool_name === 'apply_patch') stats.files[fp].writes++;
         else stats.files[fp].reads++;
       }
-      // Tool result tokens for context breakdown.
       var resultLen = (tc.tool_result || '').length;
       var mult = (tc.tool_name === 'Read' ? 1.0 : tc.tool_name === 'Grep' || tc.tool_name === 'Glob' ? 0.5 : 0.3);
       if (tc.tool_name === 'Agent' || tc.tool_name === 'Task') {
@@ -328,8 +495,8 @@ function sess_computeStats(hookEvents, messages, timeline) {
     }
   }
 
-  // Agent hierarchy: collect subagent events + per-agent tool counts.
-  var agentToolCounts = {}; // agent_id → count
+  // Agent hierarchy.
+  var agentToolCounts = {};
   for (var h = 0; h < hookEvents.length; h++) {
     var hev = hookEvents[h];
     if (hev.event_type === 'SubagentStart') stats.agents.push(hev);
@@ -340,9 +507,9 @@ function sess_computeStats(hookEvents, messages, timeline) {
   }
   stats.agentToolCounts = agentToolCounts;
 
-  // Messages → context breakdown + model + cost.
-  var inputTokens = 0;
-  var outputTokens = 0;
+  // Messages → context breakdown + model + cost estimate.
+  var estInputTokens = 0;
+  var estOutputTokens = 0;
   for (var m = 0; m < messages.length; m++) {
     var msg = messages[m];
     var contentLen = (msg.content || '').length;
@@ -351,34 +518,57 @@ function sess_computeStats(hookEvents, messages, timeline) {
 
     if (msg.message_type === 'user') {
       stats.context.user += tokens;
-      inputTokens += tokens;
+      estInputTokens += tokens;
     } else if (msg.message_type === 'tool_result') {
-      // Tool results overcount tokens — content is raw text, actual tokens are fewer.
-      inputTokens += Math.round(tokens * 0.3);
+      estInputTokens += Math.round(tokens * 0.3);
     } else if (msg.message_type === 'tool_use') {
-      inputTokens += tokens;
+      estInputTokens += tokens;
     } else if (msg.message_type === 'assistant' || msg.message_type === 'thinking') {
       stats.context.reasoning += tokens;
-      outputTokens += tokens;
+      estOutputTokens += tokens;
     }
   }
 
-  // Cost.
-  var price = sess_lookupPrice(stats.primaryModel);
-  stats.cost = inputTokens * price.input / 1000000 + outputTokens * price.output / 1000000;
+  // OTel enrichment: prefer precise data over estimates.
+  if (stats.apiCalls.length > 0) {
+    stats.hasOTel = true;
+    var totalIn = 0, totalOut = 0, totalCache = 0, totalCost = 0;
+    for (var ac = 0; ac < stats.apiCalls.length; ac++) {
+      var call = stats.apiCalls[ac];
+      totalIn += call.inputTokens;
+      totalOut += call.outputTokens;
+      totalCache += call.cacheTokens;
+      totalCost += call.cost;
+      if (!stats.primaryModel && call.model) stats.primaryModel = call.model;
+    }
+    stats.totalInputTokens = totalIn;
+    stats.totalOutputTokens = totalOut;
+    stats.totalCacheTokens = totalCache;
+    stats.cost = totalCost;
+    stats.costSource = 'otel';
+    if (totalIn + totalCache > 0) {
+      stats.cacheHitRatio = totalCache / (totalIn + totalCache);
+    }
+  } else {
+    // Fallback to estimates.
+    stats.totalInputTokens = estInputTokens;
+    stats.totalOutputTokens = estOutputTokens;
+    var price = sess_lookupPrice(stats.primaryModel);
+    stats.cost = estInputTokens * price.input / 1000000 + estOutputTokens * price.output / 1000000;
+  }
 
   return stats;
 }
 
+// ── File path extraction ──────────────────────────────────────────────
+
 function extractFilePath(toolName, inputStr) {
   if (!inputStr) return null;
-  // Claude Code tools.
   try {
     var obj = JSON.parse(inputStr);
     if (toolName === 'Read' || toolName === 'Write' || toolName === 'Edit') return obj.file_path || obj.path || null;
     if (toolName === 'Grep') return obj.path || null;
   } catch (e) { /* not JSON */ }
-  // Codex: apply_patch — extract file path from "*** Update File: /path" lines.
   if (toolName === 'apply_patch') {
     var m = inputStr.match(/\*\*\* (?:Update|Add|Delete) File: (.+)/);
     return m ? m[1].trim() : null;
@@ -386,7 +576,6 @@ function extractFilePath(toolName, inputStr) {
   return null;
 }
 
-// Extract ALL file paths from a tool input (for file heatmap — multiple files per apply_patch).
 function extractAllFilePaths(toolName, inputStr) {
   if (!inputStr) return [];
   if (toolName === 'apply_patch') {
@@ -400,52 +589,93 @@ function extractAllFilePaths(toolName, inputStr) {
   return single ? [single] : [];
 }
 
-// ── Render Session Detail ──────────────────────────────────────────────
+// ── Render Session Detail (two-column overlay) ────────────────────────
 
 function renderSessionDetail(timeline, stats) {
-  var detail = document.getElementById('sess-detail');
+  var content = document.getElementById('sess-detail-content');
   if (!timeline.length) {
-    detail.innerHTML = '<div class="loading">' + t('empty.no_data') + '</div>';
+    content.innerHTML = '<div class="loading" style="padding:40px;text-align:center">' + t('empty.no_data') + '</div>';
     return;
   }
 
   var html = '';
 
-  // 1. KPI row.
+  // ── Header ──
+  html += '<div class="sess-overlay-header">';
   html += '<div class="sess-detail-kpi">';
-  html += '<div class="sess-kpi"><span class="sess-kpi-label">' + t('sessions.kpi_session') + '</span><span class="sess-kpi-value" style="font-size:11px;font-family:monospace;word-break:break-all">' + escapeHTML(sessExpandedId || '') + '</span></div>';
   html += '<div class="sess-kpi"><span class="sess-kpi-label">' + t('sessions.kpi_duration') + '</span><span class="sess-kpi-value">' + fmtDurSec(stats.duration) + '</span></div>';
   html += '<div class="sess-kpi"><span class="sess-kpi-label">' + t('sessions.kpi_tools') + '</span><span class="sess-kpi-value">' + stats.toolCount + '</span></div>';
+
   var costLabel = stats.costSource === 'otel' ? t('sessions.kpi_cost') : t('sessions.kpi_cost') + ' ~';
   html += '<div class="sess-kpi"><span class="sess-kpi-label">' + costLabel + '</span><span class="sess-kpi-value cost">' + (stats.cost > 0 ? fmtCost(stats.cost) : '\u2014') + '</span></div>';
-  html += '<div class="sess-kpi"><span class="sess-kpi-label">' + t('sessions.kpi_model') + '</span><span class="sess-kpi-value" style="font-size:13px">' + escapeHTML(stats.primaryModel || '\u2014') + '</span></div>';
-  // Session is active if the last event is recent (within 10 min) and not a final Stop/SessionEnd.
+
+  // Tokens KPI.
+  var tokLabel = stats.hasOTel ? t('sessions.kpi_tokens') : t('sessions.kpi_tokens') + ' ~';
+  html += '<div class="sess-kpi"><span class="sess-kpi-label">' + tokLabel + '</span><span class="sess-kpi-value" style="font-size:14px">' + fmtTokens(stats.totalInputTokens) + ' ' + t('sessions.token_in') + ' / ' + fmtTokens(stats.totalOutputTokens) + ' ' + t('sessions.token_out') + '</span></div>';
+
+  // Cache KPI (only if OTel data available and cache > 0).
+  if (stats.hasOTel && stats.totalCacheTokens > 0) {
+    html += '<div class="sess-kpi"><span class="sess-kpi-label">' + t('sessions.kpi_cache') + '</span><span class="sess-kpi-value" style="font-size:14px">' + Math.round(stats.cacheHitRatio * 100) + '%</span></div>';
+  }
+
+  // Buttons — right-aligned.
   var lastEvent = timeline[timeline.length - 1];
   var lastIsEnd = lastEvent && lastEvent.source === 'hook' &&
     (lastEvent.data.event_type === 'SessionEnd' || lastEvent.data.event_type === 'Stop');
   var isRecent = lastEvent && (Date.now() - lastEvent.ts) < 10 * 60 * 1000;
   var isActive = isRecent && !lastIsEnd;
-  html += '<div class="sess-kpi" style="margin-left:auto;display:flex;gap:6px">';
+  html += '<div class="sess-kpi" style="margin-left:auto;display:flex;gap:6px;align-items:flex-end">';
   if (isActive) {
     html += '<button class="filter-btn" onclick="AgentCanvas.open(\x27live\x27,{sessionId:\x27' + escapeJSString(sessExpandedId) + '\x27})">' + t('sessions.btn_live_canvas') + '</button>';
   }
   html += '<button class="filter-btn" onclick="AgentCanvas.open(\x27replay\x27,{timelineData:sessTimelineData,speed:1,sessionId:\x27' + escapeJSString(sessExpandedId) + '\x27})">\u25B6 ' + t('sessions.btn_replay') + '</button>';
+  html += '<button class="sess-close-btn" onclick="sess_closeDetail()" title="' + t('ui.close') + '">\u2715</button>';
   html += '</div>';
-  html += '</div>';
+  html += '</div>'; // .sess-detail-kpi
 
-  // 2. Context window breakdown.
+  // Secondary row.
+  html += '<div class="sess-kpi-secondary">';
+  html += '<span style="font-family:monospace;font-size:11px" title="' + escapeHTML(sessExpandedId || '') + '">' + escapeHTML(sessExpandedId || '') + '</span>';
+  if (stats.primaryModel) html += '<span>' + escapeHTML(stats.primaryModel) + '</span>';
+  if (stats.errorCount > 0) html += '<span class="badge badge-error clickable" onclick="sess_toggleErrors()" style="cursor:pointer">' + stats.errorCount + ' ' + t(stats.errorCount > 1 ? 'sessions.errors_badge_plural' : 'sessions.errors_badge') + '</span>';
+  html += '</div>';
+  // Error details panel (hidden, toggled by clicking error badge).
+  if (stats.apiErrors.length > 0) {
+    html += '<div id="sess-error-panel" style="display:none;padding:8px 24px;border-bottom:1px solid var(--border);max-height:200px;overflow-y:auto">';
+    for (var ei = 0; ei < stats.apiErrors.length; ei++) {
+      var err = stats.apiErrors[ei];
+      var ea = sess_parseAttrs(err.log_attributes);
+      var errMsg = (ea && ea.error) || t('sessions.error_unknown');
+      var errModel = (ea && ea.model) || '';
+      var errTs = tsToMs(err.timestamp);
+      var errTime = errTs ? new Date(errTs).toLocaleTimeString() : '';
+      html += '<div class="tl-item clickable" style="padding:4px 8px;font-size:12px;cursor:pointer" onclick="sess_scrollToEvent(document.getElementById(\x27sess-timeline-scroll\x27),' + (errTs || 0) + ')">';
+      html += '<span class="tl-time">' + errTime + '</span>';
+      html += '<span class="badge badge-error" style="font-size:10px">' + t('ui.error') + '</span> ';
+      if (errModel) html += '<span style="color:var(--text-dim)">' + escapeHTML(errModel) + '</span> ';
+      html += '<span>' + escapeHTML(errMsg) + '</span>';
+      html += '</div>';
+    }
+    html += '</div>';
+  }
+  html += '</div>'; // .sess-overlay-header
+
+  // ── Two-column body ──
+  html += '<div class="sess-overlay-body">';
+
+  // Left: Insights panel.
+  html += '<div class="sess-insights-panel">';
   html += sess_renderContextBar(stats.context);
-
-  // 3. File attention heatmap.
+  if (stats.apiCalls.length > 0) html += sess_renderAPICalls(stats);
   html += sess_renderFileHeatmap(stats.files);
-
-  // 4. Agent hierarchy (only if subagents exist).
   if (stats.agents.length > 0) html += sess_renderAgentTree(stats.agents, stats.agentToolCounts || {});
-
-  // 5. Timeline gantt.
   if (stats.gantt.length > 0) html += sess_renderGantt(stats.gantt, timeline);
+  html += '</div>';
 
-  // 6. Toolbar (filter + chips).
+  // Right: Timeline panel.
+  html += '<div class="sess-timeline-panel">';
+
+  // Toolbar.
   var toolNames = {};
   for (var i = 0; i < timeline.length; i++) {
     var tn = null;
@@ -464,18 +694,148 @@ function renderSessionDetail(timeline, stats) {
   }
   html += '</div></div>';
 
-  // 7. Scrollable event timeline.
+  // Timeline.
   html += '<div class="sess-timeline-scroll" id="sess-timeline-scroll">';
   html += '<div class="sess-timeline" id="sess-timeline-items">';
   for (var m = 0; m < timeline.length; m++) html += renderTimelineItem(timeline[m]);
   html += '</div></div>';
 
-  detail.innerHTML = html;
+  html += '</div>'; // .sess-timeline-panel
+  html += '</div>'; // .sess-overlay-body
+
+  content.innerHTML = html;
   var scrollEl = document.getElementById('sess-timeline-scroll');
-  if (scrollEl) scrollEl.scrollTop = scrollEl.scrollHeight;
+  if (scrollEl) {
+    if (sessTargetTs) {
+      sess_scrollToEvent(scrollEl, sessTargetTs);
+      if (sessApiCallFP) sess_highlightAPICall(sessApiCallFP);
+      sessTargetTs = 0;
+      sessApiCallFP = '';
+    } else {
+      scrollEl.scrollTop = scrollEl.scrollHeight;
+    }
+  }
 }
 
-// ── Feature 1: File Attention Heatmap ──────────────────────────────────
+// Scroll to the timeline item closest to the target timestamp and highlight it.
+function sess_scrollToEvent(scrollEl, targetMs) {
+  var items = scrollEl.querySelectorAll('.tl-item-wrap[data-ts]');
+  var best = null, bestDiff = Infinity;
+  for (var i = 0; i < items.length; i++) {
+    var ts = Number(items[i].getAttribute('data-ts'));
+    var diff = Math.abs(ts - targetMs);
+    if (diff < bestDiff) { bestDiff = diff; best = items[i]; }
+  }
+  if (!best) { scrollEl.scrollTop = scrollEl.scrollHeight; return; }
+  // Clear previous highlight.
+  var prev = scrollEl.querySelector('.tl-highlight');
+  if (prev) prev.classList.remove('tl-highlight');
+  best.classList.add('tl-highlight');
+  best.scrollIntoView({ block: 'center' });
+}
+
+// Scroll to a timeline tool_pair by tool_use_id (precise CC linkage).
+function sess_scrollToToolUseId(toolUseId) {
+  var scrollEl = document.getElementById('sess-timeline-scroll');
+  if (!scrollEl) return;
+  var items = scrollEl.querySelectorAll('.tl-item-wrap[data-tool-use-id]');
+  var target = null;
+  for (var i = 0; i < items.length; i++) {
+    if (items[i].getAttribute('data-tool-use-id') === toolUseId) { target = items[i]; break; }
+  }
+  if (!target) {
+    // Fallback: find by data-tool-use-ids containing this id.
+    var allWraps = scrollEl.querySelectorAll('.tl-item-wrap');
+    for (var j = 0; j < allWraps.length; j++) {
+      var ids = allWraps[j].getAttribute('data-tool-use-id') || '';
+      if (ids === toolUseId) { target = allWraps[j]; break; }
+    }
+  }
+  if (!target) return;
+  var prev = scrollEl.querySelector('.tl-highlight');
+  if (prev) prev.classList.remove('tl-highlight');
+  target.classList.add('tl-highlight');
+  target.scrollIntoView({ block: 'center' });
+}
+
+// Expand the API Calls section and highlight the row matching the fingerprint.
+function sess_highlightAPICall(fingerprint) {
+  var details = document.querySelector('.sess-insights-panel details.sess-section');
+  var table = document.querySelector('.sess-api-table');
+  if (!details || !table) return;
+  details.open = true;
+  // Try exact fingerprint match first, then fallback to closest timestamp.
+  var trs = table.querySelectorAll('tr[data-fp]');
+  var best = null;
+  for (var i = 0; i < trs.length; i++) {
+    if (trs[i].getAttribute('data-fp') === fingerprint) { best = trs[i]; break; }
+  }
+  if (!best) {
+    // Fallback: try as numeric timestamp for Codex (nanosecond string).
+    var targetMs = Number(fingerprint);
+    if (targetMs > 0) {
+      var bestDiff = Infinity;
+      for (var j = 0; j < trs.length; j++) {
+        var ts = Number(trs[j].getAttribute('data-ts'));
+        var diff = Math.abs(ts - targetMs);
+        if (diff < bestDiff) { bestDiff = diff; best = trs[j]; }
+      }
+    }
+  }
+  if (!best) return;
+  best.classList.add('tl-highlight');
+  best.scrollIntoView({ block: 'nearest' });
+}
+
+// ── API Calls Section ─────────────────────────────────────────────────
+
+function sess_renderAPICalls(stats) {
+  var calls = stats.apiCalls;
+  if (!calls.length) return '';
+
+  var html = '<details class="sess-section">';
+  html += '<summary>' + t('sessions.api_calls') + ' (' + calls.length + ') \u00B7 ' + fmtCost(stats.cost) + '</summary>';
+  html += '<table class="sess-api-table"><thead><tr>';
+  html += '<th>' + t('sessions.api_col_model') + '</th><th>' + t('sessions.api_col_in') + '</th><th>' + t('sessions.api_col_out') + '</th><th>' + t('sessions.api_col_cache') + '</th><th>' + t('sessions.api_col_cost') + '</th><th>' + t('sessions.api_col_dur') + '</th>';
+  html += '</tr></thead><tbody>';
+
+  for (var i = 0; i < calls.length; i++) {
+    var c = calls[i];
+    var modelShort = (c.model || 'unknown').replace(/^claude-/, '').replace(/-\d{8}$/, '');
+    var tuids = (c.toolUseIds || []).join(',');
+    var fp = c.inputTokens + ',' + c.outputTokens + ',' + c.cacheCreationTokens;
+    var clickAction = tuids
+      ? 'sess_scrollToToolUseId(\x27' + escapeJSString(tuids.split(',')[0]) + '\x27)'
+      : 'sess_scrollToEvent(document.getElementById(\x27sess-timeline-scroll\x27),' + (c.ts || 0) + ')';
+    html += '<tr class="clickable" data-ts="' + (c.ts || 0) + '" data-fp="' + escapeHTML(fp) + '" data-tool-use-ids="' + escapeHTML(tuids) + '" onclick="' + clickAction + '">';
+    html += '<td style="text-align:left;max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + escapeHTML(c.model || '') + '">' + escapeHTML(modelShort) + '</td>';
+    html += '<td>' + fmtTokens(c.inputTokens) + '</td>';
+    html += '<td>' + fmtTokens(c.outputTokens) + '</td>';
+    html += '<td>' + (c.cacheTokens > 0 ? fmtTokens(c.cacheTokens) : '\u2014') + '</td>';
+    html += '<td>' + fmtCost(c.cost) + '</td>';
+    html += '<td>' + (c.durationMs > 0 ? (c.durationMs < 1000 ? Math.round(c.durationMs) + 'ms' : (c.durationMs / 1000).toFixed(1) + 's') : '\u2014') + '</td>';
+    html += '</tr>';
+  }
+
+  // Total row.
+  html += '<tr class="sess-api-total">';
+  html += '<td style="text-align:left">' + t('sessions.api_total') + '</td>';
+  html += '<td>' + fmtTokens(stats.totalInputTokens) + '</td>';
+  html += '<td>' + fmtTokens(stats.totalOutputTokens) + '</td>';
+  html += '<td>' + (stats.totalCacheTokens > 0 ? fmtTokens(stats.totalCacheTokens) : '\u2014') + '</td>';
+  html += '<td>' + fmtCost(stats.cost) + '</td>';
+  html += '<td></td>';
+  html += '</tr>';
+  html += '</tbody></table>';
+
+  if (stats.cacheHitRatio > 0) {
+    html += '<div class="sess-api-cache">' + t('sessions.api_cache_hit') + ': ' + Math.round(stats.cacheHitRatio * 100) + '%</div>';
+  }
+  html += '</details>';
+  return html;
+}
+
+// ── Feature: File Attention Heatmap ───────────────────────────────────
 
 function sess_renderFileHeatmap(files) {
   var entries = [];
@@ -492,7 +852,6 @@ function sess_renderFileHeatmap(files) {
     var e = entries[i];
     var readPct = (e.reads / maxTotal * 100).toFixed(1);
     var writePct = (e.writes / maxTotal * 100).toFixed(1);
-    // Show last 2-3 path segments for readability.
     var parts = e.path.split('/');
     var shortPath = parts.length > 3 ? '\u2026/' + parts.slice(-3).join('/') : e.path;
     html += '<div class="sess-file-row">';
@@ -508,7 +867,7 @@ function sess_renderFileHeatmap(files) {
   return html;
 }
 
-// ── Feature 3: Context Window Breakdown ────────────────────────────────
+// ── Feature: Context Window Breakdown ─────────────────────────────────
 
 function sess_renderContextBar(ctx) {
   var total = ctx.system + ctx.user + ctx.tools + ctx.reasoning + ctx.subagent;
@@ -542,7 +901,7 @@ function sess_renderContextBar(ctx) {
   return html;
 }
 
-// ── Feature 4: Agent Hierarchy ─────────────────────────────────────────
+// ── Feature: Agent Hierarchy ──────────────────────────────────────────
 
 function sess_renderAgentTree(agents, agentToolCounts) {
   var mainTools = agentToolCounts[''] || 0;
@@ -568,7 +927,7 @@ function sess_renderAgentTree(agents, agentToolCounts) {
   return html;
 }
 
-// ── Feature 5: Timeline Gantt ──────────────────────────────────────────
+// ── Feature: Timeline Gantt ───────────────────────────────────────────
 
 function sess_renderGantt(ganttData, timeline) {
   if (!ganttData.length) return '';
@@ -578,7 +937,6 @@ function sess_renderGantt(ganttData, timeline) {
   var duration = sessionEnd - sessionStart;
   if (duration <= 0) return '';
 
-  // Group by tool name (swimlanes).
   var lanes = {};
   for (var i = 0; i < ganttData.length; i++) {
     var g = ganttData[i];
@@ -612,7 +970,6 @@ function sess_renderGantt(ganttData, timeline) {
     html += '</div></div>';
   }
 
-  // Time axis.
   var durSec = duration / 1000;
   html += '<div class="sess-gantt-time-axis">';
   var ticks = 5;
@@ -624,7 +981,7 @@ function sess_renderGantt(ganttData, timeline) {
   return html;
 }
 
-// ── Timeline filter (existing) ─────────────────────────────────────────
+// ── Timeline filter ───────────────────────────────────────────────────
 
 var sessActiveToolFilter = '';
 
@@ -663,13 +1020,20 @@ function sess_applyFilters() {
   container.innerHTML = html || '<div class="loading">' + t('empty.no_data') + '</div>';
 }
 
-function renderTimelineItem(item) {
-  if (item.source === 'tool_pair') return renderToolPair(item.data, item.ts);
-  if (item.source === 'hook') return renderHookEvent(item.data, item.ts);
-  return renderMessage(item.data, item.ts);
-}
+// ── Timeline item rendering ───────────────────────────────────────────
 
-// ── Render: paired tool call ───────────────────────────────────────────
+function renderTimelineItem(item) {
+  var extraAttrs = '';
+  if (item.source === 'tool_pair' && item.data.tool_use_id) {
+    extraAttrs = ' data-tool-use-id="' + escapeHTML(item.data.tool_use_id) + '"';
+  }
+  var wrapper = '<div class="tl-item-wrap" data-ts="' + (item.ts || 0) + '"' + extraAttrs + '>';
+  var inner = '';
+  if (item.source === 'tool_pair') inner = renderToolPair(item.data, item.ts);
+  else if (item.source === 'hook') inner = renderHookEvent(item.data, item.ts);
+  else inner = renderMessage(item.data, item.ts);
+  return wrapper + inner + '</div>';
+}
 
 function renderToolPair(tc, ts) {
   var time = ts ? new Date(ts).toLocaleTimeString() : '';
@@ -699,13 +1063,11 @@ function renderToolPair(tc, ts) {
 
 function formatToolResult(toolName, result) {
   if (!result) return '';
-  // Try parsing as JSON for structured display.
   try {
     var obj = JSON.parse(result);
     if (typeof obj !== 'object' || obj === null) throw new Error('not an object');
     return '<div class="tl-result-structured">' + formatResultObj(toolName, obj) + '</div>';
   } catch (e) {
-    // Not JSON — show as plain text.
     var text = result.length > 2000 ? result.slice(0, 2000) + '\u2026' : result;
     return '<pre>' + escapeHTML(text) + '</pre>';
   }
@@ -713,30 +1075,25 @@ function formatToolResult(toolName, result) {
 
 function formatResultObj(toolName, obj) {
   var html = '';
-  // Bash: show stdout/stderr.
   if (obj.stdout != null || obj.stderr != null) {
     if (obj.stdout) html += '<div class="tl-result-field"><span class="tl-result-key">stdout</span><pre>' + escapeHTML(truncResultText(obj.stdout)) + '</pre></div>';
     if (obj.stderr) html += '<div class="tl-result-field"><span class="tl-result-key">stderr</span><pre class="tl-result-err">' + escapeHTML(truncResultText(obj.stderr)) + '</pre></div>';
     if (!html) html = '<div class="tl-result-field"><span class="tl-result-key">stdout</span><pre>' + t('sessions.no_data_result') + '</pre></div>';
     return html;
   }
-  // Read: show file content snippet.
   if (obj.file && obj.file.content != null) {
     html += '<div class="tl-result-field"><span class="tl-result-key">content</span><pre>' + escapeHTML(truncResultText(obj.file.content)) + '</pre></div>';
     return html;
   }
-  // Edit: show filePath + newString preview.
   if (obj.filePath) {
     html += '<div class="tl-result-field"><span class="tl-result-key">file</span> ' + escapeHTML(obj.filePath) + '</div>';
     if (obj.newString) html += '<div class="tl-result-field"><span class="tl-result-key">new</span><pre>' + escapeHTML(truncResultText(obj.newString)) + '</pre></div>';
     return html;
   }
-  // Codex exec_command output.
   if (obj.output != null) {
     html += '<div class="tl-result-field"><span class="tl-result-key">output</span><pre>' + escapeHTML(truncResultText(typeof obj.output === 'string' ? obj.output : JSON.stringify(obj.output))) + '</pre></div>';
     return html;
   }
-  // Generic: pretty-print JSON.
   var pretty = JSON.stringify(obj, null, 2);
   return '<pre>' + escapeHTML(truncResultText(pretty)) + '</pre>';
 }
@@ -762,8 +1119,6 @@ function summarizeToolArgs(toolName, argsStr) {
   return argsStr;
 }
 
-// ── Render: non-tool hook events ───────────────────────────────────────
-
 function renderHookEvent(ev, ts) {
   var type = ev.event_type;
   var time = ts ? new Date(ts).toLocaleTimeString() : '';
@@ -775,11 +1130,9 @@ function renderHookEvent(ev, ts) {
   }
   if (type === 'SubagentStart') return '<div class="tl-item tl-subagent"><span class="tl-time">' + time + '</span> <span class="tl-badge tl-badge-sub">\u25B6</span> ' + t('sessions.ev_subagent_start') + ' <strong>' + escapeHTML(ev.agent_type || '') + '</strong></div>';
   if (type === 'SubagentStop') return '<div class="tl-item tl-subagent"><span class="tl-time">' + time + '</span> <span class="tl-badge tl-badge-sub">\u25A0</span> ' + t('sessions.ev_subagent_stop') + '</div>';
-  if (type === 'Notification') return '<div class="tl-item tl-notification"><span class="tl-time">' + time + '</span> <span class="tl-badge tl-badge-warn">\u26A0</span> ' + escapeHTML(ev.message || ev.notification_type || 'Notification') + '</div>';
+  if (type === 'Notification') return '<div class="tl-item tl-notification"><span class="tl-time">' + time + '</span> <span class="tl-badge tl-badge-warn">\u26A0</span> ' + escapeHTML(ev.message || ev.notification_type || t('sessions.ev_notification')) + '</div>';
   return '<div class="tl-item"><span class="tl-time">' + time + '</span> ' + escapeHTML(type) + '</div>';
 }
-
-// ── Render: conversation messages ──────────────────────────────────────
 
 function renderMessage(msg, ts) {
   var time = ts ? new Date(ts).toLocaleTimeString() : '';
@@ -821,7 +1174,7 @@ async function sess_search() {
     var content = d.content || '';
     if (content.length > 200) content = content.slice(0, 200) + '\u2026';
     var label = d.tool_name || d.msg_type || '';
-    html += '<div class="search-result-item clickable" onclick="sess_toggleDetail(\x27' + escapeJSString(d.session_id) + '\x27)">';
+    html += '<div class="search-result-item clickable" onclick="sess_openDetail(\x27' + escapeJSString(d.session_id) + '\x27,\x27\x27,' + (ms || 0) + ')">';
     html += '<div class="search-result-meta"><span class="badge badge-cc">' + escapeHTML((d.session_id || '').slice(0, 8)) + '</span> ';
     if (label) html += '<span class="tl-tool-name" style="font-size:12px">' + escapeHTML(label) + '</span> ';
     html += '<span class="tl-time">' + (ms ? new Date(ms).toLocaleString() : '') + '</span></div>';

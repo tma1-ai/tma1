@@ -4,12 +4,6 @@
 var ccEventsPage = 0;
 var ccEventsPageSize = 15;
 var ccEventsHasNext = false;
-var ccPendingEventFocus = null;
-
-var ccSessionsPage = 0;
-var ccSessionsPageSize = 15;
-var ccSessionsHasNext = false;
-var ccSessionsData = [];
 
 var CC_TOOL_CATEGORIES = {
   'Read': 'file_read', 'View': 'file_read',
@@ -64,95 +58,6 @@ function cc_updateEventsPager(resultCount) {
   var start = ccEventsPage * ccEventsPageSize + 1;
   var end = start + resultCount - 1;
   info.textContent = t('pager.page') + ' ' + (ccEventsPage + 1) + ' \u00b7 ' + start + '-' + end;
-}
-
-function cc_focusPendingEvent() {
-  if (!ccPendingEventFocus) return;
-  var pending = ccPendingEventFocus;
-  var target = null;
-  document.querySelectorAll('#cc-events-body tr.clickable').forEach(function(row) {
-    if (target) return;
-    var ts = row.dataset.eventTs || '';
-    var sid = row.dataset.sessionId || '';
-    var seqTxt = row.dataset.eventSeq;
-    var seq = seqTxt === '' ? null : Number(seqTxt);
-    var tsMatch = ts === pending.timestamp;
-    var seqMatch = pending.seq == null || (seq != null && seq === pending.seq);
-    var sidMatch = !pending.sessionId || sid === pending.sessionId;
-    if (tsMatch && seqMatch && sidMatch) target = row;
-  });
-  if (!target) return;
-
-  var idx = Number(target.dataset.idx);
-  if (!Number.isNaN(idx)) cc_toggleEventDetail(target, idx);
-  target.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  ccPendingEventFocus = null;
-}
-
-async function cc_switchToEvent(tsEnc, sidEnc, seq) {
-  var targetSid = sidEnc || '';
-  var targetTs = tsEnc ? decodeURIComponent(tsEnc) : '';
-  if (!targetTs && !targetSid) return;
-
-  // Switch to Sessions tab
-  document.querySelectorAll('#cc-tabs .tab').forEach(function(t) { t.classList.remove('active'); });
-  document.querySelectorAll('#view-claude-code .tab-content').forEach(function(t) { t.classList.remove('active'); });
-  document.querySelector('[data-cctab="cc-sessions"]').classList.add('active');
-  document.getElementById('tab-cc-sessions').classList.add('active');
-
-  // Set filter to session ID if available
-  var filterInput = document.getElementById('cc-session-filter');
-  if (filterInput) filterInput.value = targetSid || '';
-  ccSessionsPage = 0;
-  await cc_loadSessions();
-  if (typeof updateHash === 'function') updateHash();
-
-  // Find the session containing the target timestamp and expand it
-  if (!ccSessionsData.length) return;
-  var targetMs = targetTs ? tsToMs(targetTs) : 0;
-  var matchIdx = -1;
-  if (targetSid) {
-    for (var i = 0; i < ccSessionsData.length; i++) {
-      if (ccSessionsData[i].sessionId === targetSid) { matchIdx = i; break; }
-    }
-  }
-  if (matchIdx < 0 && targetMs) {
-    for (var j = 0; j < ccSessionsData.length; j++) {
-      var g = ccSessionsData[j];
-      if (targetMs >= tsToMs(g.firstTs) && targetMs <= tsToMs(g.lastTs)) { matchIdx = j; break; }
-    }
-  }
-  if (matchIdx < 0) return; // target not found in loaded data; don't expand an unrelated session
-
-  // Navigate to the correct page and expand
-  var page = Math.floor(matchIdx / ccSessionsPageSize);
-  if (page !== ccSessionsPage) { ccSessionsPage = page; cc_renderSessions(); }
-  var row = document.querySelector('#cc-sessions-body tr:nth-child(' + (matchIdx - page * ccSessionsPageSize + 1) + ')');
-  if (row) {
-    cc_toggleSessionDetail(matchIdx, row);
-    // Highlight the matching event within the expanded detail
-    if (targetMs) {
-      setTimeout(function() {
-        var detail = document.querySelector('.cc-session-detail-row');
-        if (!detail) return;
-        var divs = detail.querySelectorAll('.clickable');
-        var best = null, bestDiff = Infinity;
-        divs.forEach(function(div) {
-          var spans = div.querySelectorAll('span');
-          for (var s = 0; s < spans.length; s++) {
-            var ts = Date.parse(spans[s].textContent);
-            if (!isNaN(ts)) { var diff = Math.abs(ts - targetMs); if (diff < bestDiff) { bestDiff = diff; best = div; } break; }
-          }
-        });
-        if (best) {
-          best.style.background = 'var(--bg-secondary)';
-          best.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        }
-      }, 100);
-    } else {
-      row.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }
-  }
 }
 
 // ===================================================================
@@ -315,7 +220,7 @@ async function cc_loadToolDistribution() {
           '<div class="bar-fill" style="width:' + pct + '%;background:' + tc.green + '"></div>' +
           (errs > 0 ? '<div class="bar-fill-error" style="width:' + (pct * errPct / 100) + '%;left:' + (pct - pct * errPct / 100) + '%"></div>' : '') +
         '</div>' +
-        '<div class="bar-value">' + fmtNum(cnt) + (errs > 0 ? ' <span style="color:' + tc.red + '">(' + errs + ' err)</span>' : '') + '</div>' +
+        '<div class="bar-value">' + fmtNum(cnt) + (errs > 0 ? ' <span style="color:' + tc.red + '">(' + errs + t('ui.err_suffix') + '</span>' : '') + '</div>' +
         '</div>';
     }).join('');
   } catch { /* no data */ }
@@ -431,7 +336,7 @@ async function cc_loadEvents(reloadPromptTraces) {
       if (cacheRead || cacheCreate) {
         var total = cacheRead + cacheCreate;
         var hitPct = total > 0 ? ((cacheRead / total) * 100).toFixed(0) : '0';
-        cacheDisplay = fmtNum(cacheRead) + ' / ' + fmtNum(cacheCreate) + ' <span style="color:var(--text-muted)">(' + hitPct + '% hit)</span>';
+        cacheDisplay = fmtNum(cacheRead) + ' / ' + fmtNum(cacheCreate) + ' <span style="color:var(--text-muted)">(' + hitPct + t('ui.cache_hit_pct') + '</span>';
       }
       var cost = d.cost_usd != null ? fmtCost(d.cost_usd) : '\u2014';
       var dur = fmtDurMs(d.duration_ms);
@@ -449,16 +354,15 @@ async function cc_loadEvents(reloadPromptTraces) {
         '<td>' + cacheDisplay + '</td>' +
         '<td>' + cost + '</td>' +
         '<td>' + dur + '</td>' +
-        '<td><span class="badge ' + (isErr ? 'badge-error' : 'badge-ok') + '">' + (isErr ? 'ERROR' : 'OK') + '</span></td>' +
+        '<td><span class="badge ' + (isErr ? 'badge-error' : 'badge-ok') + '">' + (isErr ? t('filter.error') : t('filter.ok')) + '</span></td>' +
         '</tr>';
     }).join('');
     cc_updateEventsPager(data.length);
-    cc_focusPendingEvent();
   } catch (err) {
     ccEventsHasNext = false;
     cc_updateEventsPager(0);
     document.getElementById('cc-events-body').innerHTML =
-      '<tr><td colspan="8" class="loading">Error: ' + escapeHTML(err.message) + '</td></tr>';
+      '<tr><td colspan="8" class="loading">' + t('ui.error_prefix') + escapeHTML(err.message) + '</td></tr>';
   }
 }
 
@@ -759,14 +663,13 @@ async function cc_loadExpensiveRequests() {
     var tbody = document.getElementById('cc-expensive-body');
     if (!data.length) { tbody.innerHTML = '<tr><td colspan="6" class="loading">' + t('empty.no_data') + '</td></tr>'; return; }
     tbody.innerHTML = data.map(function(d) {
-      var parsedAttrs = cc_parseAttrs(d.log_attributes);
-      var sessionId = cc_attr(parsedAttrs, 'session.id');
-      var evtSeq = cc_attr(parsedAttrs, 'event.sequence');
-      var tsArg = escapeJSString(String(d.timestamp || ''));
-      var sidArg = escapeJSString(String(sessionId || ''));
-      var seqNum = evtSeq == null ? null : Number(evtSeq);
-      var seqArg = Number.isNaN(seqNum) ? 'null' : String(seqNum);
-      return '<tr class="clickable" onclick="cc_switchToEvent(\'' + tsArg + '\',\'' + sidArg + '\',' + seqArg + ')"><td>' + fmtTime(d.timestamp) + '</td>' +
+      var attrs = cc_parseAttrs(d.log_attributes);
+      var sid = cc_attr(attrs, 'session.id') || '';
+      var tsMs = tsToMs(d.timestamp) || 0;
+      // Token fingerprint: input_tokens,output_tokens,cache_creation_tokens — unique per API call within a session.
+      var fp = (Number(d.input_tok) || 0) + ',' + (Number(d.output_tok) || 0) + ',' + (Number(cc_attr(attrs, 'cache_creation_tokens')) || 0);
+      var onclick = sid ? ' class="clickable" onclick="sess_openDetail(\x27' + escapeJSString(sid) + '\x27,\x27claude_code\x27,' + tsMs + ',\x27' + escapeJSString(fp) + '\x27)"' : '';
+      return '<tr' + onclick + '><td>' + fmtTime(d.timestamp) + '</td>' +
       '<td>' + escapeHTML(d.model || 'unknown') + '</td>' +
       '<td>' + fmtNum(d.input_tok) + '</td>' +
       '<td>' + fmtNum(d.output_tok) + '</td>' +
@@ -799,7 +702,7 @@ async function cc_loadCacheEfficiency() {
       return '<div class="bar-row">' +
         '<div class="bar-label">' + escapeHTML(d.model || 'unknown') + '</div>' +
         '<div class="bar-track"><div class="bar-fill" style="width:' + hitRate + '%;background:' + tc.green + '"></div></div>' +
-        '<div class="bar-value">' + hitRate + '% hit (' + fmtNum(cacheRead) + '/' + fmtNum(total) + ')</div></div>';
+        '<div class="bar-value">' + hitRate + t('ui.cache_hit_bar') + ' (' + fmtNum(cacheRead) + '/' + fmtNum(total) + ')</div></div>';
     }).join('');
   } catch { /* ignore */ }
 }
@@ -849,44 +752,6 @@ async function cc_loadCCModelComparison() {
 // ===================================================================
 // Claude Code view — Search tab
 // ===================================================================
-async function cc_doSearch() {
-  var term = document.getElementById('cc-search-input').value.trim();
-  if (!term) return;
-  var el = document.getElementById('cc-search-results');
-  el.innerHTML = '<div class="loading">' + t('empty.searching') + '</div>';
-
-  try {
-    var safeTerm = escapeSQLString(term);
-    var like = "'%" + safeTerm + "%'";
-    var res = await query(
-      "SELECT timestamp, body, log_attributes " +
-      "FROM opentelemetry_logs " +
-      "WHERE body LIKE 'claude_code.%' " +
-      "  AND (json_get_string(log_attributes, 'model') LIKE " + like +
-      "  OR json_get_string(log_attributes, 'tool_name') LIKE " + like +
-      "  OR json_get_string(log_attributes, 'error') LIKE " + like +
-      "  OR json_get_string(log_attributes, 'decision') LIKE " + like +
-      "  OR body LIKE " + like + ") " +
-      "  AND timestamp > NOW() - INTERVAL '" + intervalSQL() + "' " +
-      "ORDER BY timestamp DESC LIMIT 50"
-    );
-    var data = rowsToObjects(res);
-    if (!data.length) { el.innerHTML = '<div class="loading">' + t('empty.no_results') + '</div>'; return; }
-    el.innerHTML = data.map(function(d) {
-      var evtName = (d.body || '').replace('claude_code.', '');
-      var preview = typeof d.log_attributes === 'string' ? d.log_attributes : JSON.stringify(d.log_attributes || {});
-      if (preview.length > 200) preview = preview.substring(0, 200) + '...';
-      return '<div class="search-result-item">' +
-        '<div class="search-result-meta">' +
-        '<span>' + fmtTime(d.timestamp) + '</span>' +
-        '<span>' + escapeHTML(evtName) + '</span></div>' +
-        '<div class="search-result-content">' + escapeHTML(preview) + '</div></div>';
-    }).join('');
-  } catch (err) {
-    el.innerHTML = '<div class="loading">' + t('error.search') + escapeHTML(err.message) + '</div>';
-  }
-}
-
 async function cc_loadAnomalies() {
   var el = document.getElementById('cc-anomaly-list');
   el.innerHTML = '<div class="loading">' + t('empty.loading_anomalies') + '</div>';
@@ -954,11 +819,20 @@ async function cc_loadAnomalies() {
       el.innerHTML = '<div class="loading">' + t('empty.no_anomalies') + '</div>';
       return;
     }
-    var html = data.map(function(d, i) {
+    var html = data.map(function(d) {
       var reason = d.body === 'claude_code.api_error' ? t('anomaly.api_error') : t('anomaly.high_cost') + ' ($' + Number(d.cost_usd).toFixed(4) + ' > 3x avg $' + avgCost.toFixed(4) + ')';
       var severity = d.body === 'claude_code.api_error' ? '' : 'warn';
-      var attrsStr = typeof d.log_attributes === 'string' ? d.log_attributes : JSON.stringify(d.log_attributes || {});
-      return '<div class="anomaly-item ' + severity + '" style="cursor:pointer" onclick="cc_toggleAnomalyDetail(this, ' + i + ')" data-attrs="' + escapeHTML(attrsStr) + '">' +
+      var attrs = cc_parseAttrs(d.log_attributes);
+      var sid = cc_attr(attrs, 'session.id') || '';
+      var tsMs = tsToMs(d.timestamp) || 0;
+      // High-cost api_request: pass token fingerprint for precise API call matching.
+      // api_error: no token data, only timeline positioning.
+      var fp = d.body === 'claude_code.api_request'
+        ? (Number(d.input_tok) || 0) + ',' + (Number(d.output_tok) || 0) + ',' + (Number(cc_attr(attrs, 'cache_creation_tokens')) || 0)
+        : '';
+      var fpArg = fp ? ',\x27' + escapeJSString(fp) + '\x27' : '';
+      var onclick = sid ? ' onclick="sess_openDetail(\x27' + escapeJSString(sid) + '\x27,\x27claude_code\x27,' + tsMs + fpArg + ')"' : '';
+      return '<div class="anomaly-item ' + severity + ' clickable"' + onclick + '>' +
         '<div class="anomaly-reason">' + reason + '</div>' +
         '<div style="font-size:13px">' +
         escapeHTML(d.model || 'unknown') + ' &middot; ' +
@@ -966,338 +840,26 @@ async function cc_loadAnomalies() {
         (d.duration_ms != null ? fmtDurMs(d.duration_ms) : '') +
         (d.error ? ' &middot; ' + escapeHTML(d.error) : '') +
         ' &middot; ' + fmtTime(d.timestamp) +
-        '</div><div class="anomaly-detail" style="display:none"></div></div>';
+        '</div></div>';
     }).join('');
 
-    slowToolItems.forEach(function(d, i) {
-      var attrsStr = typeof d.log_attributes === 'string' ? d.log_attributes : JSON.stringify(d.log_attributes || {});
-      html += '<div class="anomaly-item warn" style="cursor:pointer" onclick="cc_toggleAnomalyDetail(this, ' + (data.length + i) + ')" data-attrs="' + escapeHTML(attrsStr) + '">' +
+    slowToolItems.forEach(function(d) {
+      var attrs = cc_parseAttrs(d.log_attributes);
+      var sid = cc_attr(attrs, 'session.id') || '';
+      var tsMs = tsToMs(d.timestamp) || 0;
+      var onclick = sid ? ' onclick="sess_openDetail(\x27' + escapeJSString(sid) + '\x27,\x27claude_code\x27,' + tsMs + ')"' : '';
+      html += '<div class="anomaly-item warn clickable"' + onclick + '>' +
         '<div class="anomaly-reason">' + t('anomaly.slow_tool') + '</div>' +
         '<div style="font-size:13px">' +
         escapeHTML(d.tool_name || 'unknown') + ' &middot; ' +
         fmtDurMs(d.duration_ms) + ' &middot; ' +
         fmtTime(d.timestamp) +
-        '</div><div class="anomaly-detail" style="display:none"></div></div>';
+        '</div></div>';
     });
     el.innerHTML = html;
   } catch {
     el.innerHTML = '<div class="loading">' + t('error.load_anomalies') + '</div>';
   }
-}
-
-function cc_toggleAnomalyDetail(item, idx) {
-  var detail = item.querySelector('.anomaly-detail');
-  if (detail.style.display !== 'none') { detail.style.display = 'none'; return; }
-  document.querySelectorAll('#cc-anomaly-list .anomaly-detail').forEach(function(d) { d.style.display = 'none'; });
-  var attrs = item.dataset.attrs;
-  var formatted = attrs;
-  try { formatted = JSON.stringify(JSON.parse(attrs), null, 2); } catch (_) { /* ignore parse error */ }
-  detail.innerHTML = '<pre style="font-size:12px;color:var(--text-muted);margin-top:8px;overflow-x:auto;white-space:pre-wrap;word-break:break-all">' + escapeHTML(formatted) + '</pre>';
-  detail.style.display = 'block';
-}
-
-// ===================================================================
-// Claude Code view — Sessions tab
-// ===================================================================
-function cc_prevSessionsPage() {
-  if (ccSessionsPage <= 0) return;
-  ccSessionsPage--;
-  cc_renderSessions();
-}
-
-function cc_nextSessionsPage() {
-  if (!ccSessionsHasNext) return;
-  ccSessionsPage++;
-  cc_renderSessions();
-}
-
-function cc_updateSessionsPager(shownCount) {
-  var prevBtn = document.getElementById('cc-sessions-prev-btn');
-  var nextBtn = document.getElementById('cc-sessions-next-btn');
-  var info = document.getElementById('cc-sessions-page-info');
-  if (!prevBtn || !nextBtn || !info) return;
-
-  var total = ccSessionsData.length;
-  ccSessionsHasNext = (ccSessionsPage + 1) * ccSessionsPageSize < total;
-  prevBtn.disabled = ccSessionsPage <= 0;
-  nextBtn.disabled = !ccSessionsHasNext;
-  if (!shownCount) {
-    info.textContent = t('pager.no_results');
-    return;
-  }
-  var start = ccSessionsPage * ccSessionsPageSize + 1;
-  var end = start + shownCount - 1;
-  info.textContent = t('pager.page') + ' ' + (ccSessionsPage + 1) + ' \u00b7 ' + start + '-' + end + ' ' + t('pager.of') + ' ' + total;
-}
-
-async function cc_loadSessions() {
-  var tbody = document.getElementById('cc-sessions-body');
-  if (!tbody) return;
-  tbody.innerHTML = '<tr><td colspan="8" class="loading">' + t('empty.loading') + '</td></tr>';
-
-  try {
-    var iv = intervalSQL();
-    var filterText = (document.getElementById('cc-session-filter')?.value || '').trim();
-    var rowLimit = sessionQueryLimit();
-    var res = await query(
-      "SELECT timestamp, body, log_attributes " +
-      "FROM opentelemetry_logs " +
-      "WHERE body IN ('claude_code.user_prompt', 'claude_code.api_request', 'claude_code.api_error', 'claude_code.tool_result', 'claude_code.tool_decision') " +
-      "  AND timestamp > NOW() - INTERVAL '" + iv + "' " +
-      "ORDER BY timestamp DESC LIMIT " + rowLimit
-    );
-    var data = rowsToObjects(res);
-    if (!data.length) {
-      tbody.innerHTML = '<tr><td colspan="8" class="loading">' + t('empty.no_events') + '</td></tr>';
-      cc_updateSessionsPager(0);
-      return;
-    }
-
-    // Parse events
-    var events = [];
-    var hasPromptId = false;
-    var hasSessionId = false;
-    data.forEach(function(d) {
-      var attrs = cc_parseAttrs(d.log_attributes);
-      var promptId = cc_attr(attrs, 'prompt.id');
-      var sessionId = cc_attr(attrs, 'session.id');
-      var seqRaw = cc_attr(attrs, 'event.sequence');
-      var seq = seqRaw == null ? null : Number(seqRaw);
-      if (seq != null && Number.isNaN(seq)) seq = null;
-      if (promptId) hasPromptId = true;
-      if (sessionId) hasSessionId = true;
-      events.push({
-        timestamp: d.timestamp,
-        body: d.body,
-        seq: seq,
-        promptId: promptId ? String(promptId) : null,
-        sessionId: sessionId ? String(sessionId) : null,
-        model: cc_attr(attrs, 'model'),
-        tool: cc_attr(attrs, 'tool_name'),
-        cost: Number(cc_attr(attrs, 'cost_usd')) || 0,
-        duration: cc_attr(attrs, 'duration_ms'),
-        error: cc_attr(attrs, 'error'),
-        success: cc_attr(attrs, 'success'),
-        inputTokens: Number(cc_attr(attrs, 'input_tokens')) || 0,
-        outputTokens: Number(cc_attr(attrs, 'output_tokens')) || 0,
-        cacheRead: Number(cc_attr(attrs, 'cache_read_tokens')) || 0,
-        cacheCreate: Number(cc_attr(attrs, 'cache_creation_tokens')) || 0,
-        attrs: attrs,
-      });
-    });
-
-    // Build session groups
-    var groups = [];
-    if (hasSessionId) {
-      var bySession = {};
-      events.forEach(function(e) {
-        if (!e.sessionId) return;
-        if (!bySession[e.sessionId]) bySession[e.sessionId] = [];
-        bySession[e.sessionId].push(e);
-      });
-      Object.keys(bySession).forEach(function(sessionId) {
-        var arr = bySession[sessionId];
-        var turns = 0;
-        var tools = 0;
-        var tokens = 0;
-        var cost = 0;
-        var errors = 0;
-        var firstTs = arr[arr.length - 1].timestamp;
-        var lastTs = arr[0].timestamp;
-        arr.forEach(function(e) {
-          if (e.body === 'claude_code.user_prompt') turns++;
-          if (e.body === 'claude_code.tool_result') tools++;
-          if (e.body === 'claude_code.api_request') {
-            tokens += e.inputTokens + e.outputTokens + e.cacheRead + e.cacheCreate;
-            cost += e.cost;
-          }
-          if (e.body === 'claude_code.api_error' || e.error) errors++;
-        });
-        groups.push({
-          sessionId: sessionId,
-          firstTs: firstTs,
-          lastTs: lastTs,
-          turns: turns,
-          tools: tools,
-          tokens: tokens,
-          cost: cost,
-          errors: errors,
-          events: arr,
-        });
-      });
-    } else if (hasPromptId) {
-      var byPrompt = {};
-      events.forEach(function(e) {
-        if (!e.promptId) return;
-        if (!byPrompt[e.promptId]) byPrompt[e.promptId] = cc_newTraceGroup(e.promptId, e.sessionId, e.timestamp);
-        cc_addEventToTraceGroup(byPrompt[e.promptId], e);
-      });
-      Object.values(byPrompt).forEach(function(g) {
-        var tokens = 0;
-        g.events.forEach(function(e) {
-          if (e.body === 'claude_code.api_request') {
-            tokens += (e.inputTokens || 0) + (e.outputTokens || 0) + (e.cacheRead || 0) + (e.cacheCreate || 0);
-          }
-        });
-        groups.push({
-          sessionId: g.promptId,
-          firstTs: g.events[g.events.length - 1]?.timestamp || g.latestTs,
-          lastTs: g.latestTs,
-          turns: g.events.filter(function(e) { return e.body === 'claude_code.user_prompt'; }).length || g.reqs,
-          tools: g.tools,
-          tokens: tokens,
-          cost: g.cost,
-          errors: g.errors,
-          events: g.events,
-        });
-      });
-    }
-
-    // Apply filter
-    groups = groups.filter(function(g) {
-      if (!filterText) return true;
-      return g.sessionId.indexOf(filterText) >= 0;
-    });
-
-    // Sort by latest timestamp descending
-    groups.sort(function(a, b) { return tsToMs(b.lastTs) - tsToMs(a.lastTs); });
-    ccSessionsData = groups;
-    ccSessionsPage = 0;
-    cc_renderSessions();
-
-    // Show truncation warning if the query hit its row limit
-    var warnEl = document.getElementById('cc-sessions-truncation');
-    if (warnEl) warnEl.style.display = data.length >= rowLimit ? 'block' : 'none';
-  } catch (err) {
-    tbody.innerHTML = '<tr><td colspan="8" class="loading">Error: ' + escapeHTML(err.message) + '</td></tr>';
-    cc_updateSessionsPager(0);
-  }
-}
-
-function cc_renderSessions() {
-  var tbody = document.getElementById('cc-sessions-body');
-  if (!tbody) return;
-  var start = ccSessionsPage * ccSessionsPageSize;
-  var page = ccSessionsData.slice(start, start + ccSessionsPageSize);
-
-  if (!page.length) {
-    tbody.innerHTML = '<tr><td colspan="8" class="loading">' + t('empty.no_events') + '</td></tr>';
-    cc_updateSessionsPager(0);
-    return;
-  }
-
-  var tc = getThemeColors();
-  tbody.innerHTML = page.map(function(g, i) {
-    var globalIdx = start + i;
-    var shortId = g.sessionId.length > 12 ? g.sessionId.substring(0, 12) + '\u2026' : g.sessionId;
-    var durationMs = tsToMs(g.lastTs) - tsToMs(g.firstTs);
-    var durStr = durationMs > 0 ? fmtDurMs(durationMs) : '<1s';
-    var errStyle = g.errors > 0 ? 'color:' + tc.red : '';
-    return '<tr class="clickable" onclick="cc_toggleSessionDetail(' + globalIdx + ', this)" title="' + escapeHTML(g.sessionId) + '">' +
-      '<td>' + escapeHTML(shortId) + '</td>' +
-      '<td>' + fmtTime(g.firstTs) + '</td>' +
-      '<td>' + durStr + '</td>' +
-      '<td>' + g.turns + '</td>' +
-      '<td>' + g.tools + '</td>' +
-      '<td>' + fmtNum(g.tokens) + '</td>' +
-      '<td>' + fmtCost(g.cost) + '</td>' +
-      '<td' + (errStyle ? ' style="' + errStyle + '"' : '') + '>' + g.errors + '</td>' +
-      '</tr>';
-  }).join('');
-  cc_updateSessionsPager(page.length);
-}
-
-function cc_toggleSessionDetail(groupIdx, clickedRow) {
-  var prev = document.querySelector('.cc-session-detail-row');
-  if (prev) {
-    var prevIdx = prev.dataset.idx;
-    prev.remove();
-    if (String(prevIdx) === String(groupIdx)) return;
-  }
-
-  var g = ccSessionsData[groupIdx];
-  if (!g) return;
-  var events = g.events.slice().sort(cc_sortPromptEvents);
-
-  var timeline = events.map(function(e, ei) {
-    var evt = (e.body || '').replace('claude_code.', '');
-    var badgeClass = 'badge-ok';
-    if (evt === 'user_prompt') badgeClass = 'badge-prompt';
-    else if (evt === 'api_error' || e.error) badgeClass = 'badge-error';
-    else if (evt === 'tool_result') badgeClass = 'badge-tool';
-    else if (evt === 'api_request') badgeClass = 'badge-request';
-
-    var parts = [];
-    if (e.model) parts.push(e.model);
-    if (e.tool) {
-      var cat = ccToolCategory(e.tool);
-      var icon = CC_CATEGORY_ICONS[cat] || '';
-      parts.push(icon + ' ' + e.tool);
-    }
-    if (e.inputTokens || e.outputTokens) {
-      var tokDetail = fmtNum(e.inputTokens) + ' in / ' + fmtNum(e.outputTokens) + ' out';
-      if (e.cacheRead) tokDetail += ' / ' + fmtNum(e.cacheRead) + ' cache';
-      parts.push(tokDetail);
-    }
-    if (e.cost) parts.push(fmtCost(e.cost));
-    if (e.duration != null) parts.push(fmtDurMs(Number(e.duration)));
-    if (e.success != null) parts.push(e.success === 'true' ? 'ok' : 'failed');
-    if (e.error) {
-      var errStr = String(e.error);
-      parts.push(errStr.length > 60 ? errStr.substring(0, 60) + '\u2026' : errStr);
-    }
-
-    var rowId = 'cc-sd-' + groupIdx + '-' + ei;
-    var attrJson = '';
-    try { attrJson = JSON.stringify(deepParseAttrs(e.attrs || {}), null, 2); } catch (_) { attrJson = '{}'; }
-
-    return '<div class="clickable" style="font-size:12px;padding:4px 0;border-bottom:1px solid var(--border)" ' +
-      'onclick="var d=document.getElementById(\x27' + rowId + '\x27);var v=d.style.display===\x27none\x27;d.style.display=v?\x27block\x27:\x27none\x27;this.querySelector(\x27.expand-arrow\x27).textContent=v?\x27\\u25BC\x27:\x27\\u25B6\x27">' +
-      '<span class="expand-arrow" style="color:var(--text-muted);font-size:10px;margin-right:4px;display:inline-block;width:10px">&#9654;</span>' +
-      '<span style="color:var(--text-secondary);margin-right:6px">' + escapeHTML(fmtTime(e.timestamp)) + '</span>' +
-      '<span class="badge ' + badgeClass + '" style="font-size:10px">' + escapeHTML(evt.toUpperCase()) + '</span> ' +
-      escapeHTML(parts.join(' \u00b7 ')) +
-      '</div>' +
-      '<pre id="' + rowId + '" style="display:none;font-size:11px;color:var(--text-muted);' +
-      'background:var(--bg-secondary);padding:8px;margin:0 0 4px;border-radius:4px;' +
-      'overflow-x:auto;white-space:pre-wrap;word-break:break-all">' +
-      escapeHTML(attrJson) + '</pre>';
-  }).join('');
-
-  // File modifications (from Write/Edit/MultiEdit tool events)
-  var files = {};
-  events.forEach(function(e) {
-    if (e.body === 'claude_code.tool_result' && (e.tool === 'Write' || e.tool === 'Edit' || e.tool === 'MultiEdit')) {
-      var fp = cc_attr(e.attrs, 'file_path') || cc_attr(e.attrs, 'filePath');
-      if (fp) files[fp] = true;
-    }
-  });
-  var fileList = Object.keys(files);
-  var filesHtml = '';
-  if (fileList.length) {
-    filesHtml = '<div style="margin-top:8px"><strong>Files Modified (' + fileList.length + '):</strong>' +
-      '<div style="font-size:12px;color:var(--text-muted);margin-top:4px">' +
-      fileList.map(function(f) { return escapeHTML(f); }).join('<br>') +
-      '</div></div>';
-  }
-
-  var detailRow = document.createElement('tr');
-  detailRow.className = 'cc-session-detail-row trace-detail-row';
-  detailRow.dataset.idx = groupIdx;
-  detailRow.innerHTML = '<td colspan="8"><div class="trace-detail-inner">' +
-    '<div class="detail-header"><h3>Session: ' + escapeHTML(g.sessionId) + '</h3>' +
-    '<button class="close-btn" onclick="this.closest(\'.cc-session-detail-row\').remove()">&times;</button></div>' +
-    '<div style="margin-bottom:8px;font-size:13px">' +
-    fmtNum(events.length) + ' events \u00b7 ' +
-    g.turns + ' turns \u00b7 ' +
-    g.tools + ' tool calls \u00b7 ' +
-    fmtNum(g.tokens) + ' tokens \u00b7 ' +
-    fmtCost(g.cost) + ' \u00b7 ' +
-    g.errors + ' errors</div>' +
-    filesHtml +
-    '<div style="max-height:400px;overflow-y:auto;margin-top:8px">' + timeline + '</div>' +
-    '</div></td>';
-  clickedRow.after(detailRow);
 }
 
 // ===================================================================
@@ -1412,7 +974,7 @@ async function cc_loadToolFailures() {
       return;
     }
     tbody.innerHTML = data.map(function(d, i) {
-      var errText = d.error || 'unknown error';
+      var errText = d.error || t('sessions.error_unknown');
       if (errText.length > 80) errText = errText.substring(0, 80) + '\u2026';
       var rowId = 'cc-fail-' + i;
       var attrJson = '';

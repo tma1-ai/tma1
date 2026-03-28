@@ -947,7 +947,7 @@ async function oc_loadTraces() {
       var shortName = oc_shortSpanName(d.span_name);
       var isErr = d.span_status_code === 'STATUS_CODE_ERROR';
       var statusHtml = isErr
-        ? '<span class="badge badge-error">ERROR</span>'
+        ? '<span class="badge badge-error">' + t('filter.error') + '</span>'
         : (d.outcome ? escapeHTML(d.outcome) : '\u2014');
       return '<tr class="clickable" onclick="oc_toggleTraceDetail(this, \'' + escapeJSString(d.trace_id) + '\')">' +
       '<td>' + fmtTime(d.timestamp) + '</td>' +

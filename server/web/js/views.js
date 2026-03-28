@@ -128,7 +128,7 @@ function parseHash() {
   var h = location.hash.replace('#', '');
   if (!h) return { view: null, tab: null, range: null };
   var parts = h.split('/');
-  var validRanges = ['1h', '6h', '24h', '7d', '30d'];
+  var validRanges = ['15m', '30m', '1h', '6h', '24h', '7d', '30d'];
   var range = null;
   if (parts.length > 0 && validRanges.includes(parts[parts.length - 1])) {
     range = parts.pop();
@@ -188,11 +188,11 @@ async function initViews() {
 
   viewTabsEl.innerHTML = '';
   var views = [];
-  if (hasCCView) views.push({ id: 'claude-code', label: 'Claude Code' });
-  if (dataSources.hasCodex) views.push({ id: 'codex', label: 'Codex' });
-  if (dataSources.hasOpenClaw) views.push({ id: 'openclaw', label: 'OpenClaw' });
-  if (dataSources.hasGenAITraces) views.push({ id: 'traces', label: 'OTel GenAI' });
-  if (dataSources.hasHookEvents) views.push({ id: 'sessions', label: 'Sessions' });
+  if (hasCCView) views.push({ id: 'claude-code', label: t('view.claude_code') });
+  if (dataSources.hasCodex) views.push({ id: 'codex', label: t('view.codex') });
+  if (dataSources.hasOpenClaw) views.push({ id: 'openclaw', label: t('view.openclaw') });
+  if (dataSources.hasGenAITraces) views.push({ id: 'traces', label: t('view.otel_genai') });
+  if (dataSources.hasHookEvents) views.push({ id: 'sessions', label: t('view.sessions') });
 
   if (views.length === 0) {
     document.getElementById('setup-notice').style.display = 'block';
@@ -280,6 +280,7 @@ document.querySelectorAll('#oc-tabs .tab').forEach(function(btn) {
 
 // Tab navigation (Claude Code view)
 document.querySelectorAll('#cc-tabs .tab').forEach(function(btn) {
+  if (btn.dataset.link) return; // skip link-style tabs (handled by onclick)
   btn.addEventListener('click', function() {
     document.querySelectorAll('#cc-tabs .tab').forEach(function(t) { t.classList.remove('active'); });
     document.querySelectorAll('#view-claude-code .tab-content').forEach(function(t) { t.classList.remove('active'); });
@@ -292,10 +293,9 @@ document.querySelectorAll('#cc-tabs .tab').forEach(function(btn) {
 
 function cc_onTabChange(tab) {
   if (tab === 'cc-overview') cc_loadOverview();
-  else if (tab === 'cc-sessions') cc_loadSessions();
   else if (tab === 'cc-tools') cc_loadToolsTab();
   else if (tab === 'cc-cost') cc_loadCostTab();
-  else if (tab === 'cc-search') cc_loadAnomalies();
+  else if (tab === 'cc-anomalies') cc_loadAnomalies();
 }
 
 // Tab navigation (Sessions view)
@@ -312,6 +312,7 @@ document.querySelectorAll('#sess-tabs .tab').forEach(function(btn) {
 
 // Tab navigation (Codex view)
 document.querySelectorAll('#cdx-tabs .tab').forEach(function(btn) {
+  if (btn.dataset.link) return; // skip link-style tabs (handled by onclick)
   btn.addEventListener('click', function() {
     document.querySelectorAll('#cdx-tabs .tab').forEach(function(t) { t.classList.remove('active'); });
     document.querySelectorAll('#view-codex .tab-content').forEach(function(t) { t.classList.remove('active'); });
@@ -321,6 +322,12 @@ document.querySelectorAll('#cdx-tabs .tab').forEach(function(btn) {
     updateHash();
   });
 });
+
+function switchToSessions(source) {
+  var filter = document.getElementById('sess-source-filter');
+  if (filter) filter.value = source || '';
+  switchView('sessions');
+}
 
 function onTimeRangeChange() {
   currentTimeRange = document.getElementById('time-range').value;

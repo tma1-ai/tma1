@@ -60,7 +60,8 @@ var sessionTableDDLs = []string{
     notification_type STRING NULL,
     "message"         STRING NULL,
     cwd               STRING NULL,
-    transcript_path   STRING NULL
+    transcript_path   STRING NULL,
+    conversation_id   STRING NULL
 ) WITH ('append_mode'='true')`,
 	`CREATE TABLE IF NOT EXISTS tma1_messages (
     ts              TIMESTAMP TIME INDEX,
@@ -70,8 +71,30 @@ var sessionTableDDLs = []string{
     content         STRING NULL FULLTEXT INDEX WITH (backend='bloom', analyzer='English', case_sensitive='false'),
     model           STRING NULL INVERTED INDEX,
     tool_name       STRING NULL,
-    tool_use_id     STRING NULL
+    tool_use_id     STRING NULL,
+    input_tokens    BIGINT NULL,
+    output_tokens   BIGINT NULL,
+    cache_read_tokens      BIGINT NULL,
+    cache_creation_tokens  BIGINT NULL
 ) WITH ('append_mode'='true')`,
+}
+
+// sessionTableUpgrades are ALTER TABLE statements for adding columns to existing tables.
+// GreptimeDB returns an error if the column already exists, which we silently ignore.
+var sessionTableUpgrades = []string{
+	`ALTER TABLE tma1_hook_events ADD COLUMN conversation_id STRING NULL`,
+	`ALTER TABLE tma1_messages ADD COLUMN input_tokens BIGINT NULL`,
+	`ALTER TABLE tma1_messages ADD COLUMN output_tokens BIGINT NULL`,
+	`ALTER TABLE tma1_messages ADD COLUMN cache_read_tokens BIGINT NULL`,
+	`ALTER TABLE tma1_messages ADD COLUMN cache_creation_tokens BIGINT NULL`,
+}
+
+func isIgnorableSchemaUpgradeError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "already exists") || strings.Contains(msg, "duplicate")
 }
 
 // InitSessionTables creates the session tables.
@@ -81,6 +104,12 @@ func InitSessionTables(httpPort int, logger *slog.Logger) error {
 	for _, ddl := range sessionTableDDLs {
 		if err := execSQL(sqlURL, ddl); err != nil {
 			return fmt.Errorf("init session tables: %w", err)
+		}
+	}
+	// Upgrade existing tables: ignore only duplicate-column errors.
+	for _, alter := range sessionTableUpgrades {
+		if err := execSQL(sqlURL, alter); err != nil && !isIgnorableSchemaUpgradeError(err) {
+			return fmt.Errorf("upgrade session tables: %w", err)
 		}
 	}
 	logger.Info("session tables initialized")

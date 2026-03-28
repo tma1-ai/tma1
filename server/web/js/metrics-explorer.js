@@ -236,7 +236,7 @@ async function meRunQuery(prefix) {
     var json = await resp.json();
 
     if (json.status === 'error') {
-      chartArea.innerHTML = '<div class="chart-empty">' + t('empty.promql_error') + ': ' + escapeHTML(json.error || 'unknown error') + '</div>';
+      chartArea.innerHTML = '<div class="chart-empty">' + t('empty.promql_error') + ': ' + escapeHTML(json.error || t('sessions.error_unknown')) + '</div>';
       return;
     }
 
