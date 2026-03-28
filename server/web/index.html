@@ -38,6 +38,8 @@
       </div>
       <div class="view-tabs" id="view-tabs" style="display:none"></div>
       <select class="time-select" id="time-range" onchange="onTimeRangeChange()">
+        <option value="15m" data-i18n="time.15m">Last 15m</option>
+        <option value="30m" data-i18n="time.30m">Last 30m</option>
         <option value="1h" data-i18n="time.1h">Last 1h</option>
         <option value="6h" data-i18n="time.6h">Last 6h</option>
         <option value="24h" selected data-i18n="time.24h">Last 24h</option>
@@ -124,10 +126,10 @@
 
     <div class="tabs" id="cc-tabs">
       <button class="tab active" data-cctab="cc-overview" data-i18n="tab.cc_overview">Overview</button>
-      <button class="tab" data-cctab="cc-sessions" data-i18n="tab.cc_sessions">Sessions</button>
       <button class="tab" data-cctab="cc-tools" data-i18n="tab.cc_tools">Tools</button>
       <button class="tab" data-cctab="cc-cost" data-i18n="tab.cc_cost">Cost</button>
-      <button class="tab" data-cctab="cc-search" data-i18n="tab.cc_search">Search</button>
+      <button class="tab" data-cctab="cc-anomalies" data-i18n="tab.cc_anomalies">Anomalies</button>
+      <button class="tab" data-link="sessions" onclick="switchToSessions('claude_code')" data-i18n="tab.sessions">Sessions</button>
     </div>
 
     <!-- CC Overview -->
@@ -170,42 +172,6 @@
         <div id="cc-metrics-quick-actions" class="me-quick-actions"></div>
         <div id="cc-metrics-chart-area"></div>
         <div id="cc-metrics-legend" class="me-legend"></div>
-      </div>
-    </div>
-
-    <!-- CC Sessions -->
-    <div class="tab-content" id="tab-cc-sessions">
-      <div class="filters">
-        <input class="filter-input" id="cc-session-filter" type="text"
-               placeholder="Filter by session.id or prompt.id..." data-i18n-placeholder="filter.filter_session_prompt" onkeydown="if(event.key==='Enter')cc_loadSessions()" />
-        <button class="filter-btn primary" onclick="cc_loadSessions()" data-i18n="btn.refresh">Refresh</button>
-      </div>
-      <div id="cc-sessions-truncation" class="truncation-warning" style="display:none" data-i18n="warning.truncation">
-        Results may be incomplete. Try a shorter time range for accurate totals.
-      </div>
-      <div style="overflow-x:auto">
-        <table>
-          <thead>
-            <tr>
-              <th data-i18n="table.session">Session</th>
-              <th data-i18n="table.started">Started</th>
-              <th data-i18n="table.duration">Duration</th>
-              <th data-i18n="table.turns">Turns</th>
-              <th data-i18n="table.tools">Tools</th>
-              <th data-i18n="table.tokens">Tokens</th>
-              <th data-i18n="table.cost">Cost</th>
-              <th data-i18n="table.errors">Errors</th>
-            </tr>
-          </thead>
-          <tbody id="cc-sessions-body">
-            <tr><td colspan="8" class="loading" data-i18n="empty.loading">Loading...</td></tr>
-          </tbody>
-        </table>
-      </div>
-      <div class="filters" style="margin-top:12px;justify-content:flex-end">
-        <button class="filter-btn" id="cc-sessions-prev-btn" onclick="cc_prevSessionsPage()" data-i18n="pager.prev">Prev</button>
-        <span id="cc-sessions-page-info" style="color:var(--text-muted);font-size:13px;min-width:120px;text-align:center">Page 1</span>
-        <button class="filter-btn" id="cc-sessions-next-btn" onclick="cc_nextSessionsPage()" data-i18n="pager.next">Next</button>
       </div>
     </div>
 
@@ -317,15 +283,8 @@
     </div>
 
     <!-- CC Search -->
-    <div class="tab-content" id="tab-cc-search">
-      <div class="filters">
-        <input class="filter-input" id="cc-search-input" type="text"
-               data-i18n-placeholder="filter.search_events"
-               placeholder="Search log events..." onkeydown="if(event.key==='Enter')cc_doSearch()" />
-        <button class="filter-btn primary" onclick="cc_doSearch()" data-i18n="btn.search">Search</button>
-      </div>
-      <div class="search-results" id="cc-search-results"></div>
-      <div class="chart-container" style="margin-top:24px">
+    <div class="tab-content" id="tab-cc-anomalies">
+      <div class="chart-container">
         <h3 data-i18n="section.anomaly_highlights">Anomaly Highlights</h3>
         <div class="anomaly-list" id="cc-anomaly-list">
           <div class="loading" data-i18n="empty.loading_anomalies">Loading anomalies...</div>
@@ -361,9 +320,10 @@
 
     <div class="tabs" id="cdx-tabs">
       <button class="tab active" data-cdxtab="cdx-overview" data-i18n="tab.cdx_overview">Overview</button>
-      <button class="tab" data-cdxtab="cdx-sessions" data-i18n="tab.cdx_sessions">Sessions</button>
       <button class="tab" data-cdxtab="cdx-tools" data-i18n="tab.cdx_tools">Tools</button>
       <button class="tab" data-cdxtab="cdx-cost" data-i18n="tab.cdx_cost">Cost</button>
+      <button class="tab" data-cdxtab="cdx-anomalies" data-i18n="tab.cdx_anomalies">Anomalies</button>
+      <button class="tab" data-link="sessions" onclick="switchToSessions('codex')" data-i18n="tab.sessions">Sessions</button>
     </div>
 
     <div class="tab-content active" id="tab-cdx-overview">
@@ -405,41 +365,6 @@
         <div id="cdx-metrics-quick-actions" class="me-quick-actions"></div>
         <div id="cdx-metrics-chart-area"></div>
         <div id="cdx-metrics-legend" class="me-legend"></div>
-      </div>
-    </div>
-
-    <!-- Codex Sessions -->
-    <div class="tab-content" id="tab-cdx-sessions">
-      <div class="filters">
-        <input class="filter-input" id="cdx-session-filter" type="text"
-               placeholder="Filter by call_id..." data-i18n-placeholder="filter.filter_call_id" onkeydown="if(event.key==='Enter')cdx_loadSessions()" />
-        <button class="filter-btn primary" onclick="cdx_loadSessions()" data-i18n="btn.refresh">Refresh</button>
-      </div>
-      <div id="cdx-sessions-truncation" class="truncation-warning" style="display:none" data-i18n="warning.truncation">
-        Results may be incomplete. Try a shorter time range for accurate totals.
-      </div>
-      <div style="overflow-x:auto">
-        <table>
-          <thead>
-            <tr>
-              <th data-i18n="table.turn">Turn</th>
-              <th data-i18n="table.model">Model</th>
-              <th data-i18n="table.tokens">Tokens</th>
-              <th data-i18n="table.tools">Tools</th>
-              <th data-i18n="table.cost">Cost</th>
-              <th data-i18n="table.duration">Duration</th>
-              <th data-i18n="table.status">Status</th>
-            </tr>
-          </thead>
-          <tbody id="cdx-sessions-body">
-            <tr><td colspan="7" class="loading" data-i18n="empty.loading">Loading...</td></tr>
-          </tbody>
-        </table>
-      </div>
-      <div class="filters" style="margin-top:12px;justify-content:flex-end">
-        <button class="filter-btn" id="cdx-sessions-prev-btn" onclick="cdx_prevSessionsPage()" data-i18n="pager.prev">Prev</button>
-        <span id="cdx-sessions-page-info" style="color:var(--text-muted);font-size:13px;min-width:120px;text-align:center">Page 1</span>
-        <button class="filter-btn" id="cdx-sessions-next-btn" onclick="cdx_nextSessionsPage()" data-i18n="pager.next">Next</button>
       </div>
     </div>
 
@@ -529,6 +454,15 @@
             <tr><td colspan="4" class="loading" data-i18n="empty.loading">Loading...</td></tr>
           </tbody>
         </table>
+      </div>
+    </div>
+
+    <div class="tab-content" id="tab-cdx-anomalies">
+      <div class="chart-container">
+        <h3 data-i18n="section.anomaly_highlights">Anomaly Highlights</h3>
+        <div class="anomaly-list" id="cdx-anomaly-list">
+          <div class="loading" data-i18n="empty.loading_anomalies">Loading anomalies...</div>
+        </div>
       </div>
     </div>
   </div>
@@ -1190,7 +1124,6 @@
         </table>
       </div>
       <div class="pagination" id="sess-pagination"></div>
-      <div id="sess-detail" style="display:none"></div>
     </div>
 
     <div class="tab-content" id="tab-sess-search">
@@ -1204,6 +1137,11 @@
       <div class="search-results" id="sess-search-results"></div>
     </div>
   </div><!-- /view-sessions -->
+
+  <!-- Session Detail Overlay -->
+  <div id="sess-detail-overlay" class="sess-overlay" style="display:none">
+    <div id="sess-detail-content"></div>
+  </div>
 
   <!-- Agent Canvas Overlay -->
   <div id="agent-canvas-overlay" class="ac-overlay" style="display:none">

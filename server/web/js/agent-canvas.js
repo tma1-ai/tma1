@@ -57,7 +57,7 @@ var AgentCanvas = (function () {
       vx: 0, vy: 0, r: isMain ? MAIN_R : SUB_R,
       label: label || (isMain ? 'main' : id.slice(0, 8)),
       state: 'idle', breath: Math.random() * 6.28, isMain: isMain, pinned: false,
-      opacity: 0, // fade in
+      opacity: 0, lastActive: globalTime,
     };
     agentToolCounts[id] = 0;
     return agents[id];
@@ -88,13 +88,25 @@ var AgentCanvas = (function () {
 
     for (i = 0; i < ids.length; i++) {
       a = agents[ids[i]];
-      // Fade in.
-      if (a.opacity < 1) a.opacity = Math.min(1, a.opacity + dt * 3);
+      // Auto-complete idle subagents (handles missing SubagentStop, e.g. Codex).
+      // Only 'thinking' state: agent finished tools but no SubagentStop arrived.
+      if (!a.isMain && a.state === 'thinking' && globalTime - a.lastActive > 10) {
+        a.state = 'complete';
+      }
+      // Fade out completed subagents, then remove.
+      if (a.state === 'complete' && !a.isMain) {
+        a.opacity -= dt * 0.8;
+        if (a.opacity <= 0) { delete agents[ids[i]]; continue; }
+      } else if (a.opacity < 1) {
+        // Fade in.
+        a.opacity = Math.min(1, a.opacity + dt * 3);
+      }
       if (a.pinned) continue;
       a.vx += (cx - a.x) * CENTER_K;
       a.vy += (cy - a.y) * CENTER_K;
       for (j = i + 1; j < ids.length; j++) {
         b = agents[ids[j]];
+        if (!b) continue;
         dx = b.x - a.x; dy = b.y - a.y;
         distSq = dx * dx + dy * dy + 1;
         force = CHARGE_K / distSq;
@@ -493,7 +505,7 @@ var AgentCanvas = (function () {
         addEdge(mainId, aId);
       }
       var agNode = agents[aId] || agents[mainId];
-      if (agNode) agNode.state = 'tool_calling';
+      if (agNode) { agNode.state = 'tool_calling'; agNode.lastActive = globalTime; }
       agentToolCounts[aId || mainId] = (agentToolCounts[aId || mainId] || 0) + 1;
       toolCalls[ev.tool_use_id] = {
         toolUseId: ev.tool_use_id, agentId: aId || mainId,
@@ -512,7 +524,7 @@ var AgentCanvas = (function () {
         tc.toolResult = typeof rawResult === 'object' ? JSON.stringify(rawResult) : rawResult;
       }
       var aId2 = ev.agent_id || mainId;
-      if (agents[aId2]) agents[aId2].state = 'thinking';
+      if (agents[aId2]) { agents[aId2].state = 'thinking'; agents[aId2].lastActive = globalTime; }
       break;
     }
     case 'SubagentStart': {
@@ -889,7 +901,7 @@ var AgentCanvas = (function () {
     var bar = document.getElementById('agent-canvas-controls');
     var html = '';
     if (mode === 'replay') {
-      html += '<button onclick="AgentCanvas.togglePause()" id="ac-pause-btn" aria-label="Pause/Play">\u23F8</button>';
+      html += '<button onclick="AgentCanvas.togglePause()" id="ac-pause-btn" aria-label="' + t('canvas.pause_play') + '">\u23F8</button>';
       html += '<select onchange="AgentCanvas.setSpeed(Number(this.value))">';
       html += '<option value="0.5">0.5x</option><option value="1" selected>1x</option>';
       html += '<option value="2">2x</option><option value="5">5x</option>';
@@ -898,7 +910,7 @@ var AgentCanvas = (function () {
       html += '<span class="ac-live-dot"></span> ' + t('canvas.live_label');
     }
     html += '<button onclick="AgentCanvas.zoomToFit()" title="' + t('canvas.zoom_to_fit') + '" aria-label="' + t('canvas.zoom_to_fit') + '">&#x2922;</button>';
-    html += '<button onclick="AgentCanvas.close()" class="ac-close" aria-label="Close">\u2715</button>';
+    html += '<button onclick="AgentCanvas.close()" class="ac-close" aria-label="' + t('ui.close') + '">\u2715</button>';
     bar.innerHTML = html;
   }
 

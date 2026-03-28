@@ -184,17 +184,26 @@ func (w *Watcher) tailFile(ctx context.Context, sessionID, filePath string, seen
 
 // transcriptEntry matches the JSONL format written by Claude Code.
 type transcriptEntry struct {
-	SessionID string           `json:"sessionId"`
-	Type      string           `json:"type"` // "user", "assistant", "progress"
-	UUID      string           `json:"uuid"`
-	Message   *transcriptMsg   `json:"message"`
-	CWD       string           `json:"cwd"`
+	SessionID string         `json:"sessionId"`
+	Type      string         `json:"type"` // "user", "assistant", "progress"
+	UUID      string         `json:"uuid"`
+	Message   *transcriptMsg `json:"message"`
+	CWD       string         `json:"cwd"`
 }
 
 type transcriptMsg struct {
 	Role    string          `json:"role"`
 	Model   string          `json:"model"`
 	Content json.RawMessage `json:"content"` // string or []contentBlock
+	Usage   *msgUsage       `json:"usage"`
+}
+
+// msgUsage captures token counts from the API response.
+type msgUsage struct {
+	InputTokens         int64 `json:"input_tokens"`
+	OutputTokens        int64 `json:"output_tokens"`
+	CacheReadTokens     int64 `json:"cache_read_input_tokens"`
+	CacheCreationTokens int64 `json:"cache_creation_input_tokens"`
 }
 
 type contentBlock struct {
@@ -255,12 +264,18 @@ func (w *Watcher) processLine(sessionID, line string, seen map[string]struct{}) 
 		emitType = "assistant"
 	}
 
+	// Get usage from assistant messages (nil for user messages).
+	var usage *msgUsage
+	if entry.Type == "assistant" && entry.Message.Usage != nil {
+		usage = entry.Message.Usage
+	}
+
 	// Try as string first.
 	var strContent string
 	if err := json.Unmarshal(content, &strContent); err == nil {
 		strContent = strings.TrimSpace(strContent)
 		if strContent != "" && !isDup(emitType, strContent) {
-			w.insertMessage(sessionID, emitType, role, truncate(strContent, maxContentLen), model, "", "")
+			w.insertMessage(sessionID, emitType, role, truncate(strContent, maxContentLen), model, "", "", usage)
 		}
 		return
 	}
@@ -281,12 +296,13 @@ func (w *Watcher) processLine(sessionID, line string, seen map[string]struct{}) 
 		case "text":
 			text := strings.TrimSpace(b.Text)
 			if text != "" && !isDup(emitRole, text) {
-				w.insertMessage(sessionID, emitRole, role, truncate(text, maxContentLen), model, "", "")
+				w.insertMessage(sessionID, emitRole, role, truncate(text, maxContentLen), model, "", "", usage)
+				usage = nil // attach usage to first emitted message only
 			}
 		case "thinking":
 			thinking := strings.TrimSpace(b.Thinking)
 			if thinking != "" && !isDup("thinking", thinking) {
-				w.insertMessage(sessionID, "thinking", role, truncate(thinking, maxContentLen), model, "", "")
+				w.insertMessage(sessionID, "thinking", role, truncate(thinking, maxContentLen), model, "", "", nil)
 			}
 		case "tool_use":
 			// tool_use dedup by ID, not content.
@@ -295,14 +311,15 @@ func (w *Watcher) processLine(sessionID, line string, seen map[string]struct{}) 
 			}
 			seen["tooluse:"+b.ID] = struct{}{}
 			inputStr := truncate(string(b.Input), maxToolInput)
-			w.insertMessage(sessionID, "tool_use", emitRole, inputStr, model, b.Name, b.ID)
+			w.insertMessage(sessionID, "tool_use", emitRole, inputStr, model, b.Name, b.ID, usage)
+			usage = nil
 		case "tool_result":
 			if _, ok := seen["toolresult:"+b.ToolUseID]; ok {
 				continue
 			}
 			seen["toolresult:"+b.ToolUseID] = struct{}{}
 			resultStr := extractToolResultContent(b.Content)
-			w.insertMessage(sessionID, "tool_result", role, truncate(resultStr, maxToolContent), model, "", b.ToolUseID)
+			w.insertMessage(sessionID, "tool_result", role, truncate(resultStr, maxToolContent), model, "", b.ToolUseID, nil)
 		}
 	}
 }
@@ -332,7 +349,7 @@ func extractToolResultContent(raw json.RawMessage) string {
 	return string(raw)
 }
 
-func (w *Watcher) insertMessage(sessionID, messageType, role, content, model, toolName, toolUseID string) {
+func (w *Watcher) insertMessage(sessionID, messageType, role, content, model, toolName, toolUseID string, usage *msgUsage) {
 	// Use a monotonically increasing timestamp so batch-processed lines get distinct,
 	// ordered timestamps instead of all sharing the same time.Now().
 	now := time.Now().UnixMilli()
@@ -347,18 +364,40 @@ func (w *Watcher) insertMessage(sessionID, messageType, role, content, model, to
 			break
 		}
 	}
-	sql := fmt.Sprintf(
-		"INSERT INTO tma1_messages (ts, session_id, message_type, \"role\", content, model, tool_name, tool_use_id) "+
-			"VALUES (%d, '%s', '%s', '%s', '%s', '%s', '%s', '%s')",
-		now,
-		escapeSQLString(sessionID),
-		escapeSQLString(messageType),
-		escapeSQLString(role),
-		escapeSQLString(content),
-		escapeSQLString(model),
-		escapeSQLString(toolName),
-		escapeSQLString(toolUseID),
-	)
+
+	var sql string
+	if usage != nil {
+		sql = fmt.Sprintf(
+			"INSERT INTO tma1_messages (ts, session_id, message_type, \"role\", content, model, tool_name, tool_use_id, "+
+				"input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens) "+
+				"VALUES (%d, '%s', '%s', '%s', '%s', '%s', '%s', '%s', %d, %d, %d, %d)",
+			now,
+			escapeSQLString(sessionID),
+			escapeSQLString(messageType),
+			escapeSQLString(role),
+			escapeSQLString(content),
+			escapeSQLString(model),
+			escapeSQLString(toolName),
+			escapeSQLString(toolUseID),
+			usage.InputTokens,
+			usage.OutputTokens,
+			usage.CacheReadTokens,
+			usage.CacheCreationTokens,
+		)
+	} else {
+		sql = fmt.Sprintf(
+			"INSERT INTO tma1_messages (ts, session_id, message_type, \"role\", content, model, tool_name, tool_use_id) "+
+				"VALUES (%d, '%s', '%s', '%s', '%s', '%s', '%s', '%s')",
+			now,
+			escapeSQLString(sessionID),
+			escapeSQLString(messageType),
+			escapeSQLString(role),
+			escapeSQLString(content),
+			escapeSQLString(model),
+			escapeSQLString(toolName),
+			escapeSQLString(toolUseID),
+		)
+	}
 
 	go func() {
 		insertSem <- struct{}{}        // acquire

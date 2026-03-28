@@ -232,9 +232,10 @@ type codexResponseItem struct {
 
 // codexFileContext tracks per-file agent identity (main vs subagent).
 type codexFileContext struct {
-	fileID    string
-	agentID   string
-	agentType string
+	fileID         string
+	agentID        string
+	agentType      string
+	conversationID string // from session_meta.payload.id (= OTel conversation.id)
 }
 
 func (w *Watcher) processCodexLine(sessionID, line string, seen map[string]struct{}, fctx *codexFileContext) {
@@ -253,21 +254,25 @@ func (w *Watcher) processCodexLine(sessionID, line string, seen map[string]struc
 	case "session_meta":
 		// Detect subagent from source field: {"subagent": "review"} vs "cli"
 		var meta struct {
+			ID     string          `json:"id"` // conversation ID (= OTel conversation.id)
 			Source json.RawMessage `json:"source"`
 			CWD    string          `json:"cwd"`
 		}
 		if err := json.Unmarshal(ev.Payload, &meta); err == nil {
+			if meta.ID != "" {
+				fctx.conversationID = meta.ID
+			}
 			var subSource struct {
 				Subagent string `json:"subagent"`
 			}
 			if json.Unmarshal(meta.Source, &subSource) == nil && subSource.Subagent != "" {
 				fctx.agentID = codexSubagentID(fctx.fileID, subSource.Subagent)
 				fctx.agentType = subSource.Subagent
-				w.insertCodexSubagentEvent(sessionID, ts, fctx.agentID, fctx.agentType)
+				w.insertCodexSubagentEvent(sessionID, ts, fctx.agentID, fctx.agentType, fctx.conversationID)
 				break
 			}
 		}
-		w.insertCodexSessionStart(sessionID, ts, meta.CWD)
+		w.insertCodexSessionStart(sessionID, ts, meta.CWD, fctx.conversationID)
 
 	case "turn_context":
 		// Extract model name and store as a message with model field set.
@@ -276,6 +281,33 @@ func (w *Watcher) processCodexLine(sessionID, line string, seen map[string]struc
 		}
 		if json.Unmarshal(ev.Payload, &turnCtx) == nil && turnCtx.Model != "" {
 			w.insertCodexModelMessage(sessionID, ts, turnCtx.Model, seen)
+		}
+
+	case "event_msg":
+		var eventMsg struct {
+			Type    string `json:"type"`
+			Message string `json:"message"`
+			Phase   string `json:"phase"`
+		}
+		if err := json.Unmarshal(ev.Payload, &eventMsg); err != nil {
+			return
+		}
+		switch eventMsg.Type {
+		case "task_complete":
+			// Emit SubagentStop for subagent files.
+			if fctx.agentID != "" {
+				w.insertCodexHookEvent(sessionID, ts, "SubagentStop", "", "", "", "", fctx)
+			}
+		case "user_message":
+			msg := strings.TrimSpace(eventMsg.Message)
+			if msg != "" {
+				w.insertCodexMessage(sessionID, ts, "user", msg, seen)
+			}
+		case "agent_message":
+			msg := strings.TrimSpace(eventMsg.Message)
+			if msg != "" {
+				w.insertCodexMessage(sessionID, ts, "assistant", msg, seen)
+			}
 		}
 
 	case "response_item":
@@ -409,7 +441,7 @@ func (w *Watcher) insertCodexMessage(sessionID string, ts time.Time, role, conte
 	}()
 }
 
-func (w *Watcher) insertCodexSessionStart(sessionID string, ts time.Time, cwd string) {
+func (w *Watcher) insertCodexSessionStart(sessionID string, ts time.Time, cwd, conversationID string) {
 	msTs := ts.UnixMilli()
 	for {
 		prev := lastInsertTS.Load()
@@ -426,11 +458,12 @@ func (w *Watcher) insertCodexSessionStart(sessionID string, ts time.Time, cwd st
 	sql := fmt.Sprintf(
 		"INSERT INTO tma1_hook_events "+
 			"(ts, session_id, event_type, agent_source, tool_name, tool_input, tool_result, "+
-			"tool_use_id, agent_id, agent_type, notification_type, \"message\", cwd, transcript_path) "+
-			"VALUES (%d, '%s', 'SessionStart', 'codex', '', '', '', '', '', '', '', '', '%s', '')",
+			"tool_use_id, agent_id, agent_type, notification_type, \"message\", cwd, transcript_path, conversation_id) "+
+			"VALUES (%d, '%s', 'SessionStart', 'codex', '', '', '', '', '', '', '', '', '%s', '', '%s')",
 		msTs,
 		escapeSQLString(sessionID),
 		escapeSQLString(truncate(cwd, 512)),
+		escapeSQLString(conversationID),
 	)
 	go func() {
 		insertSem <- struct{}{}
@@ -446,7 +479,7 @@ func codexSubagentID(fileID, agentType string) string {
 	return agentType
 }
 
-func (w *Watcher) insertCodexSubagentEvent(sessionID string, ts time.Time, agentID, agentType string) {
+func (w *Watcher) insertCodexSubagentEvent(sessionID string, ts time.Time, agentID, agentType, conversationID string) {
 	msTs := ts.UnixMilli()
 	for {
 		prev := lastInsertTS.Load()
@@ -463,12 +496,13 @@ func (w *Watcher) insertCodexSubagentEvent(sessionID string, ts time.Time, agent
 	sql := fmt.Sprintf(
 		"INSERT INTO tma1_hook_events "+
 			"(ts, session_id, event_type, agent_source, tool_name, tool_input, tool_result, "+
-			"tool_use_id, agent_id, agent_type, notification_type, \"message\", cwd, transcript_path) "+
-			"VALUES (%d, '%s', 'SubagentStart', 'codex', '', '', '', '', '%s', '%s', '', '', '', '')",
+			"tool_use_id, agent_id, agent_type, notification_type, \"message\", cwd, transcript_path, conversation_id) "+
+			"VALUES (%d, '%s', 'SubagentStart', 'codex', '', '', '', '', '%s', '%s', '', '', '', '', '%s')",
 		msTs,
 		escapeSQLString(sessionID),
 		escapeSQLString(agentID),
 		escapeSQLString(agentType),
+		escapeSQLString(conversationID),
 	)
 	go func() {
 		insertSem <- struct{}{}
@@ -498,11 +532,16 @@ func (w *Watcher) insertCodexHookEvent(sessionID string, ts time.Time, eventType
 		agentType = fctx.agentType
 	}
 
+	conversationID := ""
+	if fctx != nil {
+		conversationID = fctx.conversationID
+	}
+
 	sql := fmt.Sprintf(
 		"INSERT INTO tma1_hook_events "+
 			"(ts, session_id, event_type, agent_source, tool_name, tool_input, tool_result, "+
-			"tool_use_id, agent_id, agent_type, notification_type, \"message\", cwd, transcript_path) "+
-			"VALUES (%d, '%s', '%s', 'codex', '%s', '%s', '%s', '%s', '%s', '%s', '', '', '', '')",
+			"tool_use_id, agent_id, agent_type, notification_type, \"message\", cwd, transcript_path, conversation_id) "+
+			"VALUES (%d, '%s', '%s', 'codex', '%s', '%s', '%s', '%s', '%s', '%s', '', '', '', '', '%s')",
 		msTs,
 		escapeSQLString(sessionID),
 		escapeSQLString(eventType),
@@ -512,6 +551,7 @@ func (w *Watcher) insertCodexHookEvent(sessionID string, ts time.Time, eventType
 		escapeSQLString(toolUseID),
 		escapeSQLString(agentID),
 		escapeSQLString(agentType),
+		escapeSQLString(conversationID),
 	)
 	go func() {
 		insertSem <- struct{}{}

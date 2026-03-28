@@ -602,6 +602,11 @@ tr.active-trace td { background: var(--bg-hover); }
 .sess-timeline-scroll { max-height: 70vh; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); }
 .sess-timeline { display: flex; flex-direction: column; gap: 2px; padding: 8px; }
 
+/* --- Timeline item highlight (search / API call navigation) --- */
+.tl-item-wrap { transition: background 0.6s ease-out; border-radius: 8px; }
+.tl-highlight { background: rgba(121,192,255,0.18); box-shadow: inset 0 0 0 2px rgba(121,192,255,0.4); }
+[data-theme="light"] .tl-highlight { background: rgba(31,111,235,0.1); box-shadow: inset 0 0 0 2px rgba(31,111,235,0.25); }
+
 /* --- Timeline items --- */
 .tl-item { display: flex; align-items: flex-start; gap: 8px; padding: 6px 12px; border-radius: 6px; font-size: 13px; line-height: 1.5; }
 .tl-time { color: var(--text-dim); font-size: 11px; min-width: 72px; flex-shrink: 0; font-variant-numeric: tabular-nums; }
@@ -672,12 +677,40 @@ tr.active-trace td { background: var(--bg-hover); }
 .sess-section > summary { font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; cursor: pointer; padding: 6px 0; user-select: none; font-weight: 600; }
 .sess-section-label { font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; font-weight: 600; }
 
+/* --- Session detail overlay --- */
+.sess-overlay { position: fixed; inset: 0; z-index: 9998; background: var(--bg); display: flex; flex-direction: column; overflow: hidden; }
+.sess-overlay > div { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
+.sess-overlay-header { padding: 16px 24px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.sess-overlay-header .sess-detail-kpi { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
+.sess-overlay-body { display: flex; flex: 1; overflow: hidden; }
+.sess-insights-panel { width: 320px; flex-shrink: 0; overflow-y: auto; padding: 16px; border-right: 1px solid var(--border); }
+.sess-timeline-panel { flex: 1; display: flex; flex-direction: column; min-width: 0; padding: 16px; }
+.sess-timeline-panel .sess-detail-toolbar { padding-top: 0; }
+.sess-timeline-panel .sess-timeline-scroll { flex: 1; max-height: none; }
+.sess-close-btn { background: none; border: none; color: var(--text-muted); font-size: 20px; cursor: pointer; padding: 4px 8px; line-height: 1; }
+.sess-close-btn:hover { color: var(--text); }
+@media (max-width: 768px) {
+  .sess-overlay-body { flex-direction: column; }
+  .sess-insights-panel { width: 100%; max-height: 40vh; border-right: none; border-bottom: 1px solid var(--border); }
+}
+
 /* --- Session detail KPI row --- */
 .sess-detail-kpi { display: flex; gap: 24px; padding: 12px 0; border-bottom: 1px solid var(--border); margin-bottom: 12px; flex-wrap: wrap; }
 .sess-kpi { display: flex; flex-direction: column; gap: 2px; }
 .sess-kpi-label { font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; }
 .sess-kpi-value { font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .sess-kpi-value.cost { color: var(--orange); }
+.sess-kpi-secondary { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; padding: 6px 0 0; font-size: 12px; color: var(--text-dim); }
+.sess-kpi-secondary .badge-error { font-size: 11px; }
+
+/* --- API Calls table --- */
+.sess-api-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+.sess-api-table th { text-align: right; padding: 3px 6px; font-size: 10px; color: var(--text-dim); font-weight: 500; border-bottom: 1px solid var(--border); }
+.sess-api-table th:first-child { text-align: left; }
+.sess-api-table td { padding: 3px 6px; text-align: right; font-variant-numeric: tabular-nums; }
+.sess-api-table td:first-child { text-align: left; }
+.sess-api-total { border-top: 1px solid var(--border); font-weight: 600; }
+.sess-api-cache { font-size: 11px; color: var(--text-dim); margin-top: 4px; }
 
 /* --- Context window bar --- */
 .sess-ctx-bar { display: flex; height: 14px; border-radius: 4px; overflow: hidden; margin: 6px 0; }
