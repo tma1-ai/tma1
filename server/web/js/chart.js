@@ -109,9 +109,11 @@ function renderChart(containerId, data, seriesDefs, yFmt, onClickBucket) {
           h3.appendChild(hint);
         }
       }
-      chartInstances[containerId].over.addEventListener('click', function() {
-        var idx = chartInstances[containerId].cursor.idx;
-        if (idx == null) return;
+      chartInstances[containerId].over.addEventListener('click', function(e) {
+        var u = chartInstances[containerId];
+        var left = e.clientX - u.over.getBoundingClientRect().left;
+        var idx = u.valToIdx(u.posToVal(left, 'x'));
+        if (idx == null || idx < 0 || idx >= uData[0].length) return;
         var tsSec = uData[0][idx];
         var bucketSec = parseBucketSeconds(chartBucket());
         onClickBucket(container, tsSec, bucketSec);
