@@ -154,7 +154,8 @@ func main() {
 		logger.Info("hook script ready — configure in ~/.claude/settings.json", "path", hookPath)
 	}
 
-	tw := transcript.NewWatcher(cfg.GreptimeDBHTTPPort, logger)
+	bc := handler.NewHookBroadcaster()
+	tw := transcript.NewWatcher(cfg.GreptimeDBHTTPPort, logger, bc.Broadcast)
 	defer tw.StopAll()
 
 	// Start Codex session scanner (discovers ~/.codex/sessions/ JSONL files).
@@ -163,7 +164,7 @@ func main() {
 	go tw.StartCodexScanner(codexCtx)
 
 	// Step 7: start HTTP server (dashboard + API proxy).
-	srv := handler.New(cfg.GreptimeDBHTTPPort, cfg.Port, webFileSystem(), logger, tw)
+	srv := handler.New(cfg.GreptimeDBHTTPPort, cfg.Port, webFileSystem(), logger, tw, bc)
 	httpSrv := &http.Server{
 		Addr:         cfg.Host + ":" + cfg.Port,
 		Handler:      srv.Router(),

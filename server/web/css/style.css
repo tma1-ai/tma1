@@ -305,6 +305,9 @@ tr.active-trace td { background: var(--bg-hover); }
 }
 .waterfall-bar.ok { background: var(--green-bar); }
 .waterfall-bar.error { background: var(--red-bar); }
+.waterfall-bar.agent { background: rgba(139,92,246,0.2); border-left: 3px solid #8b5cf6; }
+.waterfall-bar.llm { background: var(--blue-bright); }
+.waterfall-bar.message { background: var(--text-dim); min-width: 3px; max-width: 3px; }
 .waterfall-dur {
   flex-shrink: 0; width: 60px; text-align: right;
   color: var(--text-muted); font-variant-numeric: tabular-nums;
@@ -518,6 +521,8 @@ tr.active-trace td { background: var(--bg-hover); }
 .span-badge-tool { background: rgba(210,168,255,0.15); color: var(--purple); }
 .span-badge-spawn { background: rgba(34,211,238,0.15); color: #22d3ee; }
 .span-badge-subagent { background: rgba(63,185,80,0.15); color: var(--green); }
+.span-badge-agent { background: rgba(139,92,246,0.15); color: #8b5cf6; }
+.span-badge-message { background: rgba(139,148,158,0.15); color: var(--text-dim); }
 .span-tokens {
   font-size: 10px; color: var(--text-muted); font-variant-numeric: tabular-nums;
   margin-left: 4px;

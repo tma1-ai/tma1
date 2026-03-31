@@ -334,7 +334,8 @@ var AgentCanvas = (function () {
 
       ctx.fillStyle = '#e6edf3'; ctx.font = '10px system-ui,sans-serif';
       ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-      ctx.fillText(tc.toolName, tx + 10 + shakeX, ty + TOOL_H / 2);
+      var displayName = tc.toolName.length > 18 ? tc.toolName.slice(0, 17) + '\u2026' : tc.toolName;
+      ctx.fillText(displayName, tx + 10 + shakeX, ty + TOOL_H / 2);
 
       // Spinning ring.
       if (tc.state === 'running') {
@@ -834,6 +835,20 @@ var AgentCanvas = (function () {
   // ── Public API ───────────────────────────────────────────────
 
   function open(m, opts) {
+    // Clean up any previous session to prevent animation/listener leaks.
+    if (animFrame) cancelAnimationFrame(animFrame);
+    stopLive();
+    clearTimeout(replayTimer);
+    if (canvas) {
+      canvas.removeEventListener('click', onClick);
+      canvas.removeEventListener('mousedown', onMouseDown);
+      canvas.removeEventListener('mousemove', onMouseMove);
+      canvas.removeEventListener('mouseup', onMouseUp);
+      canvas.removeEventListener('wheel', onWheel);
+    }
+    window.removeEventListener('resize', resize);
+    window.removeEventListener('keydown', onKey);
+
     mode = m; globalTime = 0; costTotal = 0;
     cam = { x: 0, y: 0, zoom: 1 };
     var overlay = document.getElementById('agent-canvas-overlay');

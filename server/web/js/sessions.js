@@ -13,6 +13,7 @@ var sessHasNext = false;
 var sessExpandedId = null;
 var sessTimelineData = [];
 var sessCurrentStats = null;
+var sessDetailVersion = 0;
 
 // Stable colors for tool names in gantt.
 var GANTT_COLORS = ['#79c0ff', '#f0883e', '#57cb8e', '#d2a9ff', '#f85149', '#e5bd57', '#79c0ff', '#ff7b72'];
@@ -205,11 +206,13 @@ function sess_openDetail(sessionId, agentSource, targetTs, apiCallFP) {
   var content = document.getElementById('sess-detail-content');
   content.innerHTML = '<div class="loading" style="padding:40px;text-align:center">' + t('empty.loading') + '</div>';
   overlay.style.display = 'flex';
+  document.removeEventListener('keydown', sess_escHandler);
   document.addEventListener('keydown', sess_escHandler);
   sess_loadDetail(sessionId, agentSource || '');
 }
 
 function sess_closeDetail() {
+  sessDetailVersion++; // invalidate any in-flight async load
   sessExpandedId = null;
   sessTimelineData = [];
   sessCurrentStats = null;
@@ -239,6 +242,7 @@ function sess_toggleErrors() {
 // ── Load Detail Data ──────────────────────────────────────────────────
 
 async function sess_loadDetail(sessionId, agentSource) {
+  var myVersion = ++sessDetailVersion;
   var sid = escapeSQLString(sessionId);
 
   // Phase 1: hook events + messages (always available).
@@ -255,6 +259,8 @@ async function sess_loadDetail(sessionId, agentSource) {
       "FROM tma1_messages WHERE session_id = '" + sid + "' ORDER BY ts ASC"
     ).catch(function() { return null; }),
   ]);
+
+  if (myVersion !== sessDetailVersion) return; // stale request
 
   var hookEvents = rowsToObjects(results[0]);
   var messages = results[1] ? rowsToObjects(results[1]) : [];
@@ -307,6 +313,7 @@ async function sess_loadDetail(sessionId, agentSource) {
   }
   timeline.sort(function(a, b) { return a.ts - b.ts; });
 
+  if (myVersion !== sessDetailVersion) return; // stale request
   sessTimelineData = timeline;
   await loadPricing();
 
@@ -354,6 +361,7 @@ async function sess_loadDetail(sessionId, agentSource) {
     } catch (e) { /* enrichment data not available */ }
   }
 
+  if (myVersion !== sessDetailVersion) return; // stale request
   sessCurrentStats = sess_computeStats(hookEvents, messages, timeline, apiCalls, apiErrors);
   renderSessionDetail(timeline, sessCurrentStats);
 }
@@ -681,10 +689,10 @@ function renderSessionDetail(timeline, stats) {
   html += '<div class="sess-insights-panel">';
   html += '<button class="sess-panel-toggle" onclick="sess_togglePanel(\x27left\x27)" title="' + t('ui.expand') + '">&#x21C9;</button>';
   html += sess_renderContextBar(stats.context);
+  html += sess_renderWaterfall(timeline, stats);
   if (stats.apiCalls.length > 0) html += sess_renderAPICalls(stats);
   html += sess_renderFileHeatmap(stats.files);
   if (stats.agents.length > 0) html += sess_renderAgentTree(stats.agents, stats.agentToolCounts || {});
-  if (stats.gantt.length > 0) html += sess_renderGantt(stats.gantt, timeline);
   html += '</div>';
 
   // Right: Timeline panel.
@@ -720,6 +728,7 @@ function renderSessionDetail(timeline, stats) {
   html += '</div>'; // .sess-overlay-body
 
   content.innerHTML = html;
+  sess_initWaterfallClicks();
   var scrollEl = document.getElementById('sess-timeline-scroll');
   if (scrollEl) {
     if (sessTargetTs) {
@@ -776,10 +785,10 @@ function sess_scrollToToolUseId(toolUseId) {
 
 // Expand the API Calls section and highlight the row matching the fingerprint.
 function sess_highlightAPICall(fingerprint) {
-  var details = document.querySelector('.sess-insights-panel details.sess-section');
   var table = document.querySelector('.sess-api-table');
-  if (!details || !table) return;
-  details.open = true;
+  if (!table) return;
+  var details = table.closest('details.sess-section');
+  if (details) details.open = true;
   // Try exact fingerprint match first, then fallback to closest timestamp.
   var trs = table.querySelectorAll('tr[data-fp]');
   var best = null;
@@ -823,7 +832,7 @@ function sess_renderAPICalls(stats) {
     var clickAction = tuids
       ? 'sess_scrollToToolUseId(\x27' + escapeJSString(tuids.split(',')[0]) + '\x27)'
       : 'sess_scrollToEvent(document.getElementById(\x27sess-timeline-scroll\x27),' + (c.ts || 0) + ')';
-    html += '<tr class="clickable" data-ts="' + (c.ts || 0) + '" data-fp="' + escapeHTML(apiKey) + '" data-tool-use-ids="' + escapeHTML(tuids) + '" onclick="' + clickAction + '">';
+    html += '<tr class="clickable" data-ts="' + (c.ts || 0) + '" data-fp="' + escapeHTML(apiKey) + '" data-tool-use-ids="' + escapeHTML(tuids) + '" onclick="' + escapeHTML(clickAction) + '">';
     html += '<td style="text-align:left;max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + escapeHTML(c.model || '') + '">' + escapeHTML(modelShort) + '</td>';
     html += '<td>' + fmtTokens(c.inputTokens) + '</td>';
     html += '<td>' + fmtTokens(c.outputTokens) + '</td>';
@@ -942,6 +951,242 @@ function sess_renderAgentTree(agents, agentToolCounts) {
   html += '</div></details>';
   return html;
 }
+
+// ── Feature: Session Waterfall ─────────────────────────────────────────
+
+function sess_renderWaterfall(timeline, stats) {
+  if (timeline.length < 2) return '';
+
+  var sessionStart = timeline[0].ts;
+  var sessionEnd = timeline[timeline.length - 1].ts;
+  // Extend sessionEnd to include all tool_pair end_ts values (long-running spans may finish later).
+  for (var i = 0; i < timeline.length; i++) {
+    if (timeline[i].source === 'tool_pair' && timeline[i].data.end_ts) {
+      sessionEnd = Math.max(sessionEnd, timeline[i].data.end_ts);
+    }
+  }
+  // Extend sessionEnd to include API call spans.
+  var apiCalls = stats.apiCalls || [];
+  for (var ci = 0; ci < apiCalls.length; ci++) {
+    var cEnd = (apiCalls[ci].ts || 0) + (apiCalls[ci].durationMs || 0);
+    if (cEnd > sessionEnd) sessionEnd = cEnd;
+  }
+  var totalMs = Math.max(sessionEnd - sessionStart, 1);
+
+  // 1. Build subagent spans from hookEvents in timeline.
+  var agentSpans = {}; // agent_id → {id, type, start_ts, end_ts}
+  for (var ai = 0; ai < timeline.length; ai++) {
+    var te = timeline[ai];
+    if (te.source !== 'hook') continue;
+    if (te.data.event_type === 'SubagentStart' && te.data.agent_id) {
+      agentSpans[te.data.agent_id] = {
+        id: te.data.agent_id, type: te.data.agent_type || 'subagent',
+        start_ts: te.ts, end_ts: sessionEnd
+      };
+    } else if (te.data.event_type === 'SubagentStop' && te.data.agent_id && agentSpans[te.data.agent_id]) {
+      agentSpans[te.data.agent_id].end_ts = te.ts;
+    }
+  }
+
+  // 2. Build flat span list.
+  var spans = [];
+  var agentIds = Object.keys(agentSpans);
+  for (var si = 0; si < agentIds.length; si++) {
+    var ag = agentSpans[agentIds[si]];
+    spans.push({ id: ag.id, parentId: 'root', name: ag.type, spanType: 'agent', start_ts: ag.start_ts, end_ts: ag.end_ts, data: ag });
+  }
+
+  for (var ti = 0; ti < timeline.length; ti++) {
+    var item = timeline[ti];
+    if (item.source === 'tool_pair') {
+      var pid = (item.data.agent_id && agentSpans[item.data.agent_id]) ? item.data.agent_id : 'root';
+      spans.push({
+        id: item.data.tool_use_id || ('tool_' + ti), parentId: pid,
+        name: item.data.tool_name || '?', spanType: 'tool',
+        start_ts: item.data.start_ts, end_ts: item.data.end_ts,
+        failed: item.data.failed, data: item.data
+      });
+    }
+  }
+
+  // Add API calls as LLM spans.
+  for (var ci2 = 0; ci2 < apiCalls.length; ci2++) {
+    var c = apiCalls[ci2];
+    var cTs = c.ts || 0;
+    var cDur = c.durationMs || 0;
+    spans.push({
+      id: 'api_' + ci2, parentId: 'root',
+      name: (c.model || 'LLM').replace(/^claude-/, '').replace(/-\d{8}$/, ''),
+      spanType: 'llm', start_ts: cTs, end_ts: cTs + cDur, data: c
+    });
+  }
+
+  // 3. Build tree via byId map + DFS.
+  var byId = { root: { children: [] } };
+  for (var bi = 0; bi < spans.length; bi++) {
+    byId[spans[bi].id] = { span: spans[bi], children: [] };
+  }
+  for (var li = 0; li < spans.length; li++) {
+    var sp = spans[li];
+    var parent = byId[sp.parentId] || byId.root;
+    parent.children.push(byId[sp.id]);
+  }
+
+  var flat = [];
+  function dfs(node, depth) {
+    if (node.span) flat.push({ span: node.span, depth: depth });
+    node.children.sort(function(a, b) { return a.span.start_ts - b.span.start_ts; });
+    for (var di = 0; di < node.children.length; di++) dfs(node.children[di], depth + (node.span ? 1 : 0));
+  }
+  dfs(byId.root, 0);
+
+  if (flat.length === 0) return '';
+  sess_waterfallFlat = flat;
+
+  // 4. Type counts for summary.
+  var typeCounts = {};
+  for (var fi = 0; fi < flat.length; fi++) {
+    var st = flat[fi].span.spanType;
+    typeCounts[st] = (typeCounts[st] || 0) + 1;
+  }
+
+  // 5. Render.
+  var labelWidth = 220;
+  var badgeLabels = { agent: t('sessions.span_agent'), tool: t('sessions.span_tool'), llm: t('sessions.span_llm'), message: t('sessions.span_message') };
+  var html = '<details class="sess-section" open>';
+  html += '<summary>' + t('sessions.waterfall') + '</summary>';
+  html += '<div class="waterfall">';
+
+  // Type summary.
+  var typeKeys = Object.keys(typeCounts);
+  if (typeKeys.length > 0) {
+    html += '<div class="waterfall-type-summary">';
+    for (var ki = 0; ki < typeKeys.length; ki++) {
+      var k = typeKeys[ki];
+      html += '<span class="span-badge span-badge-' + k + '">' + escapeHTML(badgeLabels[k] || k) + ' ' + typeCounts[k] + '</span> ';
+    }
+    html += '</div>';
+  }
+
+  for (var ri = 0; ri < flat.length; ri++) {
+    var s = flat[ri].span;
+    var depth = flat[ri].depth;
+    var startMs = s.start_ts - sessionStart;
+    var durMs = Math.max(s.end_ts - s.start_ts, 0);
+    var leftPct = (startMs / totalMs * 100).toFixed(2);
+    var widthPct = Math.max(durMs / totalMs * 100, 0.5).toFixed(2);
+    var indent = depth * 16;
+
+    var barClass = s.spanType;
+    if (s.spanType === 'tool') barClass = s.failed ? 'error' : 'ok';
+
+    var durLabel = '';
+    if (durMs >= 1000) durLabel = (durMs / 1000).toFixed(1) + 's';
+    else if (durMs > 0) durLabel = Math.round(durMs) + 'ms';
+
+    var barInner = (s.spanType !== 'message' && durMs >= 10) ? durLabel : '';
+
+    // Badge
+    var badge = '<span class="span-badge span-badge-' + s.spanType + '">' + escapeHTML(badgeLabels[s.spanType] || s.spanType) + '</span> ';
+
+    // Token inline for LLM
+    var tokenHtml = '';
+    if (s.spanType === 'llm' && s.data) {
+      var inTok = s.data.inputTokens || 0;
+      var outTok = s.data.outputTokens || 0;
+      if (inTok || outTok) tokenHtml = ' <span class="span-tokens">' + fmtNum(inTok) + '\u2192' + fmtNum(outTok) + '</span>';
+    }
+
+    // Color for tool bars via inline style.
+    var barStyle = 'left:' + leftPct + '%;width:' + widthPct + '%';
+    if (s.spanType === 'tool' && !s.failed) barStyle += ';background:' + ganttColor(s.name);
+
+    html += '<div class="waterfall-row waterfall-row-clickable" role="button" tabindex="0" aria-expanded="false" data-wf-idx="' + ri + '">';
+    html += '<div class="waterfall-label" style="width:' + labelWidth + 'px;padding-left:' + indent + 'px" title="' + escapeHTML(s.name) + '">';
+    html += (depth > 0 ? '<span style="color:var(--text-dim);margin-right:4px">\u2514</span>' : '');
+    html += badge + escapeHTML(s.name) + tokenHtml;
+    html += '</div>';
+    html += '<div class="waterfall-track"><div class="waterfall-bar ' + barClass + '" style="' + barStyle + '">' + barInner + '</div></div>';
+    html += '<div class="waterfall-dur">' + durLabel + '</div>';
+    html += '</div>';
+  }
+
+  html += '</div></details>';
+  return html;
+}
+
+// Attach click handlers for waterfall detail expansion after DOM insertion.
+function sess_initWaterfallClicks() {
+  var container = document.querySelector('.sess-insights-panel .waterfall');
+  if (!container) return;
+  container.addEventListener('click', function(e) {
+    var row = e.target.closest('.waterfall-row-clickable');
+    if (!row) return;
+    var idx = parseInt(row.getAttribute('data-wf-idx'), 10);
+    if (isNaN(idx)) return;
+    e.stopPropagation();
+    sess_toggleWaterfallDetail(container, row, idx);
+  });
+  container.addEventListener('keydown', function(e) {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    var row = e.target.closest('.waterfall-row-clickable');
+    if (!row) return;
+    e.preventDefault();
+    var idx = parseInt(row.getAttribute('data-wf-idx'), 10);
+    if (!isNaN(idx)) sess_toggleWaterfallDetail(container, row, idx);
+  });
+}
+
+function sess_toggleWaterfallDetail(container, row, idx) {
+  var existing = row.nextElementSibling;
+  if (existing && existing.classList.contains('waterfall-span-detail')) {
+    existing.remove();
+    row.setAttribute('aria-expanded', 'false');
+    return;
+  }
+  // Remove any other open detail.
+  var prev = container.querySelectorAll('.waterfall-span-detail');
+  for (var i = 0; i < prev.length; i++) {
+    var pr = prev[i].previousElementSibling;
+    if (pr) pr.setAttribute('aria-expanded', 'false');
+    prev[i].remove();
+  }
+
+  // Retrieve span data from the global flat list built during render.
+  if (!sess_waterfallFlat || !sess_waterfallFlat[idx]) return;
+  var s = sess_waterfallFlat[idx].span;
+
+  var pairs = [];
+  pairs.push(['name', s.name]);
+  pairs.push(['type', s.spanType]);
+  if (s.id) pairs.push(['id', s.id]);
+  if (s.parentId && s.parentId !== 'root') pairs.push(['parent', s.parentId]);
+  var detailDurMs = s.end_ts - s.start_ts;
+  if (detailDurMs > 0) pairs.push(['duration_ms', Math.round(detailDurMs)]);
+  if (s.spanType === 'tool' && s.data) {
+    if (s.data.tool_input) pairs.push(['input', s.data.tool_input.length > 500 ? s.data.tool_input.slice(0, 500) + '...' : s.data.tool_input]);
+    if (s.data.tool_result) pairs.push(['result', s.data.tool_result.length > 500 ? s.data.tool_result.slice(0, 500) + '...' : s.data.tool_result]);
+  }
+  if (s.spanType === 'llm' && s.data) {
+    if (s.data.model) pairs.push(['model', s.data.model]);
+    if (s.data.inputTokens) pairs.push(['input_tokens', s.data.inputTokens]);
+    if (s.data.outputTokens) pairs.push(['output_tokens', s.data.outputTokens]);
+    if (s.data.cacheTokens) pairs.push(['cache_tokens', s.data.cacheTokens]);
+    if (s.data.cost) pairs.push(['cost', '$' + s.data.cost.toFixed(4)]);
+  }
+  if (s.spanType === 'agent') {
+    pairs.push(['agent_type', s.name]);
+  }
+
+  var json = '{\n' + pairs.map(function(p) { return '  "' + p[0] + '": ' + JSON.stringify(p[1]); }).join(',\n') + '\n}';
+  var detail = document.createElement('div');
+  detail.className = 'waterfall-span-detail';
+  detail.innerHTML = '<pre class="waterfall-span-json">' + escapeHTML(json) + '</pre>';
+  row.after(detail);
+  row.setAttribute('aria-expanded', 'true');
+}
+
+var sess_waterfallFlat = null;
 
 // ── Feature: Timeline Gantt ───────────────────────────────────────────
 

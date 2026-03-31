@@ -26,11 +26,14 @@ type Server struct {
 	httpClient        *http.Client
 	otlpClient        *http.Client
 	transcriptWatcher *transcript.Watcher
-	hookBroadcast     *hookBroadcaster
+	hookBroadcast     *HookBroadcaster
 }
 
 // New creates a new Server.
-func New(greptimeHTTPPort int, tma1Port string, webFS http.FileSystem, logger *slog.Logger, tw *transcript.Watcher) *Server {
+func New(greptimeHTTPPort int, tma1Port string, webFS http.FileSystem, logger *slog.Logger, tw *transcript.Watcher, bc *HookBroadcaster) *Server {
+	if bc == nil {
+		bc = NewHookBroadcaster()
+	}
 	return &Server{
 		greptimeHTTPPort:  greptimeHTTPPort,
 		tma1Port:          tma1Port,
@@ -39,7 +42,7 @@ func New(greptimeHTTPPort int, tma1Port string, webFS http.FileSystem, logger *s
 		httpClient:        &http.Client{Timeout: 30 * time.Second},
 		otlpClient:        &http.Client{Timeout: 60 * time.Second},
 		transcriptWatcher: tw,
-		hookBroadcast:     newHookBroadcaster(),
+		hookBroadcast:     bc,
 	}
 }
 

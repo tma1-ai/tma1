@@ -192,6 +192,10 @@ func (w *Watcher) tailCodexFile(ctx context.Context, watcherKey, sessionID, file
 			continue
 		}
 		if err == io.EOF {
+			// First EOF marks end of backfill — subsequent lines are live.
+			if !fctx.live {
+				fctx.live = true
+			}
 			idleCount++
 			if idleCount > maxIdlePolls {
 				w.logger.Info("codex session idle, stopping watcher", "session", sessionID)
@@ -236,6 +240,7 @@ type codexFileContext struct {
 	agentID        string
 	agentType      string
 	conversationID string // from session_meta.payload.id (= OTel conversation.id)
+	live           bool   // true after initial backfill completes (first EOF)
 }
 
 func (w *Watcher) processCodexLine(sessionID, line string, seen map[string]struct{}, fctx *codexFileContext) {
@@ -269,10 +274,16 @@ func (w *Watcher) processCodexLine(sessionID, line string, seen map[string]struc
 				fctx.agentID = codexSubagentID(fctx.fileID, subSource.Subagent)
 				fctx.agentType = subSource.Subagent
 				w.insertCodexSubagentEvent(sessionID, ts, fctx.agentID, fctx.agentType, fctx.conversationID)
+				if fctx.live {
+					w.broadcastHookEvent(sessionID, "SubagentStart", "", "", "", "", fctx.agentID, fctx.agentType)
+				}
 				break
 			}
 		}
 		w.insertCodexSessionStart(sessionID, ts, meta.CWD, fctx.conversationID)
+		if fctx.live {
+			w.broadcastHookEvent(sessionID, "SessionStart", "", "", "", "", "", "")
+		}
 
 	case "turn_context":
 		// Extract model name and store as a message with model field set.
@@ -393,6 +404,8 @@ func (w *Watcher) insertCodexModelMessage(sessionID string, ts time.Time, model 
 		defer func() { <-insertSem }()
 		w.execSQL(sql)
 	}()
+
+	// Do NOT broadcast model messages — they are synthetic metadata, not hook events.
 }
 
 func (w *Watcher) insertCodexMessage(sessionID string, ts time.Time, role, content string, seen map[string]struct{}) {
@@ -558,4 +571,8 @@ func (w *Watcher) insertCodexHookEvent(sessionID string, ts time.Time, eventType
 		defer func() { <-insertSem }()
 		w.execSQL(sql)
 	}()
+
+	if fctx != nil && fctx.live {
+		w.broadcastHookEvent(sessionID, eventType, toolName, toolInput, toolUseID, toolResult, agentID, agentType)
+	}
 }

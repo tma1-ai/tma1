@@ -38,7 +38,7 @@ func Start(cfg Config) (*Process, error) {
 		return nil, fmt.Errorf("greptimedb: create data dir: %w", err)
 	}
 
-	configPath, err := ensureDefaultConfigFile(cfg.DataDir)
+	configPath, err := ensureDefaultConfigFile(cfg.DataDir, cfg.Logger)
 	if err != nil {
 		return nil, err
 	}
