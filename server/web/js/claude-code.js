@@ -133,7 +133,9 @@ async function cc_loadTokenChart() {
       { label: t('chart.output_tokens'), key: 'outp', color: '#f0883e' },
       { label: t('chart.cache_read'), key: 'cache_read', color: '#3fb950' },
       { label: t('chart.cache_creation'), key: 'cache_create', color: '#79c0ff' },
-    ], function(v) { return fmtNum(v); });
+    ], function(v) { return fmtNum(v); }, function(anchor, tsSec, bucketSec) {
+      showCostDrilldown(anchor, tsSec, bucketSec, function(s, e) { return cc_fetchCostDrilldown(s, e, 'tokens'); });
+    });
   } catch { /* no data */ }
 }
 
@@ -150,8 +152,59 @@ async function cc_loadCostChart() {
     if (!data.length) return;
     renderChart('cc-chart-cost', data, [
       { label: t('chart.cost_usd'), key: 'cost', color: '#f0883e' },
-    ], function(v) { return '$' + Number(v).toFixed(4); });
+    ], function(v) { return '$' + Number(v).toFixed(4); }, function(anchor, tsSec, bucketSec) {
+      showCostDrilldown(anchor, tsSec, bucketSec, cc_fetchCostDrilldown);
+    });
   } catch { /* no data */ }
+}
+
+async function cc_fetchCostDrilldown(tsStart, tsEnd, sortBy) {
+  var orderCol = sortBy === 'tokens' ? 'tokens' : 'cost_usd';
+  var res = await query(
+    "SELECT timestamp, " +
+    "json_get_float(log_attributes, 'cost_usd') AS cost_usd, " +
+    "json_get_string(log_attributes, 'model') AS model, " +
+    "COALESCE(json_get_int(log_attributes, 'input_tokens'), 0) + " +
+    "COALESCE(json_get_int(log_attributes, 'output_tokens'), 0) + " +
+    "COALESCE(json_get_int(log_attributes, 'cache_read_tokens'), 0) + " +
+    "COALESCE(json_get_int(log_attributes, 'cache_creation_tokens'), 0) AS tokens, " +
+    "log_attributes " +
+    "FROM opentelemetry_logs " +
+    "WHERE body = 'claude_code.api_request' " +
+    "  AND timestamp >= '" + tsStart + "' AND timestamp < '" + tsEnd + "' " +
+    "ORDER BY " + orderCol + " DESC"
+  );
+  // Group by session.id in JS (dotted key can't be extracted via SQL)
+  var groups = {};
+  rowsToObjects(res).forEach(function(d) {
+    var attrs = cc_parseAttrs(d.log_attributes);
+    var sid = cc_attr(attrs, 'session.id') || 'unknown';
+    if (!groups[sid]) groups[sid] = { sid: sid, cost: 0, tokens: 0, models: {}, tsMs: 0, count: 0 };
+    var g = groups[sid];
+    g.cost += Number(d.cost_usd) || 0;
+    g.tokens += Number(d.tokens) || 0;
+    g.models[d.model || 'unknown'] = true;
+    g.count++;
+    var ts = tsToMs(d.timestamp) || 0;
+    if (ts > g.tsMs) g.tsMs = ts;
+  });
+  var sorted = Object.values(groups).sort(function(a, b) {
+    return sortBy === 'tokens' ? b.tokens - a.tokens : b.cost - a.cost;
+  }).slice(0, 5);
+  return sorted.map(function(g) {
+    var models = Object.keys(g.models).join(', ');
+    var onclick = g.sid !== 'unknown'
+      ? "closeCostDrilldown();sess_openDetail(\x27" + escapeJSString(g.sid) + "\x27,\x27claude_code\x27," + g.tsMs + ")"
+      : '';
+    return {
+      time: g.count + ' calls',
+      label: g.sid !== 'unknown' ? g.sid.substring(0, 8) + '...' : '\u2014',
+      model: models,
+      tokens: g.tokens,
+      cost: g.cost,
+      onclick: onclick,
+    };
+  });
 }
 
 async function cc_loadLatencyChart() {

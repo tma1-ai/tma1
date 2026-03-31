@@ -42,9 +42,17 @@ function makeUPlotOpts(title, series, width, yFormatter) {
   };
 }
 
-function renderChart(containerId, data, seriesDefs, yFmt) {
+function parseBucketSeconds(bucketStr) {
+  var m = bucketStr.match(/^(\d+)\s+(minutes?|hours?)/);
+  if (!m) return 300;
+  var n = Number(m[1]);
+  return m[2][0] === 'h' ? n * 3600 : n * 60;
+}
+
+function renderChart(containerId, data, seriesDefs, yFmt, onClickBucket) {
   var container = document.getElementById(containerId);
   container.innerHTML = '';
+  if (onClickBucket) closeCostDrilldown();
 
   function doRender() {
     var baseWidth = container.clientWidth ||
@@ -86,6 +94,28 @@ function renderChart(containerId, data, seriesDefs, yFmt) {
     } catch (err) {
       console.error('chart render failed', containerId, err);
       container.innerHTML = '<div class="chart-empty">' + t('error.render_chart') + '</div>';
+      return;
+    }
+
+    if (onClickBucket) {
+      container.style.cursor = 'pointer';
+      var cc = container.closest('.chart-container');
+      if (cc && !cc.querySelector('.drilldown-hint')) {
+        var h3 = cc.querySelector('h3');
+        if (h3) {
+          var hint = document.createElement('span');
+          hint.className = 'drilldown-hint';
+          hint.textContent = t('drilldown.hint');
+          h3.appendChild(hint);
+        }
+      }
+      chartInstances[containerId].over.addEventListener('click', function() {
+        var idx = chartInstances[containerId].cursor.idx;
+        if (idx == null) return;
+        var tsSec = uData[0][idx];
+        var bucketSec = parseBucketSeconds(chartBucket());
+        onClickBucket(container, tsSec, bucketSec);
+      });
     }
   }
 

@@ -204,3 +204,103 @@ function setHealthFromData(el, data) {
   el.innerHTML = '<span class="health-dot"></span><span class="health-text">' +
     escapeHTML(label + detail) + '</span>';
 }
+
+// ===================================================================
+// Cost chart drill-down popup
+// ===================================================================
+
+var _costDrilldownEscHandler = null;
+var _costDrilldownClickHandler = null;
+var _costDrilldownTimeoutId = null;
+
+function closeCostDrilldown() {
+  var existing = document.getElementById('cost-drilldown-popup');
+  if (existing) existing.remove();
+  if (_costDrilldownTimeoutId) {
+    clearTimeout(_costDrilldownTimeoutId);
+    _costDrilldownTimeoutId = null;
+  }
+  if (_costDrilldownEscHandler) {
+    document.removeEventListener('keydown', _costDrilldownEscHandler);
+    _costDrilldownEscHandler = null;
+  }
+  if (_costDrilldownClickHandler) {
+    document.removeEventListener('click', _costDrilldownClickHandler);
+    _costDrilldownClickHandler = null;
+  }
+}
+
+// Show a drill-down popup below anchorEl with top sessions/traces for a time bucket.
+// fetchFn(tsStartISO, tsEndISO) → Promise<[{ time, label, model, tokens, cost, onclick }]>
+function showCostDrilldown(anchorEl, tsSec, bucketSec, fetchFn) {
+  closeCostDrilldown();
+
+  var tsStart = new Date(tsSec * 1000);
+  var tsEnd = new Date((tsSec + bucketSec) * 1000);
+  var startISO = tsStart.toISOString();
+  var endISO = tsEnd.toISOString();
+
+  var timeFmt = function(d) {
+    return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+  };
+  var timeLabel = timeFmt(tsStart) + ' \u2013 ' + timeFmt(tsEnd);
+
+  var popup = document.createElement('div');
+  popup.id = 'cost-drilldown-popup';
+  popup.innerHTML = '<div class="drilldown-header">' +
+    '<span class="drilldown-time">' + escapeHTML(timeLabel) + '</span>' +
+    '<span class="drilldown-title">' + escapeHTML(t('drilldown.top_sessions')) + '</span>' +
+    '<button class="drilldown-close" onclick="closeCostDrilldown()">\u00d7</button>' +
+    '</div>' +
+    '<div class="drilldown-body"><div class="loading" style="padding:12px;text-align:center">' +
+    escapeHTML(t('empty.loading')) + '</div></div>';
+
+  // Insert after the chart container's parent (.chart-container)
+  var chartContainer = anchorEl.closest('.chart-container') || anchorEl;
+  chartContainer.style.position = 'relative';
+  chartContainer.appendChild(popup);
+
+  // Close on Esc
+  _costDrilldownEscHandler = function(e) { if (e.key === 'Escape') closeCostDrilldown(); };
+  document.addEventListener('keydown', _costDrilldownEscHandler);
+
+  // Close on click outside (delayed to avoid catching the triggering click)
+  _costDrilldownTimeoutId = setTimeout(function() {
+    _costDrilldownTimeoutId = null;
+    _costDrilldownClickHandler = function(e) {
+      var p = document.getElementById('cost-drilldown-popup');
+      if (p && !p.contains(e.target)) closeCostDrilldown();
+    };
+    document.addEventListener('click', _costDrilldownClickHandler);
+  }, 100);
+
+  // Fetch data
+  fetchFn(startISO, endISO).then(function(items) {
+    var body = popup.querySelector('.drilldown-body');
+    if (!body) return;
+    if (!items || !items.length) {
+      body.innerHTML = '<div style="padding:12px;color:var(--text-dim);text-align:center">' +
+        escapeHTML(t('empty.no_data')) + '</div>';
+      return;
+    }
+    var html = '<table class="data-table drilldown-table"><thead><tr>' +
+      '<th>Time</th><th>Session</th><th>Model</th><th>Tokens</th><th>Cost</th>' +
+      '</tr></thead><tbody>';
+    items.forEach(function(item) {
+      html += '<tr class="clickable"' +
+        (item.onclick ? ' onclick="' + item.onclick + '"' : '') + '>' +
+        '<td>' + escapeHTML(item.time || '') + '</td>' +
+        '<td>' + escapeHTML(item.label || '') + '</td>' +
+        '<td>' + escapeHTML(item.model || '') + '</td>' +
+        '<td>' + fmtNum(item.tokens) + '</td>' +
+        '<td>' + fmtCost(item.cost) + '</td>' +
+        '</tr>';
+    });
+    html += '</tbody></table>';
+    body.innerHTML = html;
+  }).catch(function() {
+    var body = popup.querySelector('.drilldown-body');
+    if (body) body.innerHTML = '<div style="padding:12px;color:var(--text-dim)">' +
+      escapeHTML(t('empty.no_data')) + '</div>';
+  });
+}

@@ -239,7 +239,9 @@ async function oc_loadTokenChart() {
       { label: t('chart.input_tokens'), key: 'inp', color: '#79c0ff' },
       { label: t('chart.output_tokens'), key: 'outp', color: '#f0883e' },
       { label: t('chart.cache_creation'), key: 'cw', color: '#3fb950' },
-    ], function(v) { return fmtNum(v); });
+    ], function(v) { return fmtNum(v); }, function(anchor, tsSec, bucketSec) {
+      showCostDrilldown(anchor, tsSec, bucketSec, function(s, e) { return oc_fetchCostDrilldown(s, e, 'tokens'); });
+    });
   } catch { /* no data */ }
 }
 
@@ -262,8 +264,47 @@ async function oc_loadCostChart() {
     if (!data.length) return;
     renderChart('oc-chart-cost', data, [
       { label: t('chart.cost_usd'), key: 'cost', color: '#f0883e' },
-    ], function(v) { return '$' + Number(v).toFixed(4); });
+    ], function(v) { return '$' + Number(v).toFixed(4); }, function(anchor, tsSec, bucketSec) {
+      showCostDrilldown(anchor, tsSec, bucketSec, oc_fetchCostDrilldown);
+    });
   } catch { /* no data */ }
+}
+
+async function oc_fetchCostDrilldown(tsStart, tsEnd, sortBy) {
+  await loadPricing();
+  var costExpr = costCaseSQL(
+    '"span_attributes.openclaw.model"',
+    '"span_attributes.openclaw.tokens.input"',
+    '"span_attributes.openclaw.tokens.output"'
+  );
+  var cols = await oc_getTraceColumns();
+  var sessionCol = oc_traceAttrSelect(cols, 'span_attributes.openclaw.sessionId', 'session_id');
+  var res = await query(
+    "SELECT trace_id, " + sessionCol + ", " +
+    "MAX(\"span_attributes.openclaw.model\") AS model, " +
+    "MAX(timestamp) AS ts, " +
+    "SUM(CAST(\"span_attributes.openclaw.tokens.input\" AS DOUBLE) + " +
+    "CAST(\"span_attributes.openclaw.tokens.output\" AS DOUBLE) + " +
+    "COALESCE(CAST(\"span_attributes.openclaw.tokens.cache_write\" AS DOUBLE), 0)) AS tokens, " +
+    "SUM(" + costExpr + ") AS cost " +
+    "FROM opentelemetry_traces " +
+    "WHERE " + OC_MODEL_SPAN +
+    "  AND timestamp >= '" + tsStart + "' AND timestamp < '" + tsEnd + "' " +
+    "GROUP BY trace_id, session_id ORDER BY " + (sortBy === 'tokens' ? 'tokens' : 'cost') + " DESC LIMIT 5"
+  );
+  var data = rowsToObjects(res);
+  return data.map(function(d) {
+    var sid = d.session_id || '';
+    var onclick = "closeCostDrilldown();oc_switchToTrace(\x27" + escapeJSString(d.trace_id) + "\x27)";
+    return {
+      time: fmtTime(d.ts),
+      label: sid ? sid.substring(0, 12) + '...' : (d.trace_id ? d.trace_id.substring(0, 12) + '...' : '\u2014'),
+      model: d.model || 'unknown',
+      tokens: Number(d.tokens) || 0,
+      cost: Number(d.cost) || 0,
+      onclick: onclick,
+    };
+  });
 }
 
 async function oc_loadLatencyChart() {

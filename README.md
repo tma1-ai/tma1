@@ -2,9 +2,9 @@
 
 > *"Your agent runs. TMA1 remembers."*
 
-Local-first observability for AI agents.
+Local-first observability for AI agents, with a built-in dashboard.
 See what your agents cost, how long they take, and whether they're doing anything weird. All data stays on your machine.
-No cloud account, no Docker, no Grafana.
+One binary, no cloud account, no Docker, no Grafana.
 
 Named after TMA-1 (Tycho Magnetic Anomaly-1) from *2001: A Space Odyssey*:
 the monolith buried on the moon, silently recording everything until you dig it out.
@@ -57,6 +57,12 @@ git clone https://github.com/tma1-ai/tma1.git
 cd tma1
 make build
 ```
+
+## Agent Install
+
+Ask your agent:
+
+> Read https://tma1.ai/SKILL.md and follow the instructions to install and configure TMA1 for your AI agent
 
 ## Quick Start
 

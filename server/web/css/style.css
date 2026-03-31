@@ -186,6 +186,36 @@ header .tagline { font-size: 13px; color: var(--text-muted); }
   color: var(--text-dim); font-size: 13px;
 }
 
+/* --- Cost drill-down popup --- */
+#cost-drilldown-popup {
+  position: absolute; left: 0; right: 0; top: 100%; z-index: 100;
+  background: var(--bg-hover); border: 1px solid var(--orange);
+  border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+  padding: 12px 16px; margin-top: 4px;
+}
+.drilldown-header {
+  display: flex; align-items: center; gap: 8px;
+  margin-bottom: 8px; font-size: 13px;
+}
+.drilldown-time {
+  font-weight: 600; color: var(--text-bright);
+  background: var(--border); border-radius: 4px; padding: 2px 8px;
+}
+.drilldown-title { color: var(--text-muted); flex: 1; }
+.drilldown-close {
+  background: none; border: none; color: var(--text-dim);
+  cursor: pointer; font-size: 16px; padding: 0 4px;
+}
+.drilldown-close:hover { color: var(--text-bright); }
+.drilldown-hint {
+  font-size: 10px; font-weight: 400; text-transform: none; letter-spacing: 0;
+  color: var(--text-dim); margin-left: 8px;
+  opacity: 0.6;
+}
+.drilldown-table { margin-bottom: 0; }
+.drilldown-table td { font-size: 12px; padding: 6px 8px; }
+.drilldown-table th { font-size: 10px; padding: 4px 8px; }
+
 /* --- Tables --- */
 table {
   width: 100%; border-collapse: collapse;

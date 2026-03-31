@@ -180,6 +180,7 @@ async function cdx_loadCards() {
 async function cdx_loadOverview() {
   await Promise.all([
     cdx_loadTokenChart(),
+    cdx_loadCostChart(),
     cdx_loadLatencyChart(),
     cdx_loadTurnStartupChart(),
     cdx_loadSpanDistribution(),
@@ -230,10 +231,89 @@ async function cdx_loadTokenChart() {
       { label: t('chart.input_tokens'), key: 'input_tok', color: '#79c0ff' },
       { label: t('chart.output_tokens'), key: 'output_tok', color: '#f0883e' },
       { label: t('chart.cache_read'), key: 'cached_tok', color: '#3fb950' },
-    ], function(v) { return fmtNum(v); });
+    ], function(v) { return fmtNum(v); }, function(anchor, tsSec, bucketSec) {
+      showCostDrilldown(anchor, tsSec, bucketSec, function(s, e) { return cdx_fetchCostDrilldown(s, e, 'tokens'); });
+    });
   } catch {
     el.innerHTML = '<div class="chart-empty">' + t('error.load_token_data') + '</div>';
   }
+}
+
+async function cdx_loadCostChart() {
+  var el = document.getElementById('cdx-chart-cost');
+  if (!el) return;
+  await loadPricing();
+  try {
+    var estCost = cdx_estimatedCostExpr();
+    var res = await query(
+      "SELECT date_bin('" + chartBucket() + "'::INTERVAL, timestamp) AS t, " +
+      "SUM(" + estCost + ") AS cost " +
+      cdx_logsFromWhere() + " AND " + cdx_requestPredicate() + " " +
+      "GROUP BY t ORDER BY t"
+    );
+    var data = rowsToObjects(res);
+    if (!data.length) {
+      el.innerHTML = '<div class="chart-empty">' + t('empty.no_cost_data') + '</div>';
+      return;
+    }
+    renderChart('cdx-chart-cost', data, [
+      { label: t('chart.cost_usd'), key: 'cost', color: '#f0883e' },
+    ], function(v) { return '$' + Number(v).toFixed(4); }, function(anchor, tsSec, bucketSec) {
+      showCostDrilldown(anchor, tsSec, bucketSec, cdx_fetchCostDrilldown);
+    });
+  } catch {
+    el.innerHTML = '<div class="chart-empty">' + t('empty.no_cost_data') + '</div>';
+  }
+}
+
+async function cdx_fetchCostDrilldown(tsStart, tsEnd, sortBy) {
+  await loadPricing();
+  var estCost = cdx_estimatedCostExpr();
+  var orderCol = sortBy === 'tokens' ? 'tokens' : 'est_cost';
+  var res = await query(
+    "SELECT timestamp, " +
+    "COALESCE(json_get_string(log_attributes, 'model'), 'unknown') AS model, " +
+    "COALESCE(json_get_int(log_attributes, 'input_token_count'), 0) + " +
+    "COALESCE(json_get_int(log_attributes, 'output_token_count'), 0) + " +
+    "COALESCE(json_get_int(log_attributes, 'cached_token_count'), 0) AS tokens, " +
+    estCost + " AS est_cost, " +
+    "log_attributes " +
+    cdx_logsFromWhere() + " AND " + cdx_requestPredicate() +
+    "  AND timestamp >= '" + tsStart + "' AND timestamp < '" + tsEnd + "' " +
+    "ORDER BY " + orderCol + " DESC"
+  );
+  // Group by conversation.id in JS (dotted key can't be extracted via SQL)
+  var groups = {};
+  rowsToObjects(res).forEach(function(d) {
+    var la = d.log_attributes;
+    try { if (typeof la === 'string') la = JSON.parse(la); } catch (e) { la = {}; }
+    var cid = (la && la['conversation.id']) || 'unknown';
+    if (!groups[cid]) groups[cid] = { cid: cid, cost: 0, tokens: 0, models: {}, tsMs: 0, count: 0 };
+    var g = groups[cid];
+    g.cost += Number(d.est_cost) || 0;
+    g.tokens += Number(d.tokens) || 0;
+    g.models[d.model] = true;
+    g.count++;
+    var ts = tsToMs(d.timestamp) || 0;
+    if (ts > g.tsMs) g.tsMs = ts;
+  });
+  var sorted = Object.values(groups).sort(function(a, b) {
+    return sortBy === 'tokens' ? b.tokens - a.tokens : b.cost - a.cost;
+  }).slice(0, 5);
+  return sorted.map(function(g) {
+    var models = Object.keys(g.models).join(', ');
+    var onclick = g.cid !== 'unknown'
+      ? "closeCostDrilldown();cdx_openExpensiveSession(\x27" + escapeJSString(g.cid) + "\x27," + g.tsMs + ")"
+      : '';
+    return {
+      time: g.count + ' calls',
+      label: g.cid !== 'unknown' ? g.cid.substring(0, 8) + '...' : '\u2014',
+      model: models,
+      tokens: g.tokens,
+      cost: g.cost,
+      onclick: onclick,
+    };
+  });
 }
 
 async function cdx_loadLatencyChart() {

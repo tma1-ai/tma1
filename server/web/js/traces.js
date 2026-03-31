@@ -216,7 +216,9 @@ async function loadTokenChart() {
     renderChart('chart-tokens', data, [
       { label: t('chart.input_tokens'), key: 'inp', color: '#79c0ff' },
       { label: t('chart.output_tokens'), key: 'outp', color: '#f0883e' },
-    ], function(v) { return fmtNum(v); });
+    ], function(v) { return fmtNum(v); }, function(anchor, tsSec, bucketSec) {
+      showCostDrilldown(anchor, tsSec, bucketSec, function(s, e) { return genai_fetchCostDrilldown(s, e, 'tokens'); });
+    });
   } catch { /* no data yet */ }
 }
 
@@ -239,8 +241,42 @@ async function loadCostChart() {
     if (!data.length) return;
     renderChart('chart-cost', data, [
       { label: t('chart.cost_usd'), key: 'cost', color: '#f0883e' },
-    ], function(v) { return '$' + Number(v).toFixed(4); });
+    ], function(v) { return '$' + Number(v).toFixed(4); }, function(anchor, tsSec, bucketSec) {
+      showCostDrilldown(anchor, tsSec, bucketSec, genai_fetchCostDrilldown);
+    });
   } catch { /* no data yet */ }
+}
+
+async function genai_fetchCostDrilldown(tsStart, tsEnd, sortBy) {
+  var genaiWhere = genaiSpanWhere(await genai_getTraceColumns());
+  var costExpr = costCaseSQL(
+    '"span_attributes.gen_ai.request.model"',
+    '"span_attributes.gen_ai.usage.input_tokens"',
+    '"span_attributes.gen_ai.usage.output_tokens"'
+  );
+  var res = await query(
+    "SELECT trace_id, timestamp, " +
+    "\"span_attributes.gen_ai.request.model\" AS model, " +
+    "CAST(\"span_attributes.gen_ai.usage.input_tokens\" AS DOUBLE) + " +
+    "CAST(\"span_attributes.gen_ai.usage.output_tokens\" AS DOUBLE) AS tokens, " +
+    "ROUND(" + costExpr + ", 4) AS cost " +
+    "FROM opentelemetry_traces " +
+    "WHERE " + genaiWhere +
+    "  AND timestamp >= '" + tsStart + "' AND timestamp < '" + tsEnd + "' " +
+    "ORDER BY " + (sortBy === 'tokens' ? 'tokens' : 'cost') + " DESC LIMIT 5"
+  );
+  var data = rowsToObjects(res);
+  return data.map(function(d) {
+    var onclick = "closeCostDrilldown();switchToTrace(\x27" + escapeJSString(d.trace_id) + "\x27)";
+    return {
+      time: fmtTime(d.timestamp),
+      label: d.trace_id ? d.trace_id.substring(0, 12) + '...' : '\u2014',
+      model: d.model || 'unknown',
+      tokens: Number(d.tokens) || 0,
+      cost: Number(d.cost) || 0,
+      onclick: onclick,
+    };
+  });
 }
 
 async function loadLatencyChart() {
