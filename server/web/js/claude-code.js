@@ -1131,6 +1131,8 @@ async function cc_loadTraceCards() {
     document.getElementById('cc-val-llm-latency').textContent = llmLat > 0 ? fmtDurMs(llmLat) : '\u2014';
   } catch {
     ccHasTraces = false;
+    document.getElementById('cc-trace-cards').style.display = 'none';
+    document.getElementById('cc-traces-tab').style.display = 'none';
   }
 }
 

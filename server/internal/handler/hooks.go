@@ -15,6 +15,21 @@ import (
 // Key: "sessionID\x00filePath", Value: time.Time of last event.
 var fileChangedDedup sync.Map
 
+func init() {
+	go func() {
+		for {
+			time.Sleep(5 * time.Minute)
+			cutoff := time.Now().Add(-2 * time.Minute)
+			fileChangedDedup.Range(func(key, value any) bool {
+				if t, ok := value.(time.Time); ok && t.Before(cutoff) {
+					fileChangedDedup.Delete(key)
+				}
+				return true
+			})
+		}
+	}()
+}
+
 const (
 	maxHookBody    = 1 << 20 // 1 MB
 	maxToolInput   = 2048
@@ -111,7 +126,10 @@ func parseHookPayload(body []byte) (hookPayload, error) {
 				}
 			}
 			b2, _ := json.Marshal(extra)
-			p.Metadata = string(b2)
+			if len(b2) <= maxMetadata {
+				p.Metadata = string(b2)
+			}
+			// else: drop metadata entirely — too many non-string fields
 		}
 	}
 
@@ -184,14 +202,16 @@ func (s *Server) handleHooks(w http.ResponseWriter, r *http.Request) {
 	if payload.HookEventName == "FileChanged" {
 		meta := hookMeta(payload)
 		fp, _ := meta["file_path"].(string)
-		key := payload.SessionID + "\x00" + fp
-		now := time.Now()
-		if prev, ok := fileChangedDedup.Load(key); ok {
-			if now.Sub(prev.(time.Time)) < time.Second {
-				return
+		if fp != "" {
+			key := payload.SessionID + "\x00" + fp
+			now := time.Now()
+			if prev, ok := fileChangedDedup.Load(key); ok {
+				if now.Sub(prev.(time.Time)) < time.Second {
+					return
+				}
 			}
+			fileChangedDedup.Store(key, now)
 		}
-		fileChangedDedup.Store(key, now)
 	}
 
 	// Async INSERT into GreptimeDB.

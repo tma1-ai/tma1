@@ -290,7 +290,7 @@ async function sess_loadDetail(sessionId, agentSource) {
   if (agentSource === 'codex') {
     // Codex: query OTel logs by conversation_id.
     var conversationIds = sess_collectConversationIds(hookEvents);
-    if (conversationIds.length > 0) {
+    if (conversationIds.length > 0 && timeline.length > 0) {
       var tsBetween = "timestamp BETWEEN '" + new Date(timeline[0].ts - 60000).toISOString() + "' AND '" + new Date(timeline[timeline.length - 1].ts + 60000).toISOString() + "'";
       var otelRes = await query(
         "SELECT timestamp, log_attributes FROM opentelemetry_logs " +

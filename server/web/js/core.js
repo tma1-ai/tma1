@@ -76,7 +76,8 @@ function fmtMs(ns) {
 
 function fmtDurMs(ms) {
   if (ms == null) return '\u2014';
-  return (ms / 1000).toFixed(1) + 's';
+  if (ms >= 1000) return (ms / 1000).toFixed(1) + 's';
+  return Math.round(ms) + 'ms';
 }
 
 function fmtDurMsPrecise(ms) {

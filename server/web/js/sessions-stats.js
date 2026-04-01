@@ -167,11 +167,6 @@ function fmtTokens(n) {
   return (n / 1000000).toFixed(1) + 'M';
 }
 
-function fmtDurMs(ms) {
-  if (ms >= 1000) return (ms / 1000).toFixed(1) + 's';
-  return ms + 'ms';
-}
-
 // ── OTel parsers ──────────────────────────────────────────────────────
 
 // Fallback OTel parser for CC sessions without usage data in messages (old data).
