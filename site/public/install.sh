@@ -103,11 +103,55 @@ download() {
 }
 
 # --- Download GreptimeDB binary via official install script ---
+# Minimum GreptimeDB version required by TMA1. Keep in sync with
+# minRequiredVersion in server/internal/install/install.go.
+MIN_GREPTIMEDB_VERSION="1.0.0"
+
+# version_lt returns 0 (true) if $1 < $2.
+# Compares major.minor.patch numerically; when equal, a pre-release
+# version (e.g. 1.0.0-rc.2) is considered less than the release (1.0.0).
+# POSIX-compatible — works on macOS and Linux without sort -V.
+version_lt() {
+  local a_pre="${1#*-}" b_pre="${2#*-}"
+  # If no hyphen, *-pattern matches the whole string — clear it.
+  [ "$a_pre" = "$1" ] && a_pre=""
+  [ "$b_pre" = "$2" ] && b_pre=""
+  local a="${1%%-*}" b="${2%%-*}"  # numeric part only
+  local a1 a2 a3 b1 b2 b3
+  IFS=. read -r a1 a2 a3 <<EOF
+$a
+EOF
+  IFS=. read -r b1 b2 b3 <<EOF
+$b
+EOF
+  a1="${a1:-0}" a2="${a2:-0}" a3="${a3:-0}"
+  b1="${b1:-0}" b2="${b2:-0}" b3="${b3:-0}"
+  [ "$a1" -lt "$b1" ] 2>/dev/null && return 0
+  [ "$a1" -gt "$b1" ] 2>/dev/null && return 1
+  [ "$a2" -lt "$b2" ] 2>/dev/null && return 0
+  [ "$a2" -gt "$b2" ] 2>/dev/null && return 1
+  [ "$a3" -lt "$b3" ] 2>/dev/null && return 0
+  [ "$a3" -gt "$b3" ] 2>/dev/null && return 1
+  # Same numeric version: pre-release < release.
+  [ -n "$a_pre" ] && [ -z "$b_pre" ] && return 0
+  return 1
+}
+
 download_greptimedb() {
   local greptime_bin="${INSTALL_DIR}/greptime"
   if [ -f "$greptime_bin" ] && [ "$TMA1_FORCE" != "1" ]; then
-    info "GreptimeDB binary already present, skipping download."
-    return
+    # Check if the installed version meets the minimum requirement.
+    local installed_ver
+    installed_ver=$("$greptime_bin" --version 2>/dev/null | grep '^version:' | awk '{print $2}' || true)
+    if [ -n "$installed_ver" ] && ! version_lt "$installed_ver" "$MIN_GREPTIMEDB_VERSION"; then
+      info "GreptimeDB ${installed_ver} already installed (>= ${MIN_GREPTIMEDB_VERSION}), skipping download."
+      return
+    fi
+    if [ -n "$installed_ver" ]; then
+      info "GreptimeDB ${installed_ver} is below minimum ${MIN_GREPTIMEDB_VERSION}, upgrading..."
+    else
+      info "Cannot determine GreptimeDB version, upgrading..."
+    fi
   fi
 
   mkdir -p "$INSTALL_DIR"
