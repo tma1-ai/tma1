@@ -236,6 +236,57 @@ func TestProcessOpenClawLineAssistantWithUsage(t *testing.T) {
 	}
 }
 
+func TestProcessOpenClawLineAssistantToolUseFormat(t *testing.T) {
+	// Verify Anthropic API format (tool_use + input) is handled alongside pi format (toolCall + arguments).
+	sqlCh := make(chan string, 8)
+	ts := httptest.NewServer(httpTestHandler(sqlCh))
+	defer ts.Close()
+
+	oldClient := httpClient
+	httpClient = ts.Client()
+	defer func() { httpClient = oldClient }()
+
+	w := &Watcher{
+		sqlURL: ts.URL,
+		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+	seen := make(map[string]struct{})
+	fctx := &openclawFileContext{agentID: "main"}
+
+	line := `{"type":"message","id":"e5","parentId":"e1","timestamp":"2026-04-13T10:30:05Z","message":{` +
+		`"role":"assistant",` +
+		`"content":[{"type":"text","text":"reading file"},{"type":"tool_use","id":"tu1","name":"Read","input":{"path":"/tmp/test.go"}}],` +
+		`"provider":"anthropic","model":"claude-sonnet-4-20250514",` +
+		`"usage":{"input":500,"output":100,"cacheRead":0,"cacheWrite":0,"totalTokens":600},` +
+		`"stopReason":"tool_use","timestamp":1713006605000}}`
+
+	w.processOpenClawLine("oc:main:abc", line, seen, fctx)
+
+	var sqls []string
+	for i := 0; i < 2; i++ {
+		sqls = append(sqls, waitForSQL(t, sqlCh))
+	}
+
+	var sawMessage, sawPreTool bool
+	for _, sql := range sqls {
+		if strings.Contains(sql, "tma1_messages") && strings.Contains(sql, "reading file") {
+			sawMessage = true
+		}
+		if strings.Contains(sql, "PreToolUse") && strings.Contains(sql, "Read") {
+			sawPreTool = true
+			if !strings.Contains(sql, "/tmp/test.go") {
+				t.Fatalf("expected tool input in PreToolUse, got: %s", sql)
+			}
+		}
+	}
+	if !sawMessage {
+		t.Fatalf("expected assistant message insert, got: %v", sqls)
+	}
+	if !sawPreTool {
+		t.Fatalf("expected PreToolUse for tool_use format, got: %v", sqls)
+	}
+}
+
 func TestProcessOpenClawLineToolResult(t *testing.T) {
 	sqlCh := make(chan string, 4)
 	ts := httptest.NewServer(httpTestHandler(sqlCh))

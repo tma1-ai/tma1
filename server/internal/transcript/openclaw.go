@@ -144,8 +144,11 @@ func isOpenClawPrimaryTranscript(name string) bool {
 }
 
 // openclawSessionIDFromFilename extracts the session UUID from the transcript filename.
-// Format: "<ISO-timestamp-dashes>_<sessionId>.jsonl" or "<sessionId>.jsonl"
-// Also handles topic sessions: "<timestamp>_<sessionId>-topic-<threadId>.jsonl"
+// OpenClaw gateway format: "<sessionId>.jsonl" (primary).
+// Pi CLI fallback: "<timestamp>_<sessionId>.jsonl" (splits on first underscore).
+// Topic sessions may appear with or without a timestamp prefix:
+//   - "<sessionId>-topic-<threadId>.jsonl"
+//   - "<timestamp>_<sessionId>-topic-<threadId>.jsonl"
 func openclawSessionIDFromFilename(name string) string {
 	base := strings.TrimSuffix(name, ".jsonl")
 	// Split on first underscore: timestamp part is before, sessionId part is after.
@@ -313,13 +316,35 @@ type ocCost struct {
 }
 
 // ocContentBlock represents a content block within a message.
+// Pi runtime writes toolCall + arguments; Anthropic API uses tool_use + input.
 type ocContentBlock struct {
-	Type      string                 `json:"type"` // text, thinking, toolCall, image
+	Type      string                 `json:"type"` // text, thinking, toolCall/tool_use, image
 	Text      string                 `json:"text"`
 	Thinking  string                 `json:"thinking"`
 	ID        string                 `json:"id"`
 	Name      string                 `json:"name"`
-	Arguments map[string]interface{} `json:"arguments"`
+	Arguments map[string]interface{} `json:"arguments"` // pi-coding-agent format
+	Input     map[string]interface{} `json:"input"`     // Anthropic API format
+}
+
+// isToolCallBlock returns true for tool call content blocks.
+// Pi runtime uses "toolCall"; this helper also accepts "tool_use",
+// "tool_call", "toolcall" for read-time compatibility.
+func isToolCallBlock(t string) bool {
+	switch strings.ToLower(t) {
+	case "toolcall", "tool_call", "tool_use":
+		return true
+	}
+	return false
+}
+
+// toolCallInput returns the tool arguments, preferring pi format (arguments)
+// and falling back to Anthropic format (input).
+func (b *ocContentBlock) toolCallInput() map[string]interface{} {
+	if len(b.Arguments) > 0 {
+		return b.Arguments
+	}
+	return b.Input
 }
 
 func (w *Watcher) processOpenClawLine(sessionID, line string, seen map[string]struct{}, fctx *openclawFileContext) {
@@ -445,7 +470,7 @@ func (w *Watcher) processOpenClawAssistant(sessionID string, ts time.Time, msg *
 		w.insertOpenClawMessage(sessionID, ts, "assistant", "assistant", "", msg.Model, usage, durMs)
 	}
 	for _, b := range blocks {
-		if b.Type != "toolCall" {
+		if !isToolCallBlock(b.Type) {
 			continue
 		}
 		toolDedupKey := "toolcall:" + b.ID
@@ -455,8 +480,8 @@ func (w *Watcher) processOpenClawAssistant(sessionID string, ts time.Time, msg *
 		seen[toolDedupKey] = struct{}{}
 
 		var inputStr string
-		if len(b.Arguments) > 0 {
-			if data, err := json.Marshal(b.Arguments); err == nil {
+		if args := b.toolCallInput(); len(args) > 0 {
+			if data, err := json.Marshal(args); err == nil {
 				inputStr = string(data)
 			}
 		}
