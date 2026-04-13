@@ -211,6 +211,17 @@ setup_launchd() {
 
   <key>ProcessType</key>
   <string>Background</string>
+
+  <key>SoftResourceLimits</key>
+  <dict>
+    <key>NumberOfFiles</key>
+    <integer>1048576</integer>
+  </dict>
+  <key>HardResourceLimits</key>
+  <dict>
+    <key>NumberOfFiles</key>
+    <integer>1048576</integer>
+  </dict>
 </dict>
 </plist>
 PLIST
@@ -246,6 +257,7 @@ After=network.target
 [Service]
 Type=simple
 ExecStart=${INSTALL_DIR}/tma1-server
+LimitNOFILE=1048576
 Restart=on-failure
 RestartSec=3
 Environment=TMA1_DATA_DIR=${data_dir}

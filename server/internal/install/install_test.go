@@ -15,6 +15,58 @@ import (
 )
 
 // ---------------------------------------------------------------------------
+// probeBinaryVersion
+// ---------------------------------------------------------------------------
+
+func TestProbeBinaryVersion(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell script trick not available on Windows")
+	}
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+
+	makeScript := func(t *testing.T, output string) string {
+		t.Helper()
+		f := filepath.Join(t.TempDir(), "greptime")
+		content := "#!/bin/sh\ncat <<'EOF'\n" + output + "\nEOF\n"
+		if err := os.WriteFile(f, []byte(content), 0755); err != nil {
+			t.Fatal(err)
+		}
+		return f
+	}
+
+	t.Run("real_format", func(t *testing.T) {
+		bin := makeScript(t, "greptime\nbranch:\ncommit: f8376fd6\nclean: true\nversion: 1.0.0-rc.2")
+		got := probeBinaryVersion(bin, logger)
+		if got != "v1.0.0-rc.2" {
+			t.Errorf("got %q, want %q", got, "v1.0.0-rc.2")
+		}
+	})
+
+	t.Run("release_version", func(t *testing.T) {
+		bin := makeScript(t, "greptime\nversion: 1.0.0")
+		got := probeBinaryVersion(bin, logger)
+		if got != "v1.0.0" {
+			t.Errorf("got %q, want %q", got, "v1.0.0")
+		}
+	})
+
+	t.Run("no_version_line", func(t *testing.T) {
+		bin := makeScript(t, "greptime\nbranch: main\ncommit: abc123")
+		got := probeBinaryVersion(bin, logger)
+		if got != "" {
+			t.Errorf("got %q, want empty", got)
+		}
+	})
+
+	t.Run("binary_not_found", func(t *testing.T) {
+		got := probeBinaryVersion("/no/such/binary", logger)
+		if got != "" {
+			t.Errorf("got %q, want empty", got)
+		}
+	})
+}
+
+// ---------------------------------------------------------------------------
 // readVersionFile
 // ---------------------------------------------------------------------------
 
@@ -72,20 +124,34 @@ func TestCheckVersionMismatch(t *testing.T) {
 		return f
 	}
 
-	t.Run("latest_with_version_file_skips_upgrade", func(t *testing.T) {
-		vf := writeVersion(t, "v0.12.0\n")
-		needs, resolved := checkVersionMismatch("latest", vf, logger)
+	// binPath is unused when .version file exists; pass a non-existent path.
+	noBin := "/no/such/binary"
+
+	t.Run("latest_with_current_version_skips_upgrade", func(t *testing.T) {
+		vf := writeVersion(t, minRequiredVersion+"\n")
+		needs, resolved := checkVersionMismatch("latest", vf, noBin, logger)
 		if needs {
 			t.Error("expected no upgrade needed")
 		}
-		if resolved != "v0.12.0" {
-			t.Errorf("resolved = %q, want %q", resolved, "v0.12.0")
+		if resolved != minRequiredVersion {
+			t.Errorf("resolved = %q, want %q", resolved, minRequiredVersion)
+		}
+	})
+
+	t.Run("latest_with_old_version_triggers_upgrade", func(t *testing.T) {
+		vf := writeVersion(t, "v0.12.0\n")
+		needs, resolved := checkVersionMismatch("latest", vf, noBin, logger)
+		if !needs {
+			t.Error("expected upgrade needed for version below minimum")
+		}
+		if resolved != "latest" {
+			t.Errorf("resolved = %q, want %q", resolved, "latest")
 		}
 	})
 
 	t.Run("exact_match_no_upgrade", func(t *testing.T) {
 		vf := writeVersion(t, "v0.12.0\n")
-		needs, resolved := checkVersionMismatch("v0.12.0", vf, logger)
+		needs, resolved := checkVersionMismatch("v0.12.0", vf, noBin, logger)
 		if needs {
 			t.Error("expected no upgrade needed")
 		}
@@ -96,7 +162,7 @@ func TestCheckVersionMismatch(t *testing.T) {
 
 	t.Run("mismatch_needs_upgrade", func(t *testing.T) {
 		vf := writeVersion(t, "v0.11.0\n")
-		needs, resolved := checkVersionMismatch("v0.12.0", vf, logger)
+		needs, resolved := checkVersionMismatch("v0.12.0", vf, noBin, logger)
 		if !needs {
 			t.Error("expected upgrade needed")
 		}
@@ -105,15 +171,77 @@ func TestCheckVersionMismatch(t *testing.T) {
 		}
 	})
 
-	t.Run("no_version_file_legacy", func(t *testing.T) {
-		needs, resolved := checkVersionMismatch("v0.12.0", "/no/such/file", logger)
-		if needs {
-			t.Error("expected no upgrade for legacy install")
+	t.Run("latest_with_unparseable_version_triggers_upgrade", func(t *testing.T) {
+		vf := writeVersion(t, "nightly-20260401\n")
+		needs, resolved := checkVersionMismatch("latest", vf, noBin, logger)
+		if !needs {
+			t.Error("expected upgrade needed for unparseable version")
 		}
-		if resolved != "unknown" {
-			t.Errorf("resolved = %q, want %q", resolved, "unknown")
+		if resolved != "latest" {
+			t.Errorf("resolved = %q, want %q", resolved, "latest")
 		}
 	})
+
+	t.Run("no_version_file_no_binary_triggers_upgrade_latest", func(t *testing.T) {
+		// Legacy install: no .version, binary can't be probed → upgrade.
+		needs, resolved := checkVersionMismatch("latest", "/no/such/file", noBin, logger)
+		if !needs {
+			t.Error("expected upgrade for legacy install without .version")
+		}
+		if resolved != "latest" {
+			t.Errorf("resolved = %q, want %q", resolved, "latest")
+		}
+	})
+
+	t.Run("no_version_file_no_binary_triggers_upgrade_explicit", func(t *testing.T) {
+		// Explicit version requested, no .version, binary can't be probed → upgrade.
+		needs, resolved := checkVersionMismatch("v1.0.0", "/no/such/file", noBin, logger)
+		if !needs {
+			t.Error("expected upgrade for legacy install with explicit version")
+		}
+		if resolved != "v1.0.0" {
+			t.Errorf("resolved = %q, want %q", resolved, "v1.0.0")
+		}
+	})
+}
+
+// ---------------------------------------------------------------------------
+// versionLessThan
+// ---------------------------------------------------------------------------
+
+func TestVersionLessThan(t *testing.T) {
+	tests := []struct {
+		a, b string
+		want bool
+	}{
+		{"v0.12.0", "v1.0.0", true},
+		{"v0.9.0", "v0.12.0", true},
+		{"v1.0.0", "v1.0.0", false},
+		{"v1.0.1", "v1.0.0", false},
+		{"v2.0.0", "v1.0.0", false},
+		{"v0.12.0", "v0.12.1", true},
+		{"v1.0.0-alpha", "v1.0.0", true},  // pre-release < release
+		{"v1.0.0-beta", "v1.0.0", true},
+		{"v1.0.0-rc1", "v1.0.0", true},
+		{"v1.0.0", "v1.0.0-rc1", false},   // release is NOT less than pre-release
+		{"v1.0.0-rc.1", "v1.0.0-rc.2", true},   // rc.1 < rc.2
+		{"v1.0.0-rc.2", "v1.0.0-rc.1", false},
+		{"v1.0.0-rc.1", "v1.0.0-rc.1", false},  // equal
+		{"v1.0.0-alpha", "v1.0.0-beta", true},   // alpha < beta lexically
+		{"v1.0.0-beta", "v1.0.0-rc", true},      // beta < rc lexically
+		{"v1.0.0-alpha.1", "v1.0.0-alpha.2", true},
+		{"v1.0.0-rc", "v1.0.0-rc.1", true},      // shorter < longer when prefix matches
+		{"v0.9.0-rc1", "v1.0.0", true},
+		{"invalid", "v1.0.0", false},       // parse error → conservative false
+		{"v1.0.0", "invalid", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.a+"_vs_"+tt.b, func(t *testing.T) {
+			if got := versionLessThan(tt.a, tt.b); got != tt.want {
+				t.Errorf("versionLessThan(%q, %q) = %v, want %v", tt.a, tt.b, got, tt.want)
+			}
+		})
+	}
 }
 
 // ---------------------------------------------------------------------------
