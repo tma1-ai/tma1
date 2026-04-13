@@ -5,6 +5,7 @@ import (
 	"archive/tar"
 	"bufio"
 	"compress/gzip"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -12,14 +13,23 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 )
 
 const (
 	githubReleaseBase = "https://github.com/GreptimeTeam/greptimedb/releases"
+
+	// minRequiredVersion is the minimum GreptimeDB version that tma1 requires.
+	// When the installed version is older than this, an upgrade is triggered
+	// even if the user configured "latest" (which normally skips network checks).
+	// Bump this when a new GreptimeDB release contains important fixes or
+	// breaking changes that tma1 depends on.
+	minRequiredVersion = "v1.0.0"
 )
 
 // greptimeBinaryName returns the platform-appropriate binary name.
@@ -48,8 +58,10 @@ func EnsureGreptimeDB(dataDir, version string, logger *slog.Logger) (binPath str
 	binPath = filepath.Join(binDir, greptimeBinaryName())
 	versionFile := filepath.Join(binDir, ".version")
 
+	binExists := false
 	if _, err := os.Stat(binPath); err == nil {
-		needsUpgrade, resolvedVer := checkVersionMismatch(version, versionFile, logger)
+		binExists = true
+		needsUpgrade, resolvedVer := checkVersionMismatch(version, versionFile, binPath, logger)
 		if !needsUpgrade {
 			logger.Info("greptimedb binary already present", "path", binPath, "version", resolvedVer)
 			return binPath, nil
@@ -60,6 +72,14 @@ func EnsureGreptimeDB(dataDir, version string, logger *slog.Logger) (binPath str
 
 	resolvedVersion, err := resolveVersion(version)
 	if err != nil {
+		if binExists {
+			// Network is unreachable but a binary is already present — use it
+			// rather than blocking startup. The upgrade will happen on next
+			// start when connectivity is restored.
+			logger.Warn("cannot resolve greptimedb version, using existing binary",
+				"path", binPath, "error", err)
+			return binPath, nil
+		}
 		return "", fmt.Errorf("install: resolve version: %w", err)
 	}
 	logger.Info("downloading greptimedb", "version", resolvedVersion)
@@ -77,6 +97,11 @@ func EnsureGreptimeDB(dataDir, version string, logger *slog.Logger) (binPath str
 	defer tmpFile.Close()
 
 	if err := downloadFile(tmpFile, downloadURL); err != nil {
+		if binExists {
+			logger.Warn("cannot download greptimedb, using existing binary",
+				"path", binPath, "error", err)
+			return binPath, nil
+		}
 		return "", fmt.Errorf("install: download %s: %w", downloadURL, err)
 	}
 
@@ -98,22 +123,76 @@ func EnsureGreptimeDB(dataDir, version string, logger *slog.Logger) (binPath str
 }
 
 // checkVersionMismatch returns true if the installed version doesn't match the
-// requested version and an upgrade is needed.
-func checkVersionMismatch(requestedVersion, versionFile string, logger *slog.Logger) (needsUpgrade bool, resolvedVer string) {
+// requested version and an upgrade is needed. binPath is used to probe the
+// binary's version when the .version file is missing (legacy installs).
+func checkVersionMismatch(requestedVersion, versionFile, binPath string, logger *slog.Logger) (needsUpgrade bool, resolvedVer string) {
 	installed := readVersionFile(versionFile)
 	if installed == "" {
-		// Legacy install without .version file — assume it's fine.
-		return false, "unknown"
+		// Legacy install without .version file — probe the binary directly.
+		installed = probeBinaryVersion(binPath, logger)
 	}
 
 	if requestedVersion == "latest" {
-		// Binary already installed with a known version — skip network check.
-		// To upgrade, set TMA1_GREPTIMEDB_VERSION to a specific tag or
-		// delete the .version file to force re-resolution.
+		// If the installed version can't be determined, upgrade to be safe.
+		if installed == "" {
+			logger.Info("installed greptimedb version unknown, upgrading to latest")
+			return true, "latest"
+		}
+		// If the installed version can't be parsed, fall back to re-resolving.
+		if _, _, _, _, ok := parseSemver(installed); !ok {
+			logger.Info("installed greptimedb version unparseable, upgrading to latest",
+				"installed", installed)
+			return true, "latest"
+		}
+		// Check if the installed version is below the minimum required.
+		if versionLessThan(installed, minRequiredVersion) {
+			logger.Info("installed greptimedb is below minimum required version",
+				"installed", installed, "minimum", minRequiredVersion)
+			return true, "latest"
+		}
 		return false, installed
 	}
 
+	if installed == "" {
+		// Can't determine version, re-download the requested one.
+		return true, requestedVersion
+	}
 	return requestedVersion != installed, requestedVersion
+}
+
+// probeBinaryVersion runs "greptime --version" and extracts the version tag.
+// The output is multi-line key-value, e.g.:
+//
+//	greptime
+//	branch:
+//	commit: f8376fd6...
+//	version: 1.0.0-rc.2
+//
+// Returns a "v"-prefixed version string (e.g., "v1.0.0-rc.2") or "" on failure.
+func probeBinaryVersion(binPath string, logger *slog.Logger) string {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	out, err := exec.CommandContext(ctx, binPath, "--version").Output() //nolint:gosec
+	if err != nil {
+		logger.Info("could not probe greptimedb version", "error", err)
+		return ""
+	}
+
+	for _, line := range strings.Split(string(out), "\n") {
+		key, val, ok := strings.Cut(line, ":")
+		if !ok {
+			continue
+		}
+		if strings.TrimSpace(key) == "version" {
+			v := "v" + strings.TrimSpace(val)
+			if _, _, _, _, ok := parseSemver(v); ok {
+				return v
+			}
+		}
+	}
+	logger.Info("could not parse greptimedb version output", "output", string(out))
+	return ""
 }
 
 func readVersionFile(path string) string {
@@ -122,6 +201,93 @@ func readVersionFile(path string) string {
 		return ""
 	}
 	return strings.TrimSpace(string(data))
+}
+
+// versionLessThan compares two semver strings (e.g., "v1.0.0", "v0.12.0").
+// Returns true if a < b. Pre-release versions are considered less than
+// their release counterpart (v1.0.0-rc < v1.0.0), per semver spec.
+// Returns false on parse errors (conservative: don't trigger unnecessary upgrades).
+func versionLessThan(a, b string) bool {
+	aMaj, aMin, aPat, aPre, ok1 := parseSemver(a)
+	bMaj, bMin, bPat, bPre, ok2 := parseSemver(b)
+	if !ok1 || !ok2 {
+		return false
+	}
+	if aMaj != bMaj {
+		return aMaj < bMaj
+	}
+	if aMin != bMin {
+		return aMin < bMin
+	}
+	if aPat != bPat {
+		return aPat < bPat
+	}
+	// Same numeric version: pre-release < release.
+	if aPre != "" && bPre == "" {
+		return true
+	}
+	if aPre == "" && bPre != "" {
+		return false
+	}
+	// Both have pre-release: compare identifiers per semver spec.
+	return preReleaseLessThan(aPre, bPre)
+}
+
+// preReleaseLessThan compares dot-separated pre-release identifiers per semver:
+// numeric identifiers compare as integers, others lexically; numeric < non-numeric;
+// shorter wins if all preceding identifiers are equal.
+func preReleaseLessThan(a, b string) bool {
+	as := strings.Split(a, ".")
+	bs := strings.Split(b, ".")
+	n := len(as)
+	if len(bs) < n {
+		n = len(bs)
+	}
+	for i := 0; i < n; i++ {
+		ai, aErr := strconv.Atoi(as[i])
+		bi, bErr := strconv.Atoi(bs[i])
+		aNum := aErr == nil
+		bNum := bErr == nil
+		switch {
+		case aNum && bNum: // both numeric
+			if ai != bi {
+				return ai < bi
+			}
+		case aNum && !bNum: // numeric < non-numeric
+			return true
+		case !aNum && bNum:
+			return false
+		default: // both non-numeric
+			if as[i] != bs[i] {
+				return as[i] < bs[i]
+			}
+		}
+	}
+	return len(as) < len(bs)
+}
+
+// parseSemver extracts major, minor, patch, and pre-release from a "vX.Y.Z[-pre]" string.
+func parseSemver(v string) (major, minor, patch int, pre string, ok bool) {
+	v = strings.TrimPrefix(v, "v")
+	if idx := strings.IndexByte(v, '-'); idx >= 0 {
+		pre = v[idx+1:]
+		v = v[:idx]
+	}
+	parts := strings.Split(v, ".")
+	if len(parts) != 3 {
+		return 0, 0, 0, "", false
+	}
+	var err error
+	if major, err = strconv.Atoi(parts[0]); err != nil {
+		return 0, 0, 0, "", false
+	}
+	if minor, err = strconv.Atoi(parts[1]); err != nil {
+		return 0, 0, 0, "", false
+	}
+	if patch, err = strconv.Atoi(parts[2]); err != nil {
+		return 0, 0, 0, "", false
+	}
+	return major, minor, patch, pre, true
 }
 
 // resolveVersion resolves "latest" to the actual latest release tag via GitHub API redirect.
