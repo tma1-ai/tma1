@@ -36,6 +36,7 @@ async function detectDataSources() {
       ocMetrics: tables.filter(function(t) { return t.startsWith('openclaw_'); }),
       hasHookEvents: tables.includes('tma1_hook_events'),
       hasMessages: tables.includes('tma1_messages'),
+      hasCopilotCLI: false,
     };
     result.hasCodex = result.codexMetrics.length > 0;
     result.hasOpenClaw = result.ocMetrics.length > 0;
@@ -84,6 +85,15 @@ async function detectDataSources() {
         result.hasGenAITraces = true;
       }
     }
+    // Detect Copilot CLI sessions via hook events.
+    if (result.hasHookEvents) {
+      try {
+        var cpRes = await query(
+          "SELECT 1 FROM tma1_hook_events WHERE agent_source = 'copilot_cli' LIMIT 1"
+        );
+        result.hasCopilotCLI = (rows(cpRes) || []).length > 0;
+      } catch { /* ignore */ }
+    }
     return result;
   } catch {
     return {
@@ -93,6 +103,7 @@ async function detectDataSources() {
       hasGenAITraces: false,
       hasClaudeLogs: false,
       hasCodex: false,
+      hasCopilotCLI: false,
       ccMetrics: [],
       codexMetrics: [],
     };
@@ -165,7 +176,15 @@ async function switchView(viewId, skipHash) {
     btn.classList.toggle('active', btn.dataset.view === viewId);
   });
 
-  var viewEl = document.getElementById('view-' + viewId);
+  // Copilot CLI tab reuses Sessions view with source filter pre-set.
+  var effectiveViewId = viewId;
+  if (viewId === 'copilot-cli') {
+    effectiveViewId = 'sessions';
+    var srcFilter = document.getElementById('sess-source-filter');
+    if (srcFilter) srcFilter.value = 'copilot_cli';
+  }
+
+  var viewEl = document.getElementById('view-' + effectiveViewId);
   if (viewEl) {
     var hasData = true;
     if (viewId === 'claude-code') {
@@ -178,7 +197,7 @@ async function switchView(viewId, skipHash) {
     } else if (viewId === 'openclaw') {
       hasData = await oc_loadCards();
       if (hasData) oc_loadOverview();
-    } else if (viewId === 'sessions') {
+    } else if (viewId === 'sessions' || viewId === 'copilot-cli') {
       hasData = await sess_loadCards();
       if (hasData) sess_loadList();
     } else if (viewId === 'prompts') {
@@ -210,6 +229,7 @@ async function initViews() {
   if (hasCCView) views.push({ id: 'claude-code', label: t('view.claude_code') });
   if (dataSources.hasCodex) views.push({ id: 'codex', label: t('view.codex') });
   if (dataSources.hasOpenClaw) views.push({ id: 'openclaw', label: t('view.openclaw') });
+  if (dataSources.hasCopilotCLI) views.push({ id: 'copilot-cli', label: 'Copilot CLI' });
   if (dataSources.hasGenAITraces) views.push({ id: 'traces', label: t('view.otel_genai') });
   if (dataSources.hasHookEvents) views.push({ id: 'sessions', label: t('view.sessions') });
   if (dataSources.hasMessages) views.push({ id: 'prompts', label: t('view.prompts') });
