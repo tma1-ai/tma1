@@ -288,6 +288,19 @@ func (w *Watcher) processCopilotCLILine(sessionID, line string, seen map[string]
 		seen[ev.ID] = struct{}{}
 	}
 
+	// Split on session.start: if the JSONL contains multiple logical sessions
+	// (appended across restarts), update fctx.sessionID to create separate DB sessions.
+	if ev.Type == "session.start" {
+		var startData struct {
+			SessionID string `json:"sessionId"`
+		}
+		if json.Unmarshal(ev.Data, &startData) == nil && startData.SessionID != "" && startData.SessionID != fctx.sessionID {
+			fctx.sessionID = startData.SessionID
+			fctx.model = ""
+			fctx.cwd = ""
+		}
+	}
+
 	ts, _ := time.Parse(time.RFC3339Nano, ev.Timestamp)
 	if ts.IsZero() {
 		ts = time.Now()
