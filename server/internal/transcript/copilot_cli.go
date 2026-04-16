@@ -20,6 +20,15 @@ const (
 	copilotCLISessionPfx   = "cp:"
 )
 
+// escapeSQLStringFull escapes both single quotes and backslashes for SQL string literals.
+// GreptimeDB interprets backslash as an escape character in string literals,
+// so Windows paths like C:\Users must be escaped as C:\\Users.
+func escapeSQLStringFull(s string) string {
+	s = strings.ReplaceAll(s, "\\", "\\\\")
+	s = strings.ReplaceAll(s, "'", "''")
+	return s
+}
+
 // StartCopilotCLIScanner periodically scans ~/.copilot/session-state/ for active
 // events.jsonl files and starts watching any new ones. GitHub Copilot CLI stores
 // session events as JSONL files in per-session directories.
@@ -137,10 +146,31 @@ func (w *Watcher) tailCopilotCLIFile(ctx context.Context, watcherKey, sessionID,
 	}
 	defer f.Close()
 
+	fctx := &copilotCLIContext{sessionID: sessionID}
+
 	// Skip backfill if this session was already ingested (prevents duplicates on restart).
+	// But always read the first line to populate context (model, cwd).
 	dbSID := copilotCLISessionPfx + sessionID
-	if w.copilotCLISessionExists(dbSID) {
-		// Seek to end — only process new lines written after this point.
+	skipBackfill := w.copilotCLISessionExists(dbSID)
+	if skipBackfill {
+		// Read first line to extract session context (cwd, model), then seek to end.
+		firstReader := bufio.NewReader(f)
+		if firstLine, err := firstReader.ReadString('\n'); err == nil {
+			trimmed := strings.TrimSpace(firstLine)
+			if trimmed != "" {
+				var ev copilotCLIEvent
+				if json.Unmarshal([]byte(trimmed), &ev) == nil && ev.Type == "session.start" {
+					var data struct {
+						Context struct {
+							CWD string `json:"cwd"`
+						} `json:"context"`
+					}
+					if json.Unmarshal(ev.Data, &data) == nil {
+						fctx.cwd = data.Context.CWD
+					}
+				}
+			}
+		}
 		if _, err := f.Seek(0, io.SeekEnd); err != nil {
 			w.logger.Warn("copilot-cli seek to end failed", "session", sessionID, "error", err)
 		}
@@ -148,7 +178,6 @@ func (w *Watcher) tailCopilotCLIFile(ctx context.Context, watcherKey, sessionID,
 
 	reader := bufio.NewReader(f)
 	var buf strings.Builder
-	fctx := &copilotCLIContext{sessionID: sessionID}
 	idleCount := 0
 	const maxIdlePolls = 600 // 5 minutes at 500ms
 
@@ -276,12 +305,10 @@ func (w *Watcher) handleCopilotCLISessionStart(ts time.Time, ev copilotCLIEvent,
 
 	fctx.cwd = data.Context.CWD
 
-	// Build metadata with context info.
+	// Store branch and repo in metadata (skip git_root to avoid backslash SQL issues).
 	metadata := map[string]string{
 		"copilot_version": data.CopilotVersion,
-		"git_root":        data.Context.GitRoot,
 		"branch":          data.Context.Branch,
-		"head_commit":     data.Context.HeadCommit,
 		"repository":      data.Context.Repository,
 	}
 
@@ -487,6 +514,33 @@ func (w *Watcher) copilotCLISessionExists(dbSessionID string) bool {
 	return resp.StatusCode == 200 && strings.Contains(string(body), "\"rows\":[")
 }
 
+// execSQLDebug wraps execSQL with additional logging for debugging insert failures.
+func (w *Watcher) execSQLDebug(sql, eventType, sessionID string) {
+	form := url.Values{}
+	form.Set("sql", sql)
+
+	ctx, cancel := context.WithTimeout(context.Background(), insertTimeout)
+	defer cancel()
+
+	req, err := newPostRequest(ctx, w.sqlURL, form)
+	if err != nil {
+		w.logger.Warn("copilot-cli insert: create request failed", "event", eventType, "session", sessionID, "error", err)
+		return
+	}
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		w.logger.Warn("copilot-cli insert failed", "event", eventType, "session", sessionID, "error", err)
+		return
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode != 200 {
+		w.logger.Warn("copilot-cli insert non-200", "event", eventType, "session", sessionID, "status", resp.StatusCode, "body", string(body))
+	}
+}
+
 // insertCopilotCLIMessage inserts a conversation message into tma1_messages.
 func (w *Watcher) insertCopilotCLIMessage(dbSessionID string, ts time.Time, messageType, role, content, model, toolName, toolUseID string, usage *msgUsage) {
 	msTs := ts.UnixMilli()
@@ -512,7 +566,7 @@ func (w *Watcher) insertCopilotCLIMessage(dbSessionID string, ts time.Time, mess
 			escapeSQLString(dbSessionID),
 			escapeSQLString(messageType),
 			escapeSQLString(role),
-			escapeSQLString(truncate(content, maxContentLen)),
+			escapeSQLStringFull(truncate(content, maxContentLen)),
 			escapeSQLString(model),
 			escapeSQLString(toolName),
 			escapeSQLString(toolUseID),
@@ -529,7 +583,7 @@ func (w *Watcher) insertCopilotCLIMessage(dbSessionID string, ts time.Time, mess
 			escapeSQLString(dbSessionID),
 			escapeSQLString(messageType),
 			escapeSQLString(role),
-			escapeSQLString(truncate(content, maxContentLen)),
+			escapeSQLStringFull(truncate(content, maxContentLen)),
 			escapeSQLString(model),
 			escapeSQLString(toolName),
 			escapeSQLString(toolUseID),
@@ -592,19 +646,19 @@ func (w *Watcher) insertCopilotCLIHookEventFull(ts time.Time, fctx *copilotCLICo
 		escapeSQLString(dbSessionID),
 		escapeSQLString(eventType),
 		copilotCLIAgentSource,
-		escapeSQLString(truncate(toolName, 256)),
-		escapeSQLString(truncate(toolInput, maxToolInput)),
-		escapeSQLString(truncate(toolResult, maxToolContent)),
+		escapeSQLStringFull(truncate(toolName, 256)),
+		escapeSQLStringFull(truncate(toolInput, maxToolInput)),
+		escapeSQLStringFull(truncate(toolResult, maxToolContent)),
 		escapeSQLString(toolUseID),
 		escapeSQLString(agentID),
 		escapeSQLString(agentType),
-		escapeSQLString(truncate(cwd, 512)),
+		escapeSQLStringFull(truncate(cwd, 512)),
 		escapeSQLString(dbSessionID),
-		escapeSQLString(metadataJSON),
+		escapeSQLStringFull(metadataJSON),
 	)
 	go func() {
 		insertSem <- struct{}{}
 		defer func() { <-insertSem }()
-		w.execSQL(sql)
+		w.execSQLDebug(sql, eventType, fctx.sessionID)
 	}()
 }
