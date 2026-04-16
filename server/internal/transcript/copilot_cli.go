@@ -16,7 +16,6 @@ import (
 const (
 	copilotCLIScanInterval   = 10 * time.Second
 	copilotCLIActiveAge      = 10 * time.Minute
-	copilotCLIFirstScanAge   = 24 * time.Hour // wider window on first scan to catch older sessions
 	copilotCLIAgentSource    = "copilot_cli"
 	copilotCLISessionPfx     = "cp:"
 )
@@ -40,7 +39,7 @@ func (w *Watcher) StartCopilotCLIScanner(ctx context.Context) {
 	baseDir := filepath.Join(homeDir, ".copilot", "session-state")
 	w.logger.Info("copilot-cli session scanner started", "path", baseDir)
 
-	// First scan uses a wider window to pick up older sessions on fresh install/restart.
+	// First scan has no age limit to pick up ALL historical sessions.
 	firstScan := true
 	ticker := time.NewTicker(copilotCLIScanInterval)
 	defer ticker.Stop()
@@ -51,12 +50,12 @@ func (w *Watcher) StartCopilotCLIScanner(ctx context.Context) {
 			return
 		case <-ticker.C:
 			if _, err := os.Stat(baseDir); err == nil {
-				activeAge := copilotCLIActiveAge
 				if firstScan {
-					activeAge = copilotCLIFirstScanAge
+					w.scanCopilotCLISessionsWithAge(baseDir, 0) // 0 = no limit
 					firstScan = false
+				} else {
+					w.scanCopilotCLISessionsWithAge(baseDir, copilotCLIActiveAge)
 				}
-				w.scanCopilotCLISessionsWithAge(baseDir, activeAge)
 			}
 		}
 	}
@@ -71,10 +70,14 @@ func (w *Watcher) scanCopilotCLISessionsWithAge(baseDir string, activeAge time.D
 
 	// Prune stopped watchers to prevent unbounded memory growth.
 	w.mu.Lock()
-	var stoppedCount int
+	var stoppedCount, activeCount int
 	for key, sw := range w.sessions {
-		if sw.stopped && strings.HasPrefix(key, copilotCLISessionPfx) {
-			stoppedCount++
+		if strings.HasPrefix(key, copilotCLISessionPfx) {
+			if sw.stopped {
+				stoppedCount++
+			} else {
+				activeCount++
+			}
 		}
 	}
 	if stoppedCount > 50 {
@@ -86,26 +89,71 @@ func (w *Watcher) scanCopilotCLISessionsWithAge(baseDir string, activeAge time.D
 	}
 	w.mu.Unlock()
 
+	// Limit concurrent watchers to avoid overwhelming GreptimeDB.
+	const maxConcurrentWatchers = 10
+	newWatchers := 0
+
+	// Sort entries by modification time (newest first) so recent sessions are prioritized.
 	entries, err := os.ReadDir(baseDir)
 	if err != nil {
 		return
 	}
+
+	type sessionFile struct {
+		id   string
+		path string
+		mod  time.Time
+	}
+	var candidates []sessionFile
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
 		}
 		eventsFile := filepath.Join(baseDir, entry.Name(), "events.jsonl")
 		info, err := os.Stat(eventsFile)
-		if err != nil || now.Sub(info.ModTime()) > activeAge {
+		if err != nil {
 			continue
 		}
-		sessionID := entry.Name()
-		watcherKey := copilotCLISessionPfx + sessionID
-		w.watchCopilotCLI(watcherKey, sessionID, eventsFile)
+		if activeAge > 0 && now.Sub(info.ModTime()) > activeAge {
+			continue
+		}
+		candidates = append(candidates, sessionFile{entry.Name(), eventsFile, info.ModTime()})
+	}
+
+	// Sort newest first.
+	for i := 0; i < len(candidates); i++ {
+		for j := i + 1; j < len(candidates); j++ {
+			if candidates[j].mod.After(candidates[i].mod) {
+				candidates[i], candidates[j] = candidates[j], candidates[i]
+			}
+		}
+	}
+
+	for _, c := range candidates {
+		watcherKey := copilotCLISessionPfx + c.id
+		w.mu.Lock()
+		existing, ok := w.sessions[watcherKey]
+		alreadyWatching := ok && !existing.stopped
+		w.mu.Unlock()
+
+		if alreadyWatching {
+			continue
+		}
+		if activeCount+newWatchers >= maxConcurrentWatchers {
+			break // defer remaining to next scan cycle
+		}
+		// Old completed sessions stop immediately after backfill (no idle wait).
+		isActive := now.Sub(c.mod) < copilotCLIActiveAge
+		w.watchCopilotCLIWithActive(watcherKey, c.id, c.path, isActive)
+		newWatchers++
 	}
 }
 
 func (w *Watcher) watchCopilotCLI(watcherKey, sessionID, filePath string) {
+	w.watchCopilotCLIWithActive(watcherKey, sessionID, filePath, true)
+}
+
+func (w *Watcher) watchCopilotCLIWithActive(watcherKey, sessionID, filePath string, isActive bool) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
@@ -125,11 +173,11 @@ func (w *Watcher) watchCopilotCLI(watcherKey, sessionID, filePath string) {
 	sw := &sessionWatch{cancel: cancel, seen: seen}
 	w.sessions[watcherKey] = sw
 
-	go w.tailCopilotCLIFile(ctx, watcherKey, sessionID, filePath, seen)
+	go w.tailCopilotCLIFile(ctx, watcherKey, sessionID, filePath, seen, isActive)
 	w.logger.Info("watching copilot-cli session", "session", sessionID, "file", filePath)
 }
 
-func (w *Watcher) tailCopilotCLIFile(ctx context.Context, watcherKey, sessionID, filePath string, seen map[string]struct{}) {
+func (w *Watcher) tailCopilotCLIFile(ctx context.Context, watcherKey, sessionID, filePath string, seen map[string]struct{}, isActive bool) {
 	defer func() {
 		w.mu.Lock()
 		if sw, ok := w.sessions[watcherKey]; ok {
@@ -158,38 +206,14 @@ func (w *Watcher) tailCopilotCLIFile(ctx context.Context, watcherKey, sessionID,
 
 	fctx := &copilotCLIContext{sessionID: sessionID}
 
-	// Skip backfill if this session was already ingested (prevents duplicates on restart).
-	// But always read the first line to populate context (model, cwd).
-	dbSID := copilotCLISessionPfx + sessionID
-	skipBackfill := w.copilotCLISessionExists(dbSID)
-	if skipBackfill {
-		// Read first line to extract session context (cwd, model), then seek to end.
-		firstReader := bufio.NewReader(f)
-		if firstLine, err := firstReader.ReadString('\n'); err == nil {
-			trimmed := strings.TrimSpace(firstLine)
-			if trimmed != "" {
-				var ev copilotCLIEvent
-				if json.Unmarshal([]byte(trimmed), &ev) == nil && ev.Type == "session.start" {
-					var data struct {
-						Context struct {
-							CWD string `json:"cwd"`
-						} `json:"context"`
-					}
-					if json.Unmarshal(ev.Data, &data) == nil {
-						fctx.cwd = data.Context.CWD
-					}
-				}
-			}
-		}
-		if _, err := f.Seek(0, io.SeekEnd); err != nil {
-			w.logger.Warn("copilot-cli seek to end failed", "session", sessionID, "error", err)
-		}
-	}
-
 	reader := bufio.NewReader(f)
 	var buf strings.Builder
 	idleCount := 0
-	const maxIdlePolls = 600 // 5 minutes at 500ms
+	// Active sessions wait 5 minutes for new data; completed sessions stop immediately.
+	maxIdlePolls := 600 // 5 minutes at 500ms
+	if !isActive {
+		maxIdlePolls = 2 // 1 second — just drain any buffered writes
+	}
 
 	for {
 		line, err := reader.ReadString('\n')
