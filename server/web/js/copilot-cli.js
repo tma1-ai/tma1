@@ -31,10 +31,10 @@ async function gcp_loadCards() {
         "SUM(CASE WHEN message_type IN ('user','tool_result','tool_use') THEN LENGTH(COALESCE(content,''))/4 ELSE 0 END) AS est_in_tok " +
         gcp_msgWhere() + " AND model != '' GROUP BY model"
       ),
-      // Avg duration
+      // Avg duration (cast to epoch ms to avoid Duration arithmetic)
       query(
         "SELECT AVG(dur_sec) AS v FROM (" +
-        "SELECT (MAX(ts) - MIN(ts)) / 1000 AS dur_sec " +
+        "SELECT (MAX(CAST(ts AS BIGINT)) - MIN(CAST(ts AS BIGINT))) / 1000 AS dur_sec " +
         gcp_hookWhere() + " GROUP BY session_id HAVING COUNT(*) > 1) sub"
       ),
     ]);
