@@ -1,4 +1,4 @@
-# tma1-config-version: 2
+# tma1-config-version: 3
 # TMA1 default GreptimeDB configuration.
 # CLI flags still override data-home and bound ports.
 

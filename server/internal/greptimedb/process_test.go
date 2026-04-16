@@ -41,7 +41,8 @@ func TestEnsureDefaultConfigFileWritesTemplate(t *testing.T) {
 		`with_metric_engine = true`,
 		`memory_pool_size = "512MB"`,
 		`scan_memory_limit = "512MB"`,
-		`# tma1-config-version: 2`,
+		`# tma1-config-version: 3`,
+		`experimental_compaction_memory_limit = "512MB"`,
 	} {
 		if !strings.Contains(string(content), snippet) {
 			t.Fatalf("default config missing %q", snippet)
@@ -59,7 +60,7 @@ func TestEnsureDefaultConfigFilePreservesCurrentVersion(t *testing.T) {
 	}
 
 	configPath := filepath.Join(configDir, defaultConfigFileName)
-	want := []byte("# tma1-config-version: 2\ncustom = true\n")
+	want := []byte("# tma1-config-version: 3\ncustom = true\n")
 	if err := os.WriteFile(configPath, want, 0o644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
@@ -97,6 +98,7 @@ memory_pool_size = "128MB"
 
 [[region_engine]]
 [region_engine.mito]
+experimental_compaction_memory_limit = "64MB"
 scan_memory_limit = "128MB"
 `
 	configPath := filepath.Join(configDir, defaultConfigFileName)
@@ -121,7 +123,10 @@ scan_memory_limit = "128MB"
 	if !strings.Contains(content, `scan_memory_limit = "512MB"`) {
 		t.Fatal("migration did not upgrade scan_memory_limit")
 	}
-	if !strings.Contains(content, "# tma1-config-version: 2") {
+	if !strings.Contains(content, `experimental_compaction_memory_limit = "512MB"`) {
+		t.Fatal("migration did not upgrade experimental_compaction_memory_limit")
+	}
+	if !strings.Contains(content, "# tma1-config-version: 3") {
 		t.Fatal("migration did not set version")
 	}
 }
@@ -142,6 +147,7 @@ memory_pool_size = "256MB"
 
 [[region_engine]]
 [region_engine.mito]
+experimental_compaction_memory_limit = "128MB"
 scan_memory_limit = "256MB"
 `
 	configPath := filepath.Join(configDir, defaultConfigFileName)
@@ -166,8 +172,11 @@ scan_memory_limit = "256MB"
 	if !strings.Contains(content, `scan_memory_limit = "256MB"`) {
 		t.Fatal("migration should not override user-customized scan_memory_limit")
 	}
+	if !strings.Contains(content, `experimental_compaction_memory_limit = "128MB"`) {
+		t.Fatal("migration should not override user-customized experimental_compaction_memory_limit")
+	}
 	// Version should still be bumped even though values weren't changed.
-	if !strings.Contains(content, "# tma1-config-version: 2") {
+	if !strings.Contains(content, "# tma1-config-version: 3") {
 		t.Fatal("migration did not set version")
 	}
 }

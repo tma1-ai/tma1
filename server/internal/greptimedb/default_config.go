@@ -14,7 +14,7 @@ const defaultConfigFileName = "standalone.toml"
 
 // currentConfigVersion is bumped whenever standalone-default.toml changes
 // in a way that existing user configs should be migrated.
-const currentConfigVersion = 2
+const currentConfigVersion = 3
 
 //go:embed standalone-default.toml
 var defaultConfig []byte
@@ -29,6 +29,7 @@ type configMigration struct {
 // Each entry upgrades from version N-1 to N.
 var configMigrations = []configMigration{
 	{2, migrateV1ToV2},
+	{3, migrateV2ToV3},
 }
 
 // migrateV1ToV2 raises memory limits from 128MB to 512MB.
@@ -37,6 +38,13 @@ func migrateV1ToV2(data []byte) []byte {
 	s := string(data)
 	s = strings.Replace(s, `memory_pool_size = "128MB"`, `memory_pool_size = "512MB"`, 1)
 	s = strings.Replace(s, `scan_memory_limit = "128MB"`, `scan_memory_limit = "512MB"`, 1)
+	return []byte(s)
+}
+
+// migrateV2ToV3 raises compaction memory limit to match query memory limits.
+func migrateV2ToV3(data []byte) []byte {
+	s := string(data)
+	s = strings.Replace(s, `experimental_compaction_memory_limit = "64MB"`, `experimental_compaction_memory_limit = "512MB"`, 1)
 	return []byte(s)
 }
 
