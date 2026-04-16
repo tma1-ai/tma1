@@ -444,6 +444,17 @@ async function refreshCurrentView() {
       var activeCodexTab = document.querySelector('#cdx-tabs .tab.active');
       if (activeCodexTab) cdx_onTabChange(activeCodexTab.dataset.cdxtab);
     }
+  } else if (currentView === 'copilot-cli') {
+    hasData = await gcp_loadCards();
+    if (hasData) {
+      var activeGcpTab = document.querySelector('#gcp-tabs .tab.active');
+      if (activeGcpTab && activeGcpTab.dataset.gcptab) {
+        var tabName = activeGcpTab.dataset.gcptab;
+        if (tabName === 'gcp-overview') gcp_loadOverview();
+        else if (tabName === 'gcp-tools') gcp_loadTools();
+        else if (tabName === 'gcp-cost') gcp_loadCostByModel();
+      }
+    }
   } else if (currentView === 'sessions') {
     hasData = await sess_loadCards();
     if (hasData) {
