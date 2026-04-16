@@ -164,6 +164,7 @@ async function switchView(viewId, skipHash) {
   document.getElementById('view-claude-code').style.display = 'none';
   document.getElementById('view-codex').style.display = 'none';
   document.getElementById('view-openclaw').style.display = 'none';
+  document.getElementById('view-copilot-cli').style.display = 'none';
   document.getElementById('view-traces').style.display = 'none';
   document.getElementById('view-sessions').style.display = 'none';
   document.getElementById('view-prompts').style.display = 'none';
@@ -176,15 +177,7 @@ async function switchView(viewId, skipHash) {
     btn.classList.toggle('active', btn.dataset.view === viewId);
   });
 
-  // Copilot CLI tab reuses Sessions view with source filter pre-set.
-  var effectiveViewId = viewId;
-  if (viewId === 'copilot-cli') {
-    effectiveViewId = 'sessions';
-    var srcFilter = document.getElementById('sess-source-filter');
-    if (srcFilter) srcFilter.value = 'copilot_cli';
-  }
-
-  var viewEl = document.getElementById('view-' + effectiveViewId);
+  var viewEl = document.getElementById('view-' + viewId);
   if (viewEl) {
     var hasData = true;
     if (viewId === 'claude-code') {
@@ -197,7 +190,10 @@ async function switchView(viewId, skipHash) {
     } else if (viewId === 'openclaw') {
       hasData = await oc_loadCards();
       if (hasData) oc_loadOverview();
-    } else if (viewId === 'sessions' || viewId === 'copilot-cli') {
+    } else if (viewId === 'copilot-cli') {
+      hasData = await gcp_loadCards();
+      if (hasData) gcp_loadOverview();
+    } else if (viewId === 'sessions') {
       hasData = await sess_loadCards();
       if (hasData) sess_loadList();
     } else if (viewId === 'prompts') {
