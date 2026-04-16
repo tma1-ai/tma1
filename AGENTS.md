@@ -70,7 +70,7 @@ Browser dashboard (served by tma1-server)
 
 OTel data goes through tma1-server's OTLP proxy (`/v1/otlp/*`), which forwards to GreptimeDB (port 14000) and auto-injects the `x-greptime-pipeline-name: greptime_trace_v1` header for trace requests. Agents should send OTLP to `http://localhost:14318/v1/otlp`.
 
-Hook events from Claude Code arrive via `POST /api/hooks` (configured as HTTP hooks in `~/.claude/settings.json`). A command-based hook script is also auto-installed at `~/.tma1/hooks/tma1-hook.sh` as a fallback. Codex session logs are auto-discovered from `~/.codex/sessions/` without any hook configuration.
+Hook events from Claude Code arrive via `POST /api/hooks` (configured as command hooks in `~/.claude/settings.json`, using `~/.tma1/hooks/tma1-hook.sh` auto-installed by tma1-server). Claude Code's HTTP hook type requires HTTPS, so command hooks with curl are used instead. Codex session logs are auto-discovered from `~/.codex/sessions/` without any hook configuration.
 
 ## Data sources
 
@@ -103,7 +103,7 @@ Trace attributes are auto-created as columns: `"span_attributes.ttft_ms"`, `"spa
 
 Log attributes are JSON. Use `json_get_string()`, `json_get_int()`, `json_get_float()` to extract fields (GreptimeDB does not support `->` / `->>`). Keys with dots (e.g., `session.id`) are interpreted as nested paths and cannot be extracted.
 
-Additionally, Claude Code hooks (configured in `~/.claude/settings.json` as HTTP hooks or command hooks) send events to `/api/hooks`, stored in `tma1_hook_events`. All 27 hook event types are supported; event-specific fields are stored in the `metadata` JSON column. The JSONL transcript at `~/.claude/projects/<encoded>/<session>.jsonl` is watched for conversation content, stored in `tma1_messages`.
+Additionally, Claude Code hooks (configured in `~/.claude/settings.json` as command hooks) send events to `/api/hooks`, stored in `tma1_hook_events`. All 27 hook event types are supported; event-specific fields are stored in the `metadata` JSON column. The JSONL transcript at `~/.claude/projects/<encoded>/<session>.jsonl` is watched for conversation content, stored in `tma1_messages`.
 
 **Codex** → OTel logs + metrics + JSONL session logs:
 
