@@ -173,11 +173,11 @@ async function gcp_loadTools() {
   if (!tbody) return;
   try {
     var res = await query(
-      "SELECT e.tool_name, " +
-      "SUM(CASE WHEN e.event_type = 'PreToolUse' THEN 1 ELSE 0 END) AS calls, " +
-      "SUM(CASE WHEN e.event_type = 'PostToolUseFailure' THEN 1 ELSE 0 END) AS failures " +
-      gcp_hookWhere() + " AND e.event_type IN ('PreToolUse','PostToolUse','PostToolUseFailure') " +
-      "AND e.tool_name != '' GROUP BY e.tool_name ORDER BY calls DESC"
+      "SELECT tool_name, " +
+      "SUM(CASE WHEN event_type = 'PreToolUse' THEN 1 ELSE 0 END) AS calls, " +
+      "SUM(CASE WHEN event_type = 'PostToolUseFailure' THEN 1 ELSE 0 END) AS failures " +
+      gcp_hookWhere() + " AND event_type IN ('PreToolUse','PostToolUse','PostToolUseFailure') " +
+      "AND tool_name != '' GROUP BY tool_name ORDER BY calls DESC"
     );
     var data = rowsToObjects(res);
     if (!data.length) { tbody.innerHTML = '<tr><td colspan="4" class="loading">No tool data</td></tr>'; return; }
