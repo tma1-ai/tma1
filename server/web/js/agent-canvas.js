@@ -692,14 +692,33 @@ var AgentCanvas = (function () {
 
   function scheduleNext() {
     if (replayIdx >= replayEvents.length || replayPaused) return;
-    var ev = replayEvents[replayIdx];
-    processEvent(ev);
-    replayCurrentTs = ev.ts;
-    replayIdx++;
-    if (replayIdx < replayEvents.length) {
-      var delay = (replayEvents[replayIdx].ts - ev.ts) / replaySpeed;
-      delay = Math.max(16, Math.min(delay, 2000));
-      replayTimer = setTimeout(scheduleNext, delay);
+    // Batch-process events that are close together (< 200ms apart) in one frame
+    // to avoid hundreds of tiny setTimeout calls for rapid-fire tool events.
+    while (replayIdx < replayEvents.length) {
+      var ev = replayEvents[replayIdx];
+      var prevTs = replayCurrentTs;
+      processEvent(ev);
+      replayCurrentTs = ev.ts;
+      replayIdx++;
+      // Advance running tool ages by the replay time gap.
+      var replayGapSec = (replayCurrentTs - prevTs) / 1000;
+      if (replayGapSec > 1) {
+        for (var tid in toolCalls) {
+          if (toolCalls[tid].state === 'running') {
+            toolCalls[tid].age = (toolCalls[tid].age || 0) + replayGapSec;
+          }
+        }
+      }
+      // If next event is within 200ms, process it immediately (same frame).
+      if (replayIdx < replayEvents.length) {
+        var nextGap = replayEvents[replayIdx].ts - ev.ts;
+        if (nextGap < 200) continue; // batch into same frame
+        // Cap delay: max 500ms real-time to keep replay moving during idle gaps.
+        var delay = nextGap / replaySpeed;
+        delay = Math.max(16, Math.min(delay, 500));
+        replayTimer = setTimeout(scheduleNext, delay);
+        return;
+      }
     }
   }
 
