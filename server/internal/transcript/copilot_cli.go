@@ -14,19 +14,18 @@ import (
 )
 
 const (
-	copilotCLIScanInterval = 10 * time.Second
-	copilotCLIActiveAge    = 10 * time.Minute
-	copilotCLIAgentSource  = "copilot_cli"
-	copilotCLISessionPfx   = "cp:"
+	copilotCLIScanInterval   = 10 * time.Second
+	copilotCLIActiveAge      = 10 * time.Minute
+	copilotCLIFirstScanAge   = 24 * time.Hour // wider window on first scan to catch older sessions
+	copilotCLIAgentSource    = "copilot_cli"
+	copilotCLISessionPfx     = "cp:"
 )
 
-// escapeSQLStringFull escapes both single quotes and backslashes for SQL string literals.
-// GreptimeDB interprets backslash as an escape character in string literals,
-// so Windows paths like C:\Users must be escaped as C:\\Users.
+// escapeSQLStringFull escapes single quotes for SQL string literals.
+// GreptimeDB's /v1/sql API does NOT interpret backslash escapes,
+// so only single quotes need escaping.
 func escapeSQLStringFull(s string) string {
-	s = strings.ReplaceAll(s, "\\", "\\\\")
-	s = strings.ReplaceAll(s, "'", "''")
-	return s
+	return strings.ReplaceAll(s, "'", "''")
 }
 
 // StartCopilotCLIScanner periodically scans ~/.copilot/session-state/ for active
@@ -41,6 +40,8 @@ func (w *Watcher) StartCopilotCLIScanner(ctx context.Context) {
 	baseDir := filepath.Join(homeDir, ".copilot", "session-state")
 	w.logger.Info("copilot-cli session scanner started", "path", baseDir)
 
+	// First scan uses a wider window to pick up older sessions on fresh install/restart.
+	firstScan := true
 	ticker := time.NewTicker(copilotCLIScanInterval)
 	defer ticker.Stop()
 
@@ -50,13 +51,22 @@ func (w *Watcher) StartCopilotCLIScanner(ctx context.Context) {
 			return
 		case <-ticker.C:
 			if _, err := os.Stat(baseDir); err == nil {
-				w.scanCopilotCLISessions(baseDir)
+				activeAge := copilotCLIActiveAge
+				if firstScan {
+					activeAge = copilotCLIFirstScanAge
+					firstScan = false
+				}
+				w.scanCopilotCLISessionsWithAge(baseDir, activeAge)
 			}
 		}
 	}
 }
 
 func (w *Watcher) scanCopilotCLISessions(baseDir string) {
+	w.scanCopilotCLISessionsWithAge(baseDir, copilotCLIActiveAge)
+}
+
+func (w *Watcher) scanCopilotCLISessionsWithAge(baseDir string, activeAge time.Duration) {
 	now := time.Now()
 
 	// Prune stopped watchers to prevent unbounded memory growth.
@@ -86,7 +96,7 @@ func (w *Watcher) scanCopilotCLISessions(baseDir string) {
 		}
 		eventsFile := filepath.Join(baseDir, entry.Name(), "events.jsonl")
 		info, err := os.Stat(eventsFile)
-		if err != nil || now.Sub(info.ModTime()) > copilotCLIActiveAge {
+		if err != nil || now.Sub(info.ModTime()) > activeAge {
 			continue
 		}
 		sessionID := entry.Name()
@@ -654,7 +664,7 @@ func (w *Watcher) insertCopilotCLIHookEventFull(ts time.Time, fctx *copilotCLICo
 		escapeSQLString(agentType),
 		escapeSQLStringFull(truncate(cwd, 512)),
 		escapeSQLString(dbSessionID),
-		escapeSQLStringFull(metadataJSON),
+		escapeSQLString(metadataJSON), // json.Marshal already escapes backslashes
 	)
 	go func() {
 		insertSem <- struct{}{}
