@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -135,6 +136,15 @@ func (w *Watcher) tailCopilotCLIFile(ctx context.Context, watcherKey, sessionID,
 		return
 	}
 	defer f.Close()
+
+	// Skip backfill if this session was already ingested (prevents duplicates on restart).
+	dbSID := copilotCLISessionPfx + sessionID
+	if w.copilotCLISessionExists(dbSID) {
+		// Seek to end — only process new lines written after this point.
+		if _, err := f.Seek(0, io.SeekEnd); err != nil {
+			w.logger.Warn("copilot-cli seek to end failed", "session", sessionID, "error", err)
+		}
+	}
 
 	reader := bufio.NewReader(f)
 	var buf strings.Builder
@@ -449,6 +459,32 @@ func (w *Watcher) handleCopilotCLISkillInvoked(ts time.Time, ev copilotCLIEvent,
 	}
 	metadata := map[string]string{"skill": data.Skill}
 	w.insertCopilotCLIHookEvent(ts, fctx, "SkillInvoked", "", "", "", "", metadata)
+}
+
+// copilotCLISessionExists checks if data for this session already exists in GreptimeDB.
+// Used to skip backfill on restart and prevent duplicate ingestion.
+func (w *Watcher) copilotCLISessionExists(dbSessionID string) bool {
+	form := url.Values{}
+	form.Set("sql", fmt.Sprintf(
+		"SELECT 1 FROM tma1_hook_events WHERE session_id = '%s' AND agent_source = 'copilot_cli' LIMIT 1",
+		escapeSQLString(dbSessionID),
+	))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	req, err := newPostRequest(ctx, w.sqlURL, form)
+	if err != nil {
+		return false
+	}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	// If the response contains any row data, the session exists.
+	return resp.StatusCode == 200 && strings.Contains(string(body), "\"rows\":[")
 }
 
 // insertCopilotCLIMessage inserts a conversation message into tma1_messages.
