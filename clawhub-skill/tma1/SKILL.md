@@ -194,7 +194,22 @@ Session transcripts at `~/.openclaw/agents/*/sessions/*.jsonl` are auto-discover
 
 #### Claude Code
 
-Add to `~/.claude/settings.json` (Windows: `%USERPROFILE%\.claude\settings.json`):
+Merge into `~/.claude/settings.json` (Windows: `%USERPROFILE%\.claude\settings.json`):
+
+> **CRITICAL: You MUST read the existing `settings.json` first and MERGE — NEVER overwrite.**
+> - For `"env"`: add/update only the keys shown below. Keep all existing env vars intact.
+> - For `"hooks"`: for each event type, **append** the TMA1 hook entry to the existing array. Do NOT replace the array or remove other hooks.
+> - For all other top-level keys (`permissions`, `mcpServers`, `enabledPlugins`, etc.): do NOT touch them.
+>
+> Example merge for a hook event that already has entries:
+> ```json
+> "PreToolUse": [
+>   { "hooks": [{ "type": "command", "command": "existing-hook.sh" }] },
+>   { "hooks": [{ "type": "command", "command": "~/.tma1/hooks/tma1-hook.sh", "timeout": 3 }] }
+> ]
+> ```
+
+The following keys need to be present (add if missing, do not remove others):
 
 ```json
 {
@@ -241,7 +256,7 @@ Add to `~/.claude/settings.json` (Windows: `%USERPROFILE%\.claude\settings.json`
 
 Claude Code exports metrics, logs, and traces (when enhanced telemetry enabled). `CLAUDE_CODE_ENHANCED_TELEMETRY_BETA=1` enables trace spans (TTFT, tool timing, permission waits) for the Traces tab and waterfall visualization.
 
-The `hooks` section uses command hooks (via `~/.tma1/hooks/tma1-hook.sh`, auto-installed by tma1-server on startup) for all 27 event types. On Windows, use `~/.tma1/hooks/tma1-hook.ps1` instead. This enables session-level conversation tracking (tool calls, subagent hierarchy, context compaction, permission flow, file changes) in the Sessions view. If existing hooks are present, merge — do not replace them.
+The `hooks` section uses command hooks (via `~/.tma1/hooks/tma1-hook.sh`, auto-installed by tma1-server on startup) for all 27 event types. On Windows, use `~/.tma1/hooks/tma1-hook.ps1` instead. This enables session-level conversation tracking (tool calls, subagent hierarchy, context compaction, permission flow, file changes) in the Sessions view.
 
 #### Codex
 

@@ -87,7 +87,23 @@ This should return `{"status":"ok","greptimedb":"running",...}`.
 
 Tell the user to set the OTel exporter endpoint. The exact method depends on their agent:
 
-**Claude Code** — add to `~/.claude/settings.json` (Windows: `%USERPROFILE%\.claude\settings.json`):
+**Claude Code** — merge into `~/.claude/settings.json` (Windows: `%USERPROFILE%\.claude\settings.json`):
+
+> **CRITICAL: You MUST read the existing `settings.json` first and MERGE — NEVER overwrite.**
+> - For `"env"`: add/update only the keys shown below. Keep all existing env vars intact.
+> - For `"hooks"`: for each event type, **append** the TMA1 hook entry to the existing array. Do NOT replace the array or remove other hooks.
+> - For all other top-level keys (`permissions`, `mcpServers`, `enabledPlugins`, etc.): do NOT touch them.
+>
+> Example merge for a hook event that already has entries:
+> ```json
+> "PreToolUse": [
+>   { "hooks": [{ "type": "command", "command": "existing-hook.sh" }] },
+>   { "hooks": [{ "type": "command", "command": "~/.tma1/hooks/tma1-hook.sh", "timeout": 3 }] }
+> ]
+> ```
+
+The following keys need to be present (add if missing, do not remove others):
+
 ```json
 {
   "env": {
@@ -131,7 +147,7 @@ Tell the user to set the OTel exporter endpoint. The exact method depends on the
 }
 ```
 
-Claude Code exports metrics, logs, and traces (enhanced telemetry). `CLAUDE_CODE_ENHANCED_TELEMETRY_BETA=1` enables trace spans with TTFT, tool timing, and permission waits for the Traces tab and waterfall. The `hooks` use command hooks (via `~/.tma1/hooks/tma1-hook.sh`, auto-installed by tma1-server on startup) for all 27 event types. On Windows, use `~/.tma1/hooks/tma1-hook.ps1` instead. If existing hooks are present, merge — do not replace them.
+Claude Code exports metrics, logs, and traces (enhanced telemetry). `CLAUDE_CODE_ENHANCED_TELEMETRY_BETA=1` enables trace spans with TTFT, tool timing, and permission waits for the Traces tab and waterfall. The `hooks` use command hooks (via `~/.tma1/hooks/tma1-hook.sh`, auto-installed by tma1-server on startup) for all 27 event types. On Windows, use `~/.tma1/hooks/tma1-hook.ps1` instead.
 
 **Codex** — add to `~/.codex/config.toml` (Windows: `%USERPROFILE%\.codex\config.toml`):
 ```toml
