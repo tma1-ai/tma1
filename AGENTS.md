@@ -126,7 +126,7 @@ Additionally, Codex session logs at `~/.codex/sessions/YYYY/MM/DD/rollout-*.json
 | `tma1_hook_events` | Synthesized hook events | SessionStart / SessionEnd, PreToolUse / PostToolUse(Failure), SubagentStart / SubagentStop, TaskCompleted, SkillInvoked (agent_source = 'copilot_cli') |
 | `tma1_messages` | Conversation content | user / assistant / thinking messages with `output_tokens` (session_id LIKE 'cp:%') |
 
-Copilot CLI session logs at `~/.copilot/session-state/<sessionId>/events.jsonl` are auto-discovered and parsed by tma1-server. The on-disk directory name is the authoritative session ID (stored as `cp:<sessionId>`); restart-dedup relies on this invariant. Parses 10 event types: `session.start`, `session.shutdown`, `session.model_change`, `session.task_complete`, `user.message`, `assistant.message` (content + reasoningText → thinking), `tool.execution_{start,complete}` (success=false → `PostToolUseFailure`), `subagent.{started,completed}`, `skill.invoked`. Timestamps handle both RFC3339 and Copilot CLI's `MM/DD/YYYY HH:mm:ss` UTC format. No hook configuration needed.
+Copilot CLI session logs at `~/.copilot/session-state/<sessionId>/events.jsonl` are auto-discovered and parsed by tma1-server. Session IDs are stored as `cp:<sessionId>`; when a JSONL file contains multiple logical sessions (Copilot CLI appends across restarts), each `session.start` rolls over the in-memory session ID so they're persisted as distinct DB rows. Parses 11 event types: `session.start`, `session.shutdown`, `session.model_change`, `session.task_complete`, `user.message`, `assistant.message` (content + reasoningText → thinking), `tool.execution_start`, `tool.execution_complete` (success=false → `PostToolUseFailure`), `subagent.started`, `subagent.completed`, `skill.invoked`. Timestamps handle both RFC3339 and Copilot CLI's `MM/DD/YYYY HH:mm:ss` UTC format. No hook configuration needed.
 
 **OpenClaw** → OTel traces + metrics:
 
@@ -249,7 +249,7 @@ On first start, tma1 writes a default GreptimeDB config to `~/.tma1/config/stand
 | Transcript watcher (CC JSONL) | `server/internal/transcript/watcher.go` |
 | Codex session parser | `server/internal/transcript/codex.go` |
 | OpenClaw session parser | `server/internal/transcript/openclaw.go` |
-| Copilot CLI session parser | `server/internal/transcript/copilot_cli.go` — `~/.copilot/session-state/`, dir-name = session ID, restart-dedup via DB query |
+| Copilot CLI session parser | `server/internal/transcript/copilot_cli.go` — `~/.copilot/session-state/`, session rollover on repeated `session.start`, restart-dedup via DB query |
 | Dashboard UI | `server/web/index.html` |
 | Sessions view JS | `server/web/js/sessions.js` — orchestrator (KPI cards, session list, detail loading, search) |
 | Sessions sub-modules | `server/web/js/sessions-{stats,detail,insights,waterfall,timeline}.js` — stats computation, detail overlay, insight panels, waterfall chart, timeline rendering |

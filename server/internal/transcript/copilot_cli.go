@@ -175,8 +175,9 @@ func (w *Watcher) scanCopilotCLISessionsWithAge(baseDir string, activeAge time.D
 
 // loadCopilotCLIIngestedDirs queries GreptimeDB for all session_ids already
 // ingested from Copilot CLI and populates copilotCLIIngestedDirs. Session IDs
-// in the DB are namespaced as "cp:<sessionId>" where <sessionId> matches the
-// on-disk session directory name — we rely on that invariant for restart dedup.
+// in the DB are namespaced as "cp:<sessionId>" (with optional "#N" suffix for
+// split multi-session files); the directory name is just "<sessionId>" before
+// the first split, so we strip both the prefix and any split suffix.
 func (w *Watcher) loadCopilotCLIIngestedDirs() {
 	form := url.Values{}
 	form.Set("sql", "SELECT DISTINCT session_id FROM tma1_hook_events WHERE agent_source = 'copilot_cli'")
@@ -225,6 +226,10 @@ func (w *Watcher) loadCopilotCLIIngestedDirs() {
 			continue
 		}
 		sid = strings.TrimPrefix(sid, copilotCLISessionPrefix)
+		// Strip "#N" split suffix to recover the on-disk directory name.
+		if idx := strings.Index(sid, "#"); idx > 0 {
+			sid = sid[:idx]
+		}
 		if sid != "" {
 			copilotCLIIngestedDirs[sid] = struct{}{}
 		}
@@ -393,15 +398,27 @@ func (w *Watcher) processCopilotCLILine(sessionID, line string, seen map[string]
 		seen[ev.ID] = struct{}{}
 	}
 
-	// fctx.sessionID is pinned to the on-disk directory name. Even if session.start
-	// carries a different sessionId in its payload, we keep the directory name as the
-	// authoritative ID so that restart-dedup (loadCopilotCLIIngestedDirs) works.
+	// Split on session.start: if the JSONL contains multiple logical sessions
+	// (appended across restarts), update fctx.sessionID to create separate DB sessions.
+	if ev.Type == "session.start" {
+		var startData struct {
+			SessionID string `json:"sessionId"`
+		}
+		if json.Unmarshal(ev.Data, &startData) == nil && startData.SessionID != "" && startData.SessionID != fctx.sessionID {
+			fctx.sessionID = startData.SessionID
+			fctx.model = ""
+			fctx.cwd = ""
+		}
+	}
 
 	ts := parseCopilotCLITimestamp(ev.Timestamp)
 	if ts.IsZero() {
 		ts = time.Now()
 	}
 
+	// Intentionally unhandled event types: hook.start, hook.end, session.warning,
+	// system.notification, session.mode_changed, session.context_changed,
+	// assistant.turn_start, assistant.turn_end.
 	switch ev.Type {
 	case "session.start":
 		w.handleCopilotCLISessionStart(ts, ev, fctx)
@@ -425,8 +442,6 @@ func (w *Watcher) processCopilotCLILine(sessionID, line string, seen map[string]
 		w.handleCopilotCLISubagentComplete(ts, ev, fctx)
 	case "skill.invoked":
 		w.handleCopilotCLISkillInvoked(ts, ev, fctx)
-		// Skip: hook.start, hook.end, session.warning, system.notification,
-		// session.mode_changed, session.context_changed, assistant.turn_start, assistant.turn_end
 	}
 }
 
