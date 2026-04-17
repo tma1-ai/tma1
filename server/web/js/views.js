@@ -36,6 +36,7 @@ async function detectDataSources() {
       ocMetrics: tables.filter(function(t) { return t.startsWith('openclaw_'); }),
       hasHookEvents: tables.includes('tma1_hook_events'),
       hasMessages: tables.includes('tma1_messages'),
+      hasCopilotCLI: false,
     };
     result.hasCodex = result.codexMetrics.length > 0;
     result.hasOpenClaw = result.ocMetrics.length > 0;
@@ -84,6 +85,15 @@ async function detectDataSources() {
         result.hasGenAITraces = true;
       }
     }
+    // Detect Copilot CLI sessions via hook events.
+    if (result.hasHookEvents) {
+      try {
+        var cpRes = await query(
+          "SELECT 1 FROM tma1_hook_events WHERE agent_source = 'copilot_cli' LIMIT 1"
+        );
+        result.hasCopilotCLI = (rows(cpRes) || []).length > 0;
+      } catch { /* ignore */ }
+    }
     return result;
   } catch {
     return {
@@ -93,6 +103,7 @@ async function detectDataSources() {
       hasGenAITraces: false,
       hasClaudeLogs: false,
       hasCodex: false,
+      hasCopilotCLI: false,
       ccMetrics: [],
       codexMetrics: [],
     };
@@ -153,6 +164,7 @@ async function switchView(viewId, skipHash) {
   document.getElementById('view-claude-code').style.display = 'none';
   document.getElementById('view-codex').style.display = 'none';
   document.getElementById('view-openclaw').style.display = 'none';
+  document.getElementById('view-copilot-cli').style.display = 'none';
   document.getElementById('view-traces').style.display = 'none';
   document.getElementById('view-sessions').style.display = 'none';
   document.getElementById('view-prompts').style.display = 'none';
@@ -178,6 +190,9 @@ async function switchView(viewId, skipHash) {
     } else if (viewId === 'openclaw') {
       hasData = await oc_loadCards();
       if (hasData) oc_loadOverview();
+    } else if (viewId === 'copilot-cli') {
+      hasData = await gcp_loadCards();
+      if (hasData) gcp_loadOverview();
     } else if (viewId === 'sessions') {
       hasData = await sess_loadCards();
       if (hasData) sess_loadList();
@@ -210,6 +225,7 @@ async function initViews() {
   if (hasCCView) views.push({ id: 'claude-code', label: t('view.claude_code') });
   if (dataSources.hasCodex) views.push({ id: 'codex', label: t('view.codex') });
   if (dataSources.hasOpenClaw) views.push({ id: 'openclaw', label: t('view.openclaw') });
+  if (dataSources.hasCopilotCLI) views.push({ id: 'copilot-cli', label: 'Copilot CLI' });
   if (dataSources.hasGenAITraces) views.push({ id: 'traces', label: t('view.otel_genai') });
   if (dataSources.hasHookEvents) views.push({ id: 'sessions', label: t('view.sessions') });
   if (dataSources.hasMessages) views.push({ id: 'prompts', label: t('view.prompts') });
@@ -427,6 +443,17 @@ async function refreshCurrentView() {
     if (hasData) {
       var activeCodexTab = document.querySelector('#cdx-tabs .tab.active');
       if (activeCodexTab) cdx_onTabChange(activeCodexTab.dataset.cdxtab);
+    }
+  } else if (currentView === 'copilot-cli') {
+    hasData = await gcp_loadCards();
+    if (hasData) {
+      var activeGcpTab = document.querySelector('#gcp-tabs .tab.active');
+      if (activeGcpTab && activeGcpTab.dataset.gcptab) {
+        var tabName = activeGcpTab.dataset.gcptab;
+        if (tabName === 'gcp-overview') gcp_loadOverview();
+        else if (tabName === 'gcp-tools') gcp_loadTools();
+        else if (tabName === 'gcp-cost') gcp_loadCostByModel();
+      }
     }
   } else if (currentView === 'sessions') {
     hasData = await sess_loadCards();

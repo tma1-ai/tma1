@@ -74,7 +74,7 @@ var AgentCanvas = (function () {
   }
 
   function addBubble(agentId, text, role) {
-    if (text.length > 80) text = text.slice(0, 77) + '...';
+    if (text.length > 50) text = text.slice(0, 47) + '\u2026';
     bubbles.push({ agentId: agentId, text: text, role: role, ttl: BUBBLE_TTL, opacity: 1 });
     if (bubbles.length > MAX_BUBBLES) bubbles.shift();
   }
@@ -130,7 +130,7 @@ var AgentCanvas = (function () {
 
     for (i = 0; i < ids.length; i++) {
       a = agents[ids[i]];
-      if (a.pinned) continue;
+      if (!a || a.pinned) continue;
       a.vx *= DAMPING; a.vy *= DAMPING;
       a.x += a.vx; a.y += a.vy;
       a.breath += dt * 1.5;
@@ -365,15 +365,17 @@ var AgentCanvas = (function () {
       ctx.globalAlpha = 1;
     }
 
-    // Selected agent info card (C5 glass morphism via canvas).
+    // Selected agent info card.
     if (selectedId && agents[selectedId]) {
       var sa = agents[selectedId];
+      var isSubWithMeta = !sa.isMain && (sa.totalTokens || sa.durationMs || sa.subModel);
+      var cardH = isSubWithMeta ? 104 : 76;
       var ix = sa.x + sa.r + 18, iy = sa.y - sa.r;
       ctx.save();
       ctx.shadowColor = 'rgba(102,204,255,0.15)'; ctx.shadowBlur = 12;
       ctx.fillStyle = 'rgba(8,12,24,0.88)';
       ctx.strokeStyle = 'rgba(102,204,255,0.15)'; ctx.lineWidth = 1;
-      ctx.beginPath(); ctx.roundRect(ix, iy, 160, 76, 8); ctx.fill(); ctx.stroke();
+      ctx.beginPath(); ctx.roundRect(ix, iy, 180, cardH, 8); ctx.fill(); ctx.stroke();
       ctx.restore();
       ctx.fillStyle = '#e6edf3'; ctx.font = 'bold 11px system-ui,sans-serif';
       ctx.textAlign = 'left'; ctx.textBaseline = 'top';
@@ -382,6 +384,18 @@ var AgentCanvas = (function () {
       ctx.fillText(t('canvas.state') + ': ' + sa.state, ix + 10, iy + 26);
       ctx.fillText(t('canvas.tools') + ': ' + (agentToolCounts[selectedId] || 0), ix + 10, iy + 40);
       ctx.fillText(sa.isMain ? t('canvas.main_agent') : t('canvas.subagent'), ix + 10, iy + 54);
+      if (isSubWithMeta) {
+        ctx.fillStyle = '#58a6ff'; ctx.font = '10px system-ui,sans-serif';
+        var metaParts = [];
+        if (sa.subModel) metaParts.push(sa.subModel);
+        if (sa.totalTokens) metaParts.push(fmtNum(sa.totalTokens) + ' tok');
+        if (sa.durationMs) metaParts.push(fmtDurMs(sa.durationMs));
+        ctx.fillText(metaParts.join('  \u00B7  '), ix + 10, iy + 70);
+        if (sa.totalToolCalls) {
+          ctx.fillStyle = '#8b949e';
+          ctx.fillText('Tool calls: ' + sa.totalToolCalls, ix + 10, iy + 84);
+        }
+      }
     }
 
     // Tool detail popup.
@@ -530,14 +544,28 @@ var AgentCanvas = (function () {
     }
     case 'SubagentStart': {
       var subId = ev.agent_id || ('sub_' + Date.now());
-      addAgent(subId, ev.agent_type || 'subagent', false);
+      var subLabel = ev.agent_type || 'subagent';
+      var subNode = addAgent(subId, subLabel, false);
+      subNode.agentType = ev.agent_type || '';
+      subNode.startTs = ev.ts || Date.now();
       var ek = addEdge(mainId, subId);
       agents[subId].state = 'thinking';
       spawnParticle(ek);
+      addBubble(mainId, '\u25B6 ' + subLabel, 'thinking');
       break;
     }
     case 'SubagentStop': {
-      if (ev.agent_id && agents[ev.agent_id]) agents[ev.agent_id].state = 'complete';
+      if (ev.agent_id && agents[ev.agent_id]) {
+        var sa2 = agents[ev.agent_id];
+        sa2.state = 'complete';
+        // Store completion metadata for info card display.
+        sa2.completedTs = ev.ts || Date.now();
+        sa2.durationMs = ev._durationMs || (sa2.completedTs - (sa2.startTs || sa2.completedTs));
+        sa2.totalTokens = ev._totalTokens || 0;
+        sa2.totalToolCalls = ev._totalToolCalls || 0;
+        sa2.subModel = ev._subModel || '';
+        addBubble(mainId, '\u2714 ' + (sa2.agentType || sa2.label), 'assistant');
+      }
       var stopEdge = mainId + '>' + ev.agent_id;
       if (edges[stopEdge]) edges[stopEdge].active = false;
       break;
@@ -674,10 +702,21 @@ var AgentCanvas = (function () {
           tool_use_id: item.data.tool_use_id, agent_id: item.data.agent_id || '',
           tool_result: item.data.tool_result || '' });
       } else if (item.source === 'hook') {
-        evs.push({ ts: item.ts, hook_event_name: item.data.event_type,
+        var hookEv = { ts: item.ts, hook_event_name: item.data.event_type,
           tool_name: item.data.tool_name, tool_use_id: item.data.tool_use_id,
           tool_input: item.data.tool_input || '',
-          agent_id: item.data.agent_id || '', agent_type: item.data.agent_type || '' });
+          agent_id: item.data.agent_id || '', agent_type: item.data.agent_type || '' };
+        // Extract sub-agent metadata for richer display.
+        if (item.data.event_type === 'SubagentStop' && item.data.metadata) {
+          try {
+            var meta = typeof item.data.metadata === 'string' ? JSON.parse(item.data.metadata) : item.data.metadata;
+            hookEv._totalTokens = Number(meta.total_tokens) || 0;
+            hookEv._totalToolCalls = Number(meta.total_tool_calls) || 0;
+            hookEv._durationMs = Number(meta.duration_ms) || 0;
+            hookEv._subModel = meta.model || '';
+          } catch(e) { /* ignore parse error */ }
+        }
+        evs.push(hookEv);
       } else if (item.source === 'message') {
         var mt = item.data.message_type;
         if (mt === 'user' || mt === 'assistant' || mt === 'thinking') {
@@ -687,19 +726,51 @@ var AgentCanvas = (function () {
       }
     }
     evs.sort(function (a, b) { return a.ts - b.ts; });
-    return evs;
+    // Dedup message bubbles: if two _msg events have identical text within 2s, keep only the first.
+    var deduped = [];
+    var msgSeen = {};
+    for (var di = 0; di < evs.length; di++) {
+      var dev = evs[di];
+      if (dev.hook_event_name === '_msg' && dev._text) {
+        var prefix = dev._text.substring(0, 100);
+        var key = dev._msgType + ':' + prefix;
+        if (msgSeen[key] && dev.ts - msgSeen[key] < 2000) continue;
+        msgSeen[key] = dev.ts;
+      }
+      deduped.push(dev);
+    }
+    return deduped;
   }
 
   function scheduleNext() {
     if (replayIdx >= replayEvents.length || replayPaused) return;
-    var ev = replayEvents[replayIdx];
-    processEvent(ev);
-    replayCurrentTs = ev.ts;
-    replayIdx++;
-    if (replayIdx < replayEvents.length) {
-      var delay = (replayEvents[replayIdx].ts - ev.ts) / replaySpeed;
-      delay = Math.max(16, Math.min(delay, 2000));
-      replayTimer = setTimeout(scheduleNext, delay);
+    // Batch-process events that are close together (< 200ms apart) in one frame
+    // to avoid hundreds of tiny setTimeout calls for rapid-fire tool events.
+    while (replayIdx < replayEvents.length) {
+      var ev = replayEvents[replayIdx];
+      var prevTs = replayCurrentTs;
+      processEvent(ev);
+      replayCurrentTs = ev.ts;
+      replayIdx++;
+      // Advance running tool ages by the replay time gap.
+      var replayGapSec = (replayCurrentTs - prevTs) / 1000;
+      if (replayGapSec > 1) {
+        for (var tid in toolCalls) {
+          if (toolCalls[tid].state === 'running') {
+            toolCalls[tid].age = (toolCalls[tid].age || 0) + replayGapSec;
+          }
+        }
+      }
+      // If next event is within 200ms, process it immediately (same frame).
+      if (replayIdx < replayEvents.length) {
+        var nextGap = replayEvents[replayIdx].ts - ev.ts;
+        if (nextGap < 200) continue; // batch into same frame
+        // Cap delay: max 500ms real-time to keep replay moving during idle gaps.
+        var delay = nextGap / replaySpeed;
+        delay = Math.max(16, Math.min(delay, 500));
+        replayTimer = setTimeout(scheduleNext, delay);
+        return;
+      }
     }
   }
 

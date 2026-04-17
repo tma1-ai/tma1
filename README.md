@@ -19,12 +19,13 @@ Six dashboard views, picked automatically from whatever data shows up:
 |------|------|-------------|
 | **Claude Code** | Overview, Tools, Cost, Anomalies, Sessions→ | OTel metrics + logs |
 | **Codex** | Overview, Tools, Cost, Anomalies, Sessions→ | OTel logs + metrics |
+| **Copilot CLI** | Overview, Tools, Cost, Sessions→ | JSONL transcripts (`~/.copilot/session-state/`) |
 | **OpenClaw** | Overview, Sessions, Traces, Cost, Security | OTel traces + metrics |
 | **OTel GenAI** | Overview, Traces, Cost, Security, Search | OTel traces (gen_ai semantic conventions) |
-| **Sessions** | Sessions, Search | Hooks + JSONL transcripts (Claude Code, Codex) |
+| **Sessions** | Sessions, Search | Hooks + JSONL transcripts (Claude Code, Codex, Copilot CLI) |
 | **Prompts** | Overview, Prompts, Patterns | Heuristic scoring + optional LLM-as-judge |
 
-Sessions→ links in Claude Code and Codex views navigate to the unified Sessions view.
+Sessions→ links in Claude Code, Codex, and Copilot CLI views navigate to the unified Sessions view.
 
 Each view gives you:
 - Token counts, cost, and burn rate per model
@@ -86,6 +87,10 @@ tma1-server
 # OpenClaw (sends traces)
 openclaw config set diagnostics.otel.endpoint http://localhost:14318/v1/otlp
 
+# GitHub Copilot CLI — zero config!
+# TMA1 auto-discovers session data from ~/.copilot/session-state/
+# Just start tma1-server and use Copilot CLI as usual.
+
 # Codex — add to ~/.codex/config.toml:
 #   [otel]
 #   log_user_prompt = true
@@ -116,11 +121,12 @@ open http://localhost:14318
 ## How It Works
 
 ```
-Agent (Claude Code / Codex / OpenClaw / any GenAI app)
-    │  OTLP/HTTP
+Agent (Claude Code / Codex / Copilot CLI / OpenClaw / any GenAI app)
+    │  OTLP/HTTP + JSONL transcripts
     ▼
 tma1-server  (port 14318)
     │  receives + stores OTel data
+    │  watches JSONL session files
     │  derives per-minute aggregations
     │  serves dashboard UI
     ▼

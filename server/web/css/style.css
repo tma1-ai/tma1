@@ -717,6 +717,7 @@ tr.active-trace td { background: var(--bg-hover); }
 .badge-cc { background: rgba(121,192,255,0.15); color: var(--blue); padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; }
 .badge-codex { background: rgba(210,153,255,0.15); color: var(--purple); padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; }
 .badge-oc { background: rgba(255,140,105,0.15); color: #ff8c69; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; }
+.badge-copilot { background: rgba(87,203,142,0.15); color: var(--green); padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; }
 .sess-row { cursor: pointer; }
 .sess-row:hover { background: rgba(255,255,255,0.04); }
 .search-result-item { padding: 12px; border-bottom: 1px solid var(--border); cursor: pointer; }

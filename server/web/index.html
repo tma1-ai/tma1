@@ -1108,6 +1108,89 @@
   </div>
   </div><!-- /view-traces -->
 
+  <!-- ========================= COPILOT CLI VIEW ========================= -->
+  <div id="view-copilot-cli" style="display:none">
+    <div class="cards">
+      <div class="card">
+        <div class="label">Est. Cost</div>
+        <div class="value cost" id="gcp-val-cost">&mdash;</div>
+      </div>
+      <div class="card">
+        <div class="label">Output Tokens</div>
+        <div class="value tokens" id="gcp-val-tokens">&mdash;</div>
+      </div>
+      <div class="card">
+        <div class="label">Tool Calls</div>
+        <div class="value requests" id="gcp-val-tools">&mdash;</div>
+      </div>
+      <div class="card">
+        <div class="label">Sessions</div>
+        <div class="value" id="gcp-val-sessions">&mdash;</div>
+      </div>
+      <div class="card">
+        <div class="label">Avg Duration</div>
+        <div class="value latency" id="gcp-val-duration">&mdash;</div>
+      </div>
+    </div>
+
+    <div class="tabs" id="gcp-tabs">
+      <button class="tab active" data-gcptab="gcp-overview">Overview</button>
+      <button class="tab" data-gcptab="gcp-tools">Tools</button>
+      <button class="tab" data-gcptab="gcp-cost">Cost</button>
+      <button class="tab" data-link="sessions" onclick="switchToSessions('copilot_cli')">Sessions</button>
+    </div>
+
+    <!-- Overview -->
+    <div class="tab-content active" id="tab-gcp-overview">
+      <div class="chart-container">
+        <h3>Token Usage Over Time</h3>
+        <div id="gcp-chart-tokens"><div class="chart-empty">Waiting for data...</div></div>
+      </div>
+      <div class="chart-container">
+        <h3>Cost Over Time</h3>
+        <div id="gcp-chart-cost"><div class="chart-empty">Waiting for data...</div></div>
+      </div>
+      <div class="chart-container">
+        <h3>Tool Distribution</h3>
+        <div id="gcp-tool-dist" class="bar-chart"><div class="chart-empty">Waiting for data...</div></div>
+      </div>
+      <div class="chart-container">
+        <h3>Activity Heatmap</h3>
+        <div id="gcp-activity-heatmap"><div class="chart-empty">Waiting for data...</div></div>
+      </div>
+    </div>
+
+    <!-- Tools -->
+    <div class="tab-content" id="tab-gcp-tools">
+      <div class="chart-container">
+        <h3>Tool Performance</h3>
+        <div style="overflow-x:auto">
+          <table>
+            <thead><tr>
+              <th>Tool</th><th>Calls</th><th>Failures</th><th>Failure Rate</th>
+            </tr></thead>
+            <tbody id="gcp-tools-body"><tr><td colspan="4" class="loading">Loading...</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Cost -->
+    <div class="tab-content" id="tab-gcp-cost">
+      <div class="chart-container">
+        <h3>Cost by Model</h3>
+        <div style="overflow-x:auto">
+          <table>
+            <thead><tr>
+              <th>Model</th><th>Output Tokens</th><th>Messages</th><th>Est. Cost</th>
+            </tr></thead>
+            <tbody id="gcp-cost-body"><tr><td colspan="4" class="loading">Loading...</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- ========================= SESSIONS VIEW ========================= -->
   <div id="view-sessions" style="display:none">
     <div class="cards">
@@ -1141,8 +1224,9 @@
           <option value="claude_code" data-i18n="sessions.source_cc">Claude Code</option>
           <option value="codex" data-i18n="sessions.source_codex">Codex</option>
           <option value="openclaw" data-i18n="sessions.source_openclaw">OpenClaw</option>
+          <option value="copilot_cli" data-i18n="sessions.source_copilot_cli">Copilot CLI</option>
         </select>
-        <input class="filter-input" id="sess-keyword-filter" type="text"
+        <input class="filter-input" id="sess-keyword-filter"type="text"
                placeholder="Filter by tool or keyword..."
                data-i18n-placeholder="sessions.filter_keyword"
                oninput="sess_debouncedFilter()" style="max-width:240px" />
@@ -1212,6 +1296,7 @@
         <option value="claude_code" data-i18n="sessions.source_cc">Claude Code</option>
         <option value="codex" data-i18n="sessions.source_codex">Codex</option>
         <option value="openclaw" data-i18n="sessions.source_openclaw">OpenClaw</option>
+        <option value="copilot_cli" data-i18n="sessions.source_copilot_cli">Copilot CLI</option>
       </select>
     </div>
 
@@ -1401,6 +1486,7 @@
   <script src="/js/traces.js"></script>
   <script src="/js/claude-code.js"></script>
   <script src="/js/codex.js"></script>
+  <script src="/js/copilot-cli.js"></script>
   <script src="/js/openclaw.js"></script>
   <script src="/js/sessions-stats.js"></script>
   <script src="/js/sessions-timeline.js"></script>
