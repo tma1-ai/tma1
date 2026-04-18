@@ -59,6 +59,7 @@ function renderToolPair(tc, ts) {
   var time = ts ? new Date(ts).toLocaleTimeString() : '';
   var durMs = (tc.end_ts && tc.start_ts) ? tc.end_ts - tc.start_ts : 0;
   var durLabel = durMs < 1000 ? durMs + 'ms' : (durMs / 1000).toFixed(1) + 's';
+  var durTitle = t('sessions.tool_dur_hook_tooltip');
   var statusClass = tc.failed ? 'tl-tool-card-err' : 'tl-tool-card-ok';
   var statusIcon = tc.failed ? '\u2717' : '\u2713';
   var result = tc.tool_result || '';
@@ -68,7 +69,7 @@ function renderToolPair(tc, ts) {
   html += '<div class="tl-tool-card-header">';
   html += '<span class="tl-time">' + time + '</span>';
   html += '<span class="tl-tool-name">' + escapeHTML(tc.tool_name || 'unknown') + '</span>';
-  html += '<span class="tl-tool-dur">' + durLabel + '</span>';
+  html += '<span class="tl-tool-dur" title="' + escapeHTML(durTitle) + '">' + durLabel + '</span>';
   html += '<span class="tl-tool-status">' + statusIcon + '</span>';
   html += '</div>';
   if (argsSummary) html += '<div class="tl-tool-card-args">' + escapeHTML(argsSummary) + '</div>';

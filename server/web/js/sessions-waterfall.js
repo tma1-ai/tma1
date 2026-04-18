@@ -1,5 +1,6 @@
 /* Sessions — waterfall chart (CC traces + fallback hooks/logs). */
-/* globals: t, escapeHTML, fmtNum, fmtDurMs, fmtTokens, tsToMs, ganttColor */
+/* globals: t, escapeHTML, fmtNum, fmtDurMs, fmtTokens, tsToMs, ganttColor,
+            sess_scrollToToolUseId, sess_scrollToEvent */
 
 var sess_waterfallFlat = null;
 
@@ -241,7 +242,15 @@ function sess_renderWaterfall(timeline, stats) {
     var barStyle = 'left:' + leftPct + '%;width:' + widthPct + '%';
     if (s.spanType === 'tool' && !s.failed) barStyle += ';background:' + ganttColor(s.name);
 
-    html += '<div class="waterfall-row waterfall-row-clickable" role="button" tabindex="0" aria-expanded="false" data-wf-idx="' + ri + '">';
+    var linkAttrs = ' data-ts="' + Math.round(s.start_ts) + '"';
+    // In hook-fallback mode s.id is the real tool_use_id (matches the
+    // right-side timeline's data-tool-use-id exactly). In CC trace mode it's
+    // the OTel span_id, which the timeline doesn't carry — skip there and
+    // fall back to ts matching. Also exclude synthetic 'tool_<idx>' / 'api_<idx>' IDs.
+    var hasToolUseId = !traceResult && s.spanType === 'tool' && s.id &&
+      !/^(tool|api)_/.test(s.id);
+    if (hasToolUseId) linkAttrs += ' data-tool-use-id="' + escapeHTML(s.id) + '"';
+    html += '<div class="waterfall-row waterfall-row-clickable" role="button" tabindex="0" aria-expanded="false" data-wf-idx="' + ri + '"' + linkAttrs + '>';
     html += '<div class="waterfall-label" style="width:' + labelWidth + 'px;padding-left:' + indent + 'px" title="' + escapeHTML(s.name) + '">';
     html += (depth > 0 ? '<span style="color:var(--text-dim);margin-right:4px">\u2514</span>' : '');
     html += badge + escapeHTML(s.name) + tokenHtml;
@@ -265,6 +274,7 @@ function sess_initWaterfallClicks() {
     var idx = parseInt(row.getAttribute('data-wf-idx'), 10);
     if (isNaN(idx)) return;
     e.stopPropagation();
+    sess_scrollTimelineToRow(row);
     sess_toggleWaterfallDetail(container, row, idx);
   });
   container.addEventListener('keydown', function(e) {
@@ -273,8 +283,19 @@ function sess_initWaterfallClicks() {
     if (!row) return;
     e.preventDefault();
     var idx = parseInt(row.getAttribute('data-wf-idx'), 10);
-    if (!isNaN(idx)) sess_toggleWaterfallDetail(container, row, idx);
+    if (isNaN(idx)) return;
+    sess_scrollTimelineToRow(row);
+    sess_toggleWaterfallDetail(container, row, idx);
   });
+}
+
+function sess_scrollTimelineToRow(row) {
+  var tuid = row.getAttribute('data-tool-use-id');
+  if (tuid) { sess_scrollToToolUseId(tuid); return; }
+  var tsAttr = row.getAttribute('data-ts');
+  if (!tsAttr) return;
+  var scrollEl = document.getElementById('sess-timeline-scroll');
+  if (scrollEl) sess_scrollToEvent(scrollEl, Number(tsAttr));
 }
 
 function sess_toggleWaterfallDetail(container, row, idx) {
