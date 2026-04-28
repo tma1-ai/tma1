@@ -410,16 +410,36 @@ func TestProcessCopilotCLILineRefreshesSkipThresholdOnSessionRollover(t *testing
 	fctx.lastTsMs = fctx.skipUntilTsMs
 
 	// session.start for sess-B at 01:30:00 — past dir-A's MAX(ts) (01:00:00) but
-	// before sess-B's own MAX(ts) (02:00:00). Without the rollover refresh, this
-	// event would be re-inserted as a duplicate.
+	// before sess-B's own MAX(ts) (02:00:00). The rollover refresh raises
+	// skipUntilTsMs to sess-B's MAX(ts), which means this very session.start
+	// event will be dropped by the skip check. The cwd from its envelope must
+	// still be captured into fctx so post-threshold inserts carry it.
 	w.processCopilotCLILine("dir-A",
-		`{"type":"session.start","data":{"sessionId":"sess-B","copilotVersion":"1.0","context":{"cwd":"/tmp"}},"id":"evt-start-B","timestamp":"2026-04-16T01:30:00Z","parentId":null}`,
+		`{"type":"session.start","data":{"sessionId":"sess-B","copilotVersion":"1.0","context":{"cwd":"/work/sess-b"}},"id":"evt-start-B","timestamp":"2026-04-16T01:30:00Z","parentId":null}`,
 		seen, fctx)
 	if fctx.sessionID != "sess-B" {
 		t.Fatalf("expected sessionID rollover to sess-B, got %s", fctx.sessionID)
 	}
 	if fctx.skipUntilTsMs != time.Date(2026, 4, 16, 2, 0, 0, 0, time.UTC).UnixMilli() {
 		t.Fatalf("expected skipUntilTsMs to refresh to sess-B's MAX(ts), got %d", fctx.skipUntilTsMs)
+	}
+	if fctx.cwd != "/work/sess-b" {
+		t.Fatalf("expected cwd to survive a skipped session.start, got %q", fctx.cwd)
+	}
+	// The session.start itself should not have produced an INSERT (skipped).
+	select {
+	case sql := <-sqlCh:
+		t.Fatalf("expected skipped session.start to produce no SQL, got: %s", sql)
+	default:
+	}
+
+	// model_change at 01:40:00 — also pre-threshold and dropped by the skip check.
+	// Its newModel must still propagate so subsequent inserts carry the right model.
+	w.processCopilotCLILine("dir-A",
+		`{"type":"session.model_change","data":{"newModel":"claude-opus-4.7"},"id":"evt-mc-B","timestamp":"2026-04-16T01:40:00Z","parentId":null}`,
+		seen, fctx)
+	if fctx.model != "claude-opus-4.7" {
+		t.Fatalf("expected model to survive a skipped model_change, got %q", fctx.model)
 	}
 
 	// User message inside sess-B at 01:45:00 — before sess-B's MAX(ts), so already persisted.
@@ -432,13 +452,18 @@ func TestProcessCopilotCLILineRefreshesSkipThresholdOnSessionRollover(t *testing
 	default:
 	}
 
-	// User message after sess-B's MAX(ts) — genuinely new, should insert.
+	// User message after sess-B's MAX(ts) — genuinely new, should insert and
+	// carry the cwd captured from the (skipped) session.start as well as the
+	// model captured from the (skipped) model_change.
 	w.processCopilotCLILine("dir-A",
 		`{"type":"user.message","data":{"content":"genuinely-new"},"id":"evt-after-B","timestamp":"2026-04-16T02:00:01Z","parentId":null}`,
 		seen, fctx)
 	sql := waitForSQL(t, sqlCh)
 	if !strings.Contains(sql, "genuinely-new") {
 		t.Fatalf("expected post-threshold event in rolled-over session to insert, got: %s", sql)
+	}
+	if !strings.Contains(sql, "claude-opus-4.7") {
+		t.Fatalf("expected post-threshold insert to carry model from skipped model_change, got: %s", sql)
 	}
 }
 
