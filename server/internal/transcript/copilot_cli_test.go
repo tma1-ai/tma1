@@ -362,6 +362,86 @@ func TestProcessCopilotCLILineSkipsPersistedEventsFromDBThreshold(t *testing.T) 
 	}
 }
 
+// TestProcessCopilotCLILineRefreshesSkipThresholdOnSessionRollover verifies
+// that when a JSONL file contains multiple logical sessions (Copilot CLI
+// appends across CLI restarts), session.start rollover refetches MAX(ts) for
+// the new session so already-persisted events of the rolled-over session are
+// not re-inserted on watcher restart.
+func TestProcessCopilotCLILineRefreshesSkipThresholdOnSessionRollover(t *testing.T) {
+	sqlCh := make(chan string, 4)
+	maxTSBySession := map[string]string{
+		"cp:dir-A": "2026-04-16T01:00:00Z",
+		"cp:sess-B": "2026-04-16T02:00:00Z",
+	}
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			w.WriteHeader(500)
+			return
+		}
+		sql := r.Form.Get("sql")
+		if strings.Contains(sql, "SELECT MAX(ts)") {
+			w.WriteHeader(200)
+			for sid, mt := range maxTSBySession {
+				if strings.Contains(sql, sid) {
+					_, _ = w.Write([]byte(`{"output":[{"records":{"rows":[["` + mt + `"]]}}]}`))
+					return
+				}
+			}
+			_, _ = w.Write([]byte(`{"output":[{"records":{"rows":[[null]]}}]}`))
+			return
+		}
+		sqlCh <- sql
+		w.WriteHeader(200)
+		_, _ = w.Write([]byte(`{"output":[]}`))
+	}))
+	defer ts.Close()
+
+	oldClient := httpClient
+	httpClient = ts.Client()
+	defer func() { httpClient = oldClient }()
+
+	w := &Watcher{
+		sqlURL: ts.URL,
+		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+	seen := make(map[string]struct{})
+	fctx := &copilotCLIContext{sessionID: "dir-A"}
+	fctx.skipUntilTsMs = w.fetchCopilotCLIMaxTs("dir-A")
+	fctx.lastTsMs = fctx.skipUntilTsMs
+
+	// session.start for sess-B at 01:30:00 — past dir-A's MAX(ts) (01:00:00) but
+	// before sess-B's own MAX(ts) (02:00:00). Without the rollover refresh, this
+	// event would be re-inserted as a duplicate.
+	w.processCopilotCLILine("dir-A",
+		`{"type":"session.start","data":{"sessionId":"sess-B","copilotVersion":"1.0","context":{"cwd":"/tmp"}},"id":"evt-start-B","timestamp":"2026-04-16T01:30:00Z","parentId":null}`,
+		seen, fctx)
+	if fctx.sessionID != "sess-B" {
+		t.Fatalf("expected sessionID rollover to sess-B, got %s", fctx.sessionID)
+	}
+	if fctx.skipUntilTsMs != time.Date(2026, 4, 16, 2, 0, 0, 0, time.UTC).UnixMilli() {
+		t.Fatalf("expected skipUntilTsMs to refresh to sess-B's MAX(ts), got %d", fctx.skipUntilTsMs)
+	}
+
+	// User message inside sess-B at 01:45:00 — before sess-B's MAX(ts), so already persisted.
+	w.processCopilotCLILine("dir-A",
+		`{"type":"user.message","data":{"content":"already-ingested"},"id":"evt-mid-B","timestamp":"2026-04-16T01:45:00Z","parentId":null}`,
+		seen, fctx)
+	select {
+	case sql := <-sqlCh:
+		t.Fatalf("expected events of rolled-over session before its MAX(ts) to be skipped, got SQL: %s", sql)
+	default:
+	}
+
+	// User message after sess-B's MAX(ts) — genuinely new, should insert.
+	w.processCopilotCLILine("dir-A",
+		`{"type":"user.message","data":{"content":"genuinely-new"},"id":"evt-after-B","timestamp":"2026-04-16T02:00:01Z","parentId":null}`,
+		seen, fctx)
+	sql := waitForSQL(t, sqlCh)
+	if !strings.Contains(sql, "genuinely-new") {
+		t.Fatalf("expected post-threshold event in rolled-over session to insert, got: %s", sql)
+	}
+}
+
 func TestCopilotCLIContextDBSessionID(t *testing.T) {
 	fctx := &copilotCLIContext{sessionID: "abc-123-def"}
 	want := "cp:abc-123-def"

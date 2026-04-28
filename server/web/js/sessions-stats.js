@@ -67,8 +67,9 @@ function sess_computeStats(hookEvents, messages, timeline, apiCalls, apiErrors) 
     var hts = tsToMs(hev.ts);
     if (hts < sessionStartTs) sessionStartTs = hts;
     if (hts > sessionEndTs) sessionEndTs = hts;
+    var aid = hev.agent_id || '';
     if (hev.event_type === 'PreToolUse' && hev.tool_name &&
-        (hev.tool_name.toLowerCase() === 'task' || hev.tool_name === 'Task') && hev.tool_use_id) {
+        hev.tool_name.toLowerCase() === 'task' && hev.tool_use_id) {
       var ti = sess_parseMeta(hev.tool_input);
       taskDescriptionById[hev.tool_use_id] = {
         description: ti.description || '',
@@ -79,15 +80,15 @@ function sess_computeStats(hookEvents, messages, timeline, apiCalls, apiErrors) 
     if (hev.event_type === 'SubagentStart') {
       stats.agents.push(hev);
       // If a span is already open for this id, close it out at this ts (anomaly).
-      if (openById[hev.agent_id]) {
-        var prev = openById[hev.agent_id];
+      if (openById[aid]) {
+        var prev = openById[aid];
         prev.end_ts = hts;
         prev.incomplete = true;
         agentSpans.push(prev);
       }
       var meta = sess_parseMeta(hev.metadata);
-      openById[hev.agent_id] = {
-        agent_id: hev.agent_id || '',
+      openById[aid] = {
+        agent_id: aid,
         agent_type: hev.agent_type || 'subagent',
         start_ts: hts,
         end_ts: 0,
@@ -99,7 +100,7 @@ function sess_computeStats(hookEvents, messages, timeline, apiCalls, apiErrors) 
         incomplete: false,
       };
     } else if (hev.event_type === 'SubagentStop') {
-      var sp = openById[hev.agent_id];
+      var sp = openById[aid];
       if (sp) {
         var sm = sess_parseMeta(hev.metadata);
         sp.end_ts = hts;
@@ -108,12 +109,11 @@ function sess_computeStats(hookEvents, messages, timeline, apiCalls, apiErrors) 
         sp.total_tokens = Number(sm.total_tokens) || 0;
         sp.total_tool_calls = Number(sm.total_tool_calls) || 0;
         agentSpans.push(sp);
-        delete openById[hev.agent_id];
+        delete openById[aid];
       }
       // Orphan Stop (no matching Start) — ignore.
     }
     if (hev.event_type === 'PreToolUse') {
-      var aid = hev.agent_id || '';
       agentToolCounts[aid] = (agentToolCounts[aid] || 0) + 1;
     }
   }

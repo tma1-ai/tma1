@@ -49,7 +49,7 @@ var AgentCanvas = (function () {
 
   // ── Scene Graph ──────────────────────────────────────────────
 
-  function toolArgHint(toolName, toolInput) {
+  function toolArgHint(toolInput) {
     if (!toolInput) return '';
     var obj = toolInput;
     if (typeof toolInput === 'string') {
@@ -370,7 +370,7 @@ var AgentCanvas = (function () {
 
       // Arg hint line (path, pattern, command preview, etc.).
       if (tc.argHintToolName !== tc.toolName || tc.argHintToolInput !== tc.toolInput) {
-        tc.argHint = toolArgHint(tc.toolName, tc.toolInput);
+        tc.argHint = toolArgHint(tc.toolInput);
         tc.argHintToolName = tc.toolName;
         tc.argHintToolInput = tc.toolInput;
       }

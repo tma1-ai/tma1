@@ -245,7 +245,7 @@ func (w *Watcher) loadCopilotCLIIngestedDirs() {
 func (w *Watcher) fetchCopilotCLIMaxTs(sessionID string) int64 {
 	form := url.Values{}
 	dbSid := copilotCLISessionPrefix + sessionID
-	form.Set("sql", "SELECT MAX(ts) FROM tma1_hook_events WHERE session_id = '"+strings.ReplaceAll(dbSid, "'", "''")+"'")
+	form.Set("sql", "SELECT MAX(ts) FROM tma1_hook_events WHERE session_id = '"+escapeSQLString(dbSid)+"'")
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	req, err := newPostRequest(ctx, w.sqlURL, form)
@@ -511,6 +511,12 @@ func (w *Watcher) processCopilotCLILine(sessionID, line string, seen map[string]
 			fctx.sessionID = startData.SessionID
 			fctx.model = ""
 			fctx.cwd = ""
+			// Re-seed dedup threshold for the new logical session: skipUntilTsMs
+			// was fetched at watcher start for the directory's primary session,
+			// so without this refresh we'd re-insert any events of the rolled-over
+			// session that were already persisted in a previous run.
+			fctx.skipUntilTsMs = w.fetchCopilotCLIMaxTs(fctx.sessionID)
+			fctx.lastTsMs = fctx.skipUntilTsMs
 		}
 	}
 
