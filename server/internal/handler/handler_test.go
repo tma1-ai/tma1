@@ -764,6 +764,83 @@ func TestSettingsSaveInvalidTTL(t *testing.T) {
 	}
 }
 
+func TestSettingsSaveInvalidQueryConcurrency(t *testing.T) {
+	tmpDir := t.TempDir()
+	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
+	srv := New(14000, "14318", http.Dir("."), logger, nil, NewHookBroadcaster(),
+		LLMConfig{}, ServerConfig{DataDir: tmpDir})
+	r := srv.Router()
+
+	tests := []struct {
+		name string
+		body string
+		want int
+	}{
+		{"zero (unset)", `{"query_concurrency":0}`, http.StatusOK}, // 0 means "unset", not invalid
+		{"negative", `{"query_concurrency":-1}`, http.StatusBadRequest},
+		{"too large", `{"query_concurrency":33}`, http.StatusBadRequest},
+		{"min", `{"query_concurrency":1}`, http.StatusOK},
+		{"max", `{"query_concurrency":32}`, http.StatusOK},
+		{"typical", `{"query_concurrency":4}`, http.StatusOK},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/api/settings",
+				strings.NewReader(tt.body))
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, req)
+			if w.Code != tt.want {
+				body, _ := io.ReadAll(w.Body)
+				t.Fatalf("body %s: status = %d, want %d, response: %s", tt.body, w.Code, tt.want, body)
+			}
+		})
+	}
+}
+
+func TestSettingsQueryConcurrencyPersisted(t *testing.T) {
+	tmpDir := t.TempDir()
+	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
+	srv := New(14000, "14318", http.Dir("."), logger, nil, NewHookBroadcaster(),
+		LLMConfig{}, ServerConfig{DataDir: tmpDir, QueryConcurrency: 4})
+	r := srv.Router()
+
+	// POST a new value.
+	postReq := httptest.NewRequest(http.MethodPost, "/api/settings",
+		strings.NewReader(`{"query_concurrency":7}`))
+	postReq.Header.Set("Content-Type", "application/json")
+	postW := httptest.NewRecorder()
+	r.ServeHTTP(postW, postReq)
+	if postW.Code != http.StatusOK {
+		body, _ := io.ReadAll(postW.Body)
+		t.Fatalf("save: status = %d, want 200, body: %s", postW.Code, body)
+	}
+
+	// POST response itself returns the updated value.
+	var postResp map[string]any
+	if err := json.Unmarshal(postW.Body.Bytes(), &postResp); err != nil {
+		t.Fatalf("decode POST response: %v", err)
+	}
+	if got := postResp["query_concurrency"]; got != float64(7) {
+		t.Fatalf("POST response query_concurrency = %v, want 7", got)
+	}
+
+	// Subsequent GET reflects the new value (in-memory hot-reload).
+	getReq := httptest.NewRequest(http.MethodGet, "/api/settings", nil)
+	getW := httptest.NewRecorder()
+	r.ServeHTTP(getW, getReq)
+	if getW.Code != http.StatusOK {
+		t.Fatalf("get: status = %d, want 200", getW.Code)
+	}
+	var getResp map[string]any
+	if err := json.Unmarshal(getW.Body.Bytes(), &getResp); err != nil {
+		t.Fatalf("decode GET response: %v", err)
+	}
+	if got := getResp["query_concurrency"]; got != float64(7) {
+		t.Fatalf("GET query_concurrency = %v, want 7", got)
+	}
+}
+
 func TestSettingsOriginProtection(t *testing.T) {
 	tmpDir := t.TempDir()
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))

@@ -777,6 +777,8 @@ async function saveSettings() {
       status.style.color = 'var(--green)';
       // Update LLM availability for Prompts view.
       prLLMAvailable = data.llm_api_key_set;
+      // Apply hot-reloaded query concurrency to the in-memory limiter.
+      if (data.query_concurrency > 0) QUERY_CONCURRENCY = data.query_concurrency;
       settingsKeyCleared = false;
       // Update placeholder and clear button.
       document.getElementById('settings-llm-key').value = '';

@@ -356,7 +356,7 @@ function renderStripHeatmap(el, data, cfg) {
 
   var cellRow = '';
   for (var ci = 0; ci < slots; ci++) {
-    var tip = slotLabel(ci) + ' \u2014 ' + counts[ci];
+    var tip = slotLabel(ci) + ' \u2014 ' + fmtNum(counts[ci]);
     cellRow += '<div class="ah-cell" style="background:' + ahCellColor(counts[ci], max, palette) +
       ';grid-column:' + (ci + 1) + ';grid-row:2" title="' + tip + '"></div>';
   }
