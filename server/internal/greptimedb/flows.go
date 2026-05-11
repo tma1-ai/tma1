@@ -267,7 +267,14 @@ const pricingTableDDL = `CREATE TABLE IF NOT EXISTS tma1_model_pricing (
 );`
 
 // defaultPricing is the seed data inserted on first start.
+// Prices are USD per 1M tokens (input / output), reflecting public list
+// pricing as of 2026-05.
+//
+// To roll new prices out to existing installs, ship a new binary Version
+// string: main.go compares it against ~/.tma1/.tma1-version and triggers
+// TruncatePricing + SeedPricing on mismatch.
 var defaultPricing = []modelPrice{
+	{"claude-opus-4-7", 9, 5.0, 25.0},
 	{"claude-opus-4-6", 10, 5.0, 25.0},
 	{"claude-opus-4-5", 11, 5.0, 25.0},
 	{"claude-opus-4-1", 12, 15.0, 75.0},
@@ -275,14 +282,14 @@ var defaultPricing = []modelPrice{
 	{"claude-3-opus", 14, 15.0, 75.0},
 	{"claude-sonnet", 20, 3.0, 15.0},
 	{"claude-haiku-4-5", 30, 1.0, 5.0},
-	{"claude-3-5-haiku", 31, 1.0, 5.0},
+	{"claude-3-5-haiku", 31, 0.8, 4.0},
 	{"claude-3-haiku", 32, 0.25, 1.25},
 	{"claude", 99, 3.0, 15.0},
 	{"o1-pro", 100, 150.0, 600.0},
 	{"o1-mini", 101, 0.55, 2.2},
 	{"o1", 109, 15.0, 60.0},
-	{"o4-mini", 110, 0.55, 2.2},
-	{"o3-mini", 111, 0.55, 2.2},
+	{"o4-mini", 110, 1.1, 4.4},
+	{"o3-mini", 111, 1.1, 4.4},
 	{"o3", 119, 2.0, 8.0},
 	{"gpt-4o-mini", 120, 0.15, 0.6},
 	{"gpt-4o", 129, 2.5, 10.0},
@@ -293,46 +300,52 @@ var defaultPricing = []modelPrice{
 	{"gpt-4.1", 139, 2.0, 8.0},
 	{"gpt-5-nano", 140, 0.05, 0.4},
 	{"gpt-5-mini", 141, 0.25, 2.0},
-	{"gpt-5", 149, 0.625, 5.0},
+	{"gpt-5.5", 148, 5.0, 30.0},
+	{"gpt-5", 149, 1.25, 10.0},
 	{"gpt-3.5", 150, 0.5, 1.5},
 	{"gemini-2.5-pro", 200, 1.25, 10.0},
 	{"gemini-2.5-flash", 201, 0.3, 2.5},
 	{"gemini-2.0-flash", 202, 0.1, 0.4},
 	{"gemini", 299, 0.3, 2.5},
-	{"deepseek-r1", 300, 0.28, 0.42},
-	{"deepseek-chat", 301, 0.28, 0.42},
+	// deepseek-chat / deepseek-reasoner are billed at the V3.2 list price
+	// (per api-docs.deepseek.com/quick_start/pricing-details-usd) until the
+	// legacy endpoints are retired on 2026-07-24. After that, both alias to
+	// V4-Flash ($0.14/$0.28) — update these two entries then.
+	{"deepseek-v4", 298, 0.14, 0.28},
+	{"deepseek-r1", 300, 0.55, 2.19},
+	{"deepseek-chat", 301, 0.27, 1.10},
 	{"deepseek-coder", 302, 0.14, 0.28},
-	{"deepseek", 399, 0.28, 0.42},
+	{"deepseek", 399, 0.27, 1.10},
 	// Alibaba Qwen
-	{"qwen3-max", 400, 0.35, 1.39},
-	{"qwen-plus", 401, 0.11, 0.28},
+	{"qwen3-max", 400, 0.26, 2.08},
+	{"qwen-plus", 401, 0.4, 2.4},
 	{"qwen-turbo", 402, 0.04, 0.08},
 	{"qwen-long", 403, 0.07, 0.28},
-	{"qwen-max", 404, 0.33, 1.33},
-	{"qwen", 499, 0.11, 0.28},
+	{"qwen-max", 404, 1.04, 4.16},
+	{"qwen", 499, 0.4, 2.4},
 	// Zhipu AI GLM
-	{"glm-4-plus", 500, 0.69, 0.69},
+	{"glm-4-plus", 500, 0.6, 2.2},
 	{"glm-4-flash", 501, 0.01, 0.01},
 	{"glm-4-long", 502, 0.14, 0.14},
 	{"glm-4", 509, 0.14, 0.14},
 	{"glm", 599, 0.14, 0.14},
 	// Moonshot / Kimi
-	{"kimi-k2", 600, 0.56, 2.22},
-	{"moonshot-v1-128k", 601, 8.33, 8.33},
-	{"moonshot-v1-32k", 602, 3.33, 3.33},
-	{"moonshot-v1-8k", 603, 1.67, 1.67},
-	{"moonshot", 699, 0.56, 2.22},
+	{"kimi-k2", 600, 0.6, 2.5},
+	{"moonshot-v1-128k", 601, 2.0, 5.0},
+	{"moonshot-v1-32k", 602, 1.0, 3.0},
+	{"moonshot-v1-8k", 603, 0.2, 2.0},
+	{"moonshot", 699, 0.6, 2.5},
 	// ByteDance Doubao
-	{"doubao-pro", 700, 0.11, 0.28},
-	{"doubao-lite", 701, 0.04, 0.08},
-	{"doubao", 799, 0.11, 0.28},
+	{"doubao-pro", 700, 0.47, 2.37},
+	{"doubao-lite", 701, 0.13, 0.76},
+	{"doubao", 799, 0.47, 2.37},
 	// Tencent Hunyuan
-	{"hunyuan-pro", 800, 0.55, 2.21},
+	{"hunyuan-pro", 800, 0.63, 1.55},
 	{"hunyuan-turbo", 801, 0.11, 0.28},
 	{"hunyuan-standard", 802, 0.63, 0.69},
 	{"hunyuan", 899, 0.11, 0.28},
 	// Baidu ERNIE
-	{"ernie-4", 900, 2.78, 8.33},
+	{"ernie-4", 900, 4.2, 8.4},
 	{"ernie-3.5", 901, 0.11, 0.28},
 	{"ernie", 999, 0.11, 0.28},
 	// iFlytek Spark
