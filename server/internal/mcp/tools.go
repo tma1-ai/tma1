@@ -116,9 +116,11 @@ func (t SessionStateTool) Call(ctx context.Context, args map[string]any) (CallTo
 
 	payload := map[string]any{"session": state}
 
-	// verbose=true → include raw action list (Plan §Phase 0.1: "verbose=true
-	// 返回 raw action list — 合并原 plan 的 get_recent_actions"). Failure
-	// to fetch actions doesn't fail the call; the agent still gets state.
+	// verbose=true => include raw action list. This is what the plan
+	// originally proposed as a separate get_recent_actions tool;
+	// folding it into get_session_state keeps the tool surface small.
+	// Failure to fetch actions doesn't fail the call; the agent still
+	// gets state.
 	if verbose, _ := args["verbose"].(bool); verbose {
 		limit := intArg(args, "action_limit", 50)
 		actions, err := t.Bundler.GetRecentActions(ctx, sessionID, limit)

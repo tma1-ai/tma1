@@ -149,10 +149,10 @@ func (b *Bundle) RenderSummary() string {
 }
 
 // RenderSummaryDelta renders only the bundle sections marked in delta.
-// This implements the plan's "增量优先（只列上 turn 之后变化）" budget:
-// when only the anomaly set changed since the previous turn, only the
-// anomalies block ships — counters + project orientation already in
-// the agent's context don't get re-emitted.
+// This is the incremental injection path the plan calls for: only
+// list what changed since the previous turn. When only the anomaly
+// set changed, only the anomalies block ships -- counters + project
+// orientation already in the agent's context don't get re-emitted.
 //
 // Returns an empty string when delta is empty OR when no included
 // section actually has content to render.

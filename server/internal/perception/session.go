@@ -232,9 +232,9 @@ func extractFilesFromRows(rows [][]any, lastActivity time.Time) ([]string, strin
 
 // GetRecentActions returns the most recent PreToolUse / PostToolUse /
 // PostToolUseFailure entries for sessionID, newest first. limit is
-// clamped to [1, 200] (default 50). Use this to back the verbose=true
-// variant of get_session_state — the plan's "合并原 plan 的
-// get_recent_actions" channel.
+// clamped to [1, 200] (default 50). Backs the verbose=true variant of
+// get_session_state -- the channel the plan originally proposed as a
+// separate get_recent_actions tool, folded in here.
 func (b *Bundler) GetRecentActions(ctx context.Context, sessionID string, limit int) ([]ActionEntry, error) {
 	if strings.TrimSpace(sessionID) == "" {
 		return nil, nil

@@ -30,9 +30,10 @@ func (d Digest) Equal(other Digest) bool { return d == other }
 
 // DigestDelta marks which Bundle sections differ between two digests.
 // Drives the incremental injection path: rather than re-emitting the
-// whole bundle every turn (full text → token spend), only sections
-// whose content actually changed are rendered. Plan §Phase 0.1: "摘要 ≤
-// 500 tokens, 增量优先（只列上 turn 之后变化）".
+// whole bundle every turn (full text => token spend), only sections
+// whose content actually changed are rendered. Plan Phase 0.1 spec:
+// summary stays under ~500 tokens, and each turn lists only what
+// changed since the previous one.
 type DigestDelta struct {
 	Anomalies bool
 	Build     bool

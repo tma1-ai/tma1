@@ -25,8 +25,9 @@ import (
 //   - Logs show which migration actually applied versus which was
 //     skipped because it ran before.
 //
-// Plan §真实风险点: "GreptimeDB 升级 schema 兼容性：复用现有 settings/
-// configVersion 迁移机制" — this is the schema-side analogue.
+// Plan risk section calls for a versioned migration mechanism that
+// mirrors the existing settings/configVersion approach; this is the
+// schema-side analogue.
 type Migration struct {
 	Version     int      // strictly increasing across the slice; first is 1
 	Description string   // shown in logs + persisted to the ledger
