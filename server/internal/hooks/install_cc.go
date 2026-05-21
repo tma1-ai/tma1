@@ -25,6 +25,9 @@ import (
 //go:embed all:skills
 var embeddedSkills embed.FS
 
+//go:embed all:commands
+var embeddedCommands embed.FS
+
 // ClaudeCodeInstaller knows how to set up TMA1 hooks for Claude Code.
 type ClaudeCodeInstaller struct {
 	DataDir            string // ~/.tma1
@@ -32,6 +35,11 @@ type ClaudeCodeInstaller struct {
 	GreptimeDBHTTPPort int    // GreptimeDB HTTP port; only persisted to MCP env when != default
 	ProjectDir         string // project root (where CLAUDE.md / .gitignore live)
 	Logger             *slog.Logger
+	// DryRun prints what would change without writing anything to disk.
+	// Every settings.json / .claude.json / skill / command / instruction
+	// / .gitignore write goes through writeFile, so toggling this gates
+	// the whole install pipeline.
+	DryRun bool
 }
 
 // defaultGreptimeDBHTTPPort mirrors config.envInt("TMA1_GREPTIMEDB_HTTP_PORT", 14000).
@@ -49,7 +57,33 @@ type InstallReport struct {
 	GitignorePath    string
 	MCPConfigPath    string   // ~/.claude.json (or wherever mcpServers got registered)
 	SkillPaths       []string // skill files installed under ~/.claude/skills/
+	CommandPaths     []string // slash-command files installed under ~/.claude/commands/
 	Changed          []string // human-readable summary of what changed
+}
+
+// writeFile is the DryRun-aware sink for every install-time file write.
+// On DryRun it logs the intended action and returns nil; otherwise it
+// delegates to writeFileAtomic (temp + rename) so partial writes can't
+// corrupt files holding user-critical state.
+func (i *ClaudeCodeInstaller) writeFile(path string, data []byte, perm os.FileMode) error {
+	if i.DryRun {
+		if i.Logger != nil {
+			i.Logger.Info("[dry-run] would write", "path", path, "bytes", len(data))
+		}
+		return nil
+	}
+	return writeFileAtomic(path, data, perm)
+}
+
+// mkdirAll mirrors writeFile for directory creation.
+func (i *ClaudeCodeInstaller) mkdirAll(path string, perm os.FileMode) error {
+	if i.DryRun {
+		if i.Logger != nil {
+			i.Logger.Info("[dry-run] would mkdir -p", "path", path)
+		}
+		return nil
+	}
+	return os.MkdirAll(path, perm)
 }
 
 // Install performs all installation steps. Errors from any step are joined
@@ -81,7 +115,7 @@ func (i *ClaudeCodeInstaller) Install() (InstallReport, error) {
 
 	// 3. Append <!-- tma1:start --> block to CLAUDE.md/AGENTS.md.
 	if i.ProjectDir != "" {
-		instrPath, changed, err := installInstructions(i.ProjectDir)
+		instrPath, changed, err := i.installInstructions(i.ProjectDir)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("instructions: %w", err))
 		}
@@ -91,7 +125,7 @@ func (i *ClaudeCodeInstaller) Install() (InstallReport, error) {
 		}
 
 		// 4. Add .tma1-context.md to .gitignore (best-effort).
-		gi, changed, err := installGitignore(i.ProjectDir)
+		gi, changed, err := i.installGitignore(i.ProjectDir)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("gitignore: %w", err))
 		}
@@ -101,8 +135,12 @@ func (i *ClaudeCodeInstaller) Install() (InstallReport, error) {
 		}
 	}
 
-	// 5. Install the tma1-peer slash-command skill into ~/.claude/skills/.
-	// User invokes it as `/tma1-peer [agent] [count]` from any CC session.
+	// 5. Install the tma1-peer slash-command into both `~/.claude/commands/`
+	// (CC's native location for `/<name> args` invocations) and the legacy
+	// `~/.claude/skills/` path. Plan §Phase 1.6 prefers the command form
+	// because it survives independently of skill autoload heuristics; the
+	// skill stays as a fallback for CC versions whose commands/ directory
+	// doesn't accept arguments.
 	skillPaths, skillErr := i.installSkills()
 	if skillErr != nil {
 		errs = append(errs, fmt.Errorf("skills: %w", skillErr))
@@ -110,6 +148,15 @@ func (i *ClaudeCodeInstaller) Install() (InstallReport, error) {
 	rep.SkillPaths = skillPaths
 	for _, p := range skillPaths {
 		rep.Changed = append(rep.Changed, p+" (skill)")
+	}
+
+	commandPaths, commandErr := i.installCommands()
+	if commandErr != nil {
+		errs = append(errs, fmt.Errorf("commands: %w", commandErr))
+	}
+	rep.CommandPaths = commandPaths
+	for _, p := range commandPaths {
+		rep.Changed = append(rep.Changed, p+" (command)")
 	}
 
 	// 6. Register tma1 as an MCP server in ~/.claude.json so CC can pull
@@ -138,34 +185,55 @@ func (i *ClaudeCodeInstaller) installSkills() ([]string, error) {
 		return nil, err
 	}
 	skillsDest := filepath.Join(home, ".claude", "skills")
-	if err := os.MkdirAll(skillsDest, 0o755); err != nil {
+	return i.syncEmbeddedTree(embeddedSkills, "skills", skillsDest)
+}
+
+// installCommands copies the embedded slash-command tree into
+// ~/.claude/commands/. Same shape as installSkills — separate function
+// so the InstallReport can attribute changes to the right channel
+// (commands vs skills) and so dropping support for either side later
+// is a one-call removal.
+func (i *ClaudeCodeInstaller) installCommands() ([]string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
 		return nil, err
 	}
+	cmdsDest := filepath.Join(home, ".claude", "commands")
+	return i.syncEmbeddedTree(embeddedCommands, "commands", cmdsDest)
+}
 
+// syncEmbeddedTree walks an embed.FS rooted at `embedRoot`, mirroring
+// each file under `destRoot`. Files whose on-disk content already
+// matches the embedded version are left untouched (so reinstalls don't
+// thrash mtimes). Honors DryRun via writeFile / mkdirAll.
+func (i *ClaudeCodeInstaller) syncEmbeddedTree(src embed.FS, embedRoot, destRoot string) ([]string, error) {
+	if err := i.mkdirAll(destRoot, 0o755); err != nil {
+		return nil, err
+	}
 	var changed []string
-	walkErr := fs.WalkDir(embeddedSkills, "skills", func(p string, d fs.DirEntry, walkErr error) error {
+	walkErr := fs.WalkDir(src, embedRoot, func(p string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
 		if d.IsDir() {
 			return nil
 		}
-		rel, err := filepath.Rel("skills", p)
+		rel, err := filepath.Rel(embedRoot, p)
 		if err != nil {
 			return err
 		}
-		want, err := embeddedSkills.ReadFile(p)
+		want, err := src.ReadFile(p)
 		if err != nil {
 			return err
 		}
-		target := filepath.Join(skillsDest, rel)
+		target := filepath.Join(destRoot, rel)
 		if existing, err := os.ReadFile(target); err == nil && string(existing) == string(want) {
 			return nil
 		}
-		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		if err := i.mkdirAll(filepath.Dir(target), 0o755); err != nil {
 			return err
 		}
-		if err := os.WriteFile(target, want, 0o644); err != nil {
+		if err := i.writeFile(target, want, 0o644); err != nil {
 			return err
 		}
 		changed = append(changed, target)
@@ -189,7 +257,7 @@ func (i *ClaudeCodeInstaller) installSettings(scriptPath string) (string, bool, 
 		return "", false, err
 	}
 	settingsPath := filepath.Join(home, ".claude", "settings.json")
-	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o755); err != nil {
+	if err := i.mkdirAll(filepath.Dir(settingsPath), 0o755); err != nil {
 		return settingsPath, false, err
 	}
 
@@ -207,7 +275,7 @@ func (i *ClaudeCodeInstaller) installSettings(scriptPath string) (string, bool, 
 	if err != nil {
 		return settingsPath, false, err
 	}
-	if err := writeFileAtomic(settingsPath, append(out, '\n'), 0o644); err != nil {
+	if err := i.writeFile(settingsPath, append(out, '\n'), 0o644); err != nil {
 		return settingsPath, false, err
 	}
 	return settingsPath, true, nil
@@ -305,7 +373,7 @@ func (i *ClaudeCodeInstaller) installMCPServer() (string, bool, error) {
 	if err != nil {
 		return cfgPath, false, err
 	}
-	if err := writeFileAtomic(cfgPath, append(out, '\n'), 0o644); err != nil {
+	if err := i.writeFile(cfgPath, append(out, '\n'), 0o644); err != nil {
 		return cfgPath, false, err
 	}
 	return cfgPath, true, nil
@@ -534,7 +602,7 @@ func readJSONFileStrict(path string) (map[string]any, error) {
 
 // installInstructions appends a TMA1 block to CLAUDE.md (or AGENTS.md if
 // CLAUDE.md is absent and AGENTS.md exists). Idempotent via marker matching.
-func installInstructions(projectDir string) (string, bool, error) {
+func (i *ClaudeCodeInstaller) installInstructions(projectDir string) (string, bool, error) {
 	target := chooseInstructionsFile(projectDir)
 	existing, _ := os.ReadFile(target)
 
@@ -570,7 +638,7 @@ func installInstructions(projectDir string) (string, bool, error) {
 	if string(newContent) == string(existing) {
 		return target, false, nil
 	}
-	if err := os.WriteFile(target, newContent, 0o644); err != nil {
+	if err := i.writeFile(target, newContent, 0o644); err != nil {
 		return target, false, err
 	}
 	return target, true, nil
@@ -612,7 +680,7 @@ deciding what to do next.
 // installGitignore appends ".tma1-context.md" to projectDir/.gitignore if
 // missing. Tolerates an absent .gitignore (creates it) and an absent project
 // (no-op).
-func installGitignore(projectDir string) (string, bool, error) {
+func (i *ClaudeCodeInstaller) installGitignore(projectDir string) (string, bool, error) {
 	path := filepath.Join(projectDir, ".gitignore")
 	existing, _ := os.ReadFile(path)
 	if containsLine(existing, ".tma1-context.md") {
@@ -624,7 +692,7 @@ func installGitignore(projectDir string) (string, bool, error) {
 		updated = append(updated, '\n')
 	}
 	updated = append(updated, []byte(suffix)...)
-	if err := os.WriteFile(path, updated, 0o644); err != nil {
+	if err := i.writeFile(path, updated, 0o644); err != nil {
 		return path, false, err
 	}
 	return path, true, nil

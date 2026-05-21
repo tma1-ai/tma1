@@ -339,6 +339,89 @@ func TestInstallMCPServerCreatesFileWhenAbsent(t *testing.T) {
 	}
 }
 
+func TestInstallCommandsCopiesEmbeddedTree(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	inst := &ClaudeCodeInstaller{
+		DataDir: filepath.Join(home, ".tma1"),
+		Port:    14318,
+		Logger:  slog.Default(),
+	}
+	paths, err := inst.installCommands()
+	if err != nil {
+		t.Fatalf("installCommands: %v", err)
+	}
+	if len(paths) == 0 {
+		t.Fatal("expected at least one command file written")
+	}
+	wantPath := filepath.Join(home, ".claude", "commands", "tma1-peer.md")
+	found := false
+	for _, p := range paths {
+		if p == wantPath {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("tma1-peer.md not in installed paths: %v", paths)
+	}
+	// File should exist on disk now.
+	if _, err := os.Stat(wantPath); err != nil {
+		t.Errorf("stat %s: %v", wantPath, err)
+	}
+	// Second call must be a no-op (file content unchanged).
+	paths2, err := inst.installCommands()
+	if err != nil {
+		t.Fatalf("second installCommands: %v", err)
+	}
+	if len(paths2) != 0 {
+		t.Errorf("expected no changes on second install, got %v", paths2)
+	}
+}
+
+func TestInstallDryRunWritesNothing(t *testing.T) {
+	// DryRun must report what *would* happen but leave the filesystem
+	// untouched — critical because the installer writes to ~/.claude.json
+	// (OAuth tokens live there) and users need a safe preview path.
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	project := filepath.Join(home, "proj")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	inst := &ClaudeCodeInstaller{
+		DataDir:    filepath.Join(home, ".tma1"),
+		Port:       14318,
+		ProjectDir: project,
+		Logger:     slog.Default(),
+		DryRun:     true,
+	}
+	rep, err := inst.Install()
+	if err != nil {
+		t.Fatalf("Install dry-run: %v", err)
+	}
+	if len(rep.Changed) == 0 {
+		t.Error("dry-run should still report what would change, got empty Changed list")
+	}
+
+	// Nothing under ~/.claude/ should have been created.
+	claudeDir := filepath.Join(home, ".claude")
+	if entries, _ := os.ReadDir(claudeDir); len(entries) > 0 {
+		t.Errorf("dry-run leaked files into %s: %v", claudeDir, entries)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".claude.json")); err == nil {
+		t.Error("dry-run wrote ~/.claude.json")
+	}
+	if _, err := os.Stat(filepath.Join(project, ".gitignore")); err == nil {
+		t.Error("dry-run wrote project .gitignore")
+	}
+	if _, err := os.Stat(filepath.Join(project, "CLAUDE.md")); err == nil {
+		t.Error("dry-run wrote project CLAUDE.md")
+	}
+}
+
 func readClaudeConfig(t *testing.T, path string) map[string]any {
 	t.Helper()
 	raw, err := os.ReadFile(path)

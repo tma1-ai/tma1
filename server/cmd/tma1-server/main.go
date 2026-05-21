@@ -415,11 +415,17 @@ runCmd:
 	return result.ExitCode, nil
 }
 
-// runInstall handles `tma1-server install [--adapter claude-code] [--project DIR]`.
+// runInstall handles `tma1-server install [--adapter claude-code] [--project DIR] [--dry-run]`.
 // Prints a human-readable report to stdout.
+//
+// --dry-run shows what would change without touching disk; intended for
+// users wary of an installer that writes to ~/.claude.json (OAuth tokens
+// live there). Every file write inside the installer routes through a
+// single sink that respects this flag.
 func runInstall(args []string) error {
 	adapter := "claude-code"
 	project, _ := os.Getwd()
+	dryRun := false
 
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
@@ -435,6 +441,11 @@ func runInstall(args []string) error {
 			}
 			project = args[i+1]
 			i++
+		case "--dry-run", "-n":
+			dryRun = true
+		case "-h", "--help":
+			fmt.Println("usage: tma1-server install [--adapter claude-code] [--project DIR] [--dry-run]")
+			return nil
 		default:
 			return fmt.Errorf("unknown flag %q", args[i])
 		}
@@ -461,10 +472,15 @@ func runInstall(args []string) error {
 		GreptimeDBHTTPPort: cfg.GreptimeDBHTTPPort,
 		ProjectDir:         project,
 		Logger:             logger,
+		DryRun:             dryRun,
 	}
 	rep, installErr := inst.Install()
 
-	fmt.Printf("TMA1 install report (adapter=%s)\n", adapter)
+	if dryRun {
+		fmt.Printf("TMA1 install report (adapter=%s, DRY-RUN — no files touched)\n", adapter)
+	} else {
+		fmt.Printf("TMA1 install report (adapter=%s)\n", adapter)
+	}
 	fmt.Printf("  Hook script:   %s\n", rep.HookScript)
 	fmt.Printf("  Settings:      %s\n", rep.SettingsPath)
 	if rep.InstructionsPath != "" {
@@ -482,10 +498,20 @@ func runInstall(args []string) error {
 			fmt.Printf("    - %s\n", p)
 		}
 	}
+	if len(rep.CommandPaths) > 0 {
+		fmt.Println("  Commands:")
+		for _, p := range rep.CommandPaths {
+			fmt.Printf("    - %s\n", p)
+		}
+	}
 	if len(rep.Changed) == 0 {
 		fmt.Println("  No changes (already installed).")
 	} else {
-		fmt.Println("  Changed:")
+		header := "  Changed:"
+		if dryRun {
+			header = "  Would change:"
+		}
+		fmt.Println(header)
 		for _, c := range rep.Changed {
 			fmt.Printf("    - %s\n", c)
 		}
