@@ -49,3 +49,4 @@ site/.astro/
 # Synced from clawhub-skill/tma1/ via prebuild
 site/public/SKILL.md
 site/public/REFERENCE.md
+.tma1-context.md

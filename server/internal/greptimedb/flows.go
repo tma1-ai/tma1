@@ -95,10 +95,19 @@ var sessionTableDDLs = []string{
 
 // sessionTableUpgrades are ALTER TABLE statements for adding columns to existing tables.
 // GreptimeDB returns an error if the column already exists, which we silently ignore.
+//
+// Phase 1.4 additions: derived fields extracted from tool_input/tool_response
+// at ingest time so anomaly rules + perception queries can WHERE on them
+// directly instead of doing regex/JSON parsing in SQL. The raw tool_input
+// stays as a fallback for rows written before this upgrade.
 var sessionTableUpgrades = []string{
 	`ALTER TABLE tma1_hook_events ADD COLUMN conversation_id STRING NULL`,
 	`ALTER TABLE tma1_hook_events ADD COLUMN permission_mode STRING NULL`,
 	`ALTER TABLE tma1_hook_events ADD COLUMN metadata STRING NULL`,
+	`ALTER TABLE tma1_hook_events ADD COLUMN tool_file_path STRING NULL`,
+	`ALTER TABLE tma1_hook_events ADD COLUMN tool_command_prefix STRING NULL`,
+	`ALTER TABLE tma1_hook_events ADD COLUMN tool_success BOOLEAN NULL`,
+	`ALTER TABLE tma1_hook_events ADD COLUMN tool_error_summary STRING NULL`,
 	`ALTER TABLE tma1_messages ADD COLUMN input_tokens BIGINT NULL`,
 	`ALTER TABLE tma1_messages ADD COLUMN output_tokens BIGINT NULL`,
 	`ALTER TABLE tma1_messages ADD COLUMN cache_read_tokens BIGINT NULL`,
