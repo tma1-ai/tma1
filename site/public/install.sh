@@ -10,6 +10,9 @@
 # Force reinstall (wipes all data):
 #   curl -fsSL https://tma1.ai/install.sh | TMA1_FORCE=1 bash
 #
+# Set up the Claude Code adapter (hooks + MCP + /tma1-peer skill) in one shot:
+#   curl -fsSL https://tma1.ai/install.sh | TMA1_ADAPTER=claude-code bash
+#
 # Uninstall:
 #   macOS:  launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/ai.tma1.server.plist && rm ~/Library/LaunchAgents/ai.tma1.server.plist
 #   Linux:  systemctl --user disable --now tma1-server && rm ~/.config/systemd/user/tma1-server.service
@@ -21,6 +24,9 @@ INSTALL_DIR="${TMA1_INSTALL_DIR:-$HOME/.tma1/bin}"
 TMA1_PORT="${TMA1_PORT:-14318}"
 TMA1_FORCE="${TMA1_FORCE:-0}"
 TMA1_GREPTIMEDB_VERSION="${TMA1_GREPTIMEDB_VERSION:-latest}"
+# Optional adapter to wire into a specific agent. Currently `claude-code`
+# registers hooks, MCP server, and the /tma1-peer skill. Empty = skip.
+TMA1_ADAPTER="${TMA1_ADAPTER:-}"
 
 info()  { printf "\033[1;34m==>\033[0m %s\n" "$1"; }
 warn()  { printf "\033[1;33mWarning:\033[0m %s\n" "$1"; }
@@ -377,6 +383,25 @@ post_install() {
   echo ""
 }
 
+# --- Adapter setup: register tma1 into the target agent ---
+# Runs `tma1-server install --adapter <name>` once the binary is in place
+# and the service is up. Idempotent on repeat install. Empty TMA1_ADAPTER
+# skips silently.
+register_adapter() {
+  if [ -z "$TMA1_ADAPTER" ]; then
+    return
+  fi
+  local bin="${INSTALL_DIR}/tma1-server"
+  if [ ! -x "$bin" ]; then
+    warn "Adapter '${TMA1_ADAPTER}' requested but ${bin} is not executable; skipping."
+    return
+  fi
+  info "Registering ${TMA1_ADAPTER} adapter (hooks + MCP + skill)..."
+  if ! "$bin" install --adapter "$TMA1_ADAPTER" 2>&1; then
+    warn "Adapter registration failed. You can retry with: ${bin} install --adapter ${TMA1_ADAPTER}"
+  fi
+}
+
 # --- Force reinstall: wipe existing data ---
 force_clean() {
   if [ "$TMA1_FORCE" != "1" ]; then
@@ -397,6 +422,7 @@ main() {
   download
   download_greptimedb
   setup_service
+  register_adapter
   post_install
 }
 

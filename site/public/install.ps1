@@ -6,6 +6,9 @@
 # Pin a specific version:
 #   $env:TMA1_VERSION = 'v0.1.0'; irm https://tma1.ai/install.ps1 | iex
 #
+# Set up the Claude Code adapter (hooks + MCP + /tma1-peer skill) in one shot:
+#   $env:TMA1_ADAPTER = 'claude-code'; irm https://tma1.ai/install.ps1 | iex
+#
 # Uninstall:
 #   Unregister-ScheduledTask -TaskName 'TMA1 Server' -Confirm:$false
 #   Remove-Item -Recurse -Force "$env:USERPROFILE\.tma1"
@@ -16,6 +19,9 @@ $Repo = 'tma1-ai/tma1'
 $InstallDir = if ($env:TMA1_INSTALL_DIR) { $env:TMA1_INSTALL_DIR } else { Join-Path $env:USERPROFILE '.tma1\bin' }
 $TMA1Port = if ($env:TMA1_PORT) { $env:TMA1_PORT } else { '14318' }
 $TMA1DataDir = if ($env:TMA1_DATA_DIR) { $env:TMA1_DATA_DIR } else { Join-Path $env:USERPROFILE '.tma1' }
+# Optional adapter to wire into a specific agent. `claude-code` registers
+# hooks, MCP server, and the /tma1-peer skill. Empty = skip.
+$TMA1Adapter = if ($env:TMA1_ADAPTER) { $env:TMA1_ADAPTER } else { '' }
 
 function Write-Info  { param([string]$msg) Write-Host "==> $msg" -ForegroundColor Cyan }
 function Write-Warn  { param([string]$msg) Write-Host "Warning: $msg" -ForegroundColor Yellow }
@@ -160,6 +166,24 @@ function Register-TMA1Task {
     Write-Info 'TMA1 service started.'
 }
 
+# --- Adapter setup: register tma1 into the target agent ---
+# Runs `tma1-server install --adapter <name>` once the binary is in place
+# and the service is up. Idempotent on repeat install. Empty TMA1_ADAPTER
+# skips silently.
+function Register-Adapter {
+    if (-not $TMA1Adapter) { return }
+    $binPath = Join-Path $InstallDir 'tma1-server.exe'
+    if (-not (Test-Path $binPath)) {
+        Write-Warn "Adapter '$TMA1Adapter' requested but $binPath is missing; skipping."
+        return
+    }
+    Write-Info "Registering $TMA1Adapter adapter (hooks + MCP + skill)..."
+    & $binPath install --adapter $TMA1Adapter
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warn "Adapter registration failed. You can retry with: `"$binPath`" install --adapter $TMA1Adapter"
+    }
+}
+
 # --- Wait for health endpoint ---
 function Wait-ForHealth {
     $url = "http://127.0.0.1:${TMA1Port}/health"
@@ -231,6 +255,7 @@ function main {
     Install-TMA1 -Version $version
     Register-TMA1Task
     Wait-ForHealth
+    Register-Adapter
     Show-PostInstall
 }
 
