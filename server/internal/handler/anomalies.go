@@ -10,8 +10,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/tma1-ai/tma1/server/internal/perception"
 )
 
 // handleAnomaliesQuery returns the latest anomalies across all sessions in
@@ -47,59 +45,85 @@ func (s *Server) handleAnomaliesQuery(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// collectAnomalies queries each session active in the last 24h and runs
-// the Detector on it. With a sessionID filter, only that session is
-// queried. Per-session cap keeps the response small.
+// collectAnomalies returns anomalies that were actually emitted to
+// agents over the last 24h, read from tma1_anomaly_emits.
 //
-// Most sessions are inactive so Detect returns nothing; the result is
-// usually small even without a per-session cap.
+// The dashboard MUST NOT call Detector.Detect here: Detect mutates the
+// suppression history and writes emit-log rows. With the 10s polling
+// cadence in anomalies.js, every poll would (a) consume the rule's
+// 10-minute suppression window before the agent's UserPromptSubmit
+// hook could see it, and (b) inflate the emit log with rows that no
+// agent ever saw -- corrupting precision / follow-rate / 5-per-day
+// budget gates.
+//
+// Reading the emit log instead means the dashboard shows the ground
+// truth of "what the agent was told", which is also what the
+// validation gates compute against. Strictly side-effect free.
 func (s *Server) collectAnomalies(ctx context.Context, sessionID string, totalLimit int) []map[string]any {
-	type anomalyRow struct {
-		perception.Anomaly
-		SessionID string    `json:"session_id"`
-		Ts        time.Time `json:"ts"`
+	if s.greptimeHTTPPort <= 0 {
+		return nil
+	}
+	if totalLimit <= 0 {
+		totalLimit = 50
 	}
 
-	sessions, err := s.recentSessions(ctx, sessionID, 24*time.Hour)
+	var where strings.Builder
+	where.WriteString("ts > now() - INTERVAL '24 hours'")
+	if sessionID != "" {
+		fmt.Fprintf(&where, " AND session_id = '%s'", escapeSQLString(sessionID))
+	}
+	sql := fmt.Sprintf(
+		`SELECT CAST(ts AS BIGINT) AS ts_ms, session_id, kind, severity,
+		        "channel", evidence, suggestion, related_files,
+		        CAST(first_emitted_at AS BIGINT) AS first_ms
+		 FROM tma1_anomaly_emits
+		 WHERE %s
+		 ORDER BY ts DESC LIMIT %d`,
+		where.String(), totalLimit,
+	)
+	body, err := s.querySQL(ctx, sql)
 	if err != nil {
-		s.logger.Debug("anomalies: recentSessions failed", "err", err)
+		s.logger.Debug("anomalies: read emit log failed", "err", err)
+		return nil
+	}
+	var resp struct {
+		Output []struct {
+			Records struct {
+				Rows [][]any `json:"rows"`
+			} `json:"records"`
+		} `json:"output"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil || len(resp.Output) == 0 {
 		return nil
 	}
 
-	var rows []anomalyRow
-	for _, sid := range sessions {
-		anomalies := s.bundler.Detector().Detect(ctx, sid)
-		for _, a := range anomalies {
-			// Use FirstEmittedAt (stamped by the suppression layer) so the
-			// dashboard shows when the anomaly was first detected, not when
-			// the query happened to run. Fall back to now() only if the
-			// detector somehow returned an anomaly without it.
-			ts := a.FirstEmittedAt
-			if ts.IsZero() {
-				ts = time.Now()
-			}
-			rows = append(rows, anomalyRow{Anomaly: a, SessionID: sid, Ts: ts})
-			if len(rows) >= totalLimit {
-				break
-			}
+	out := make([]map[string]any, 0, len(resp.Output[0].Records.Rows))
+	for _, r := range resp.Output[0].Records.Rows {
+		if len(r) < 8 {
+			continue
 		}
-		if len(rows) >= totalLimit {
-			break
+		// Prefer first_emitted_at as the user-facing timestamp -- it's
+		// the moment the rule first fired for the agent, not the most
+		// recent re-detection. Falls back to ts when the column is null
+		// (rows written before first_emitted_at was added).
+		tsMs := int64OrZero(r[0])
+		if firstMs := int64OrZero(r[8]); firstMs > 0 {
+			tsMs = firstMs
 		}
-	}
-
-	out := make([]map[string]any, 0, len(rows))
-	for _, r := range rows {
-		entry := map[string]any{
-			"kind":          r.Kind,
-			"severity":      r.Severity,
-			"evidence":      r.Evidence,
-			"suggestion":    r.Suggestion,
-			"related_files": r.RelatedFiles,
-			"session_id":    r.SessionID,
-			"ts":            r.Ts.Format(time.RFC3339),
+		var files []string
+		if raw := stringOrEmpty(r[7]); raw != "" {
+			_ = json.Unmarshal([]byte(raw), &files)
 		}
-		out = append(out, entry)
+		out = append(out, map[string]any{
+			"kind":          stringOrEmpty(r[2]),
+			"severity":      stringOrEmpty(r[3]),
+			"channel":       stringOrEmpty(r[4]),
+			"evidence":      stringOrEmpty(r[5]),
+			"suggestion":    stringOrEmpty(r[6]),
+			"related_files": files,
+			"session_id":    stringOrEmpty(r[1]),
+			"ts":            time.UnixMilli(tsMs).Format(time.RFC3339),
+		})
 	}
 	return out
 }
@@ -467,50 +491,6 @@ func intOrZero(v any) int {
 		return n
 	}
 	return 0
-}
-
-// recentSessions lists distinct session_ids from tma1_hook_events seen in
-// the given lookback window. When filter != "" returns only that one.
-func (s *Server) recentSessions(ctx context.Context, filter string, lookback time.Duration) ([]string, error) {
-	if filter != "" {
-		return []string{filter}, nil
-	}
-	if s.greptimeHTTPPort <= 0 {
-		return nil, nil
-	}
-	sql := fmt.Sprintf(
-		`SELECT session_id FROM tma1_hook_events
-		 WHERE ts > now() - INTERVAL '%d minutes'
-		   AND session_id IS NOT NULL AND session_id != ''
-		 GROUP BY session_id ORDER BY MAX(ts) DESC LIMIT 20`,
-		int(lookback.Minutes()),
-	)
-	body, err := s.querySQL(ctx, sql)
-	if err != nil {
-		return nil, err
-	}
-	var resp struct {
-		Output []struct {
-			Records struct {
-				Rows [][]any `json:"rows"`
-			} `json:"records"`
-		} `json:"output"`
-	}
-	if err := json.Unmarshal(body, &resp); err != nil {
-		return nil, err
-	}
-	if len(resp.Output) == 0 {
-		return nil, nil
-	}
-	out := make([]string, 0, len(resp.Output[0].Records.Rows))
-	for _, row := range resp.Output[0].Records.Rows {
-		if len(row) > 0 {
-			if sid, ok := row[0].(string); ok && sid != "" {
-				out = append(out, sid)
-			}
-		}
-	}
-	return out, nil
 }
 
 // querySQL is an internal helper that POSTs SQL to GreptimeDB and returns
