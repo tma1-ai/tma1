@@ -92,10 +92,23 @@ func (i *ClaudeCodeInstaller) Install() (InstallReport, error) {
 	var rep InstallReport
 	var errs []error
 
-	// 1. Ensure hook script exists.
-	scriptPath, err := EnsureHookScript(i.DataDir, i.Port, i.Logger)
-	if err != nil {
-		errs = append(errs, fmt.Errorf("hook script: %w", err))
+	// 1. Ensure hook script exists. DryRun computes the would-be path
+	// without writing -- EnsureHookScript creates ~/.tma1/hooks/ and
+	// emits the script via its own paths, neither of which run through
+	// the DryRun-aware writeFile/mkdirAll sinks. Honour DryRun here
+	// so "--dry-run" is actually side-effect free as advertised.
+	var scriptPath string
+	if i.DryRun {
+		scriptPath = HookScriptPath(i.DataDir)
+		if i.Logger != nil {
+			i.Logger.Info("[dry-run] would write hook script", "path", scriptPath)
+		}
+	} else {
+		p, err := EnsureHookScript(i.DataDir, i.Port, i.Logger)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("hook script: %w", err))
+		}
+		scriptPath = p
 	}
 	rep.HookScript = scriptPath
 
@@ -467,11 +480,27 @@ func registerTMA1Hooks(settings map[string]any, command string) bool {
 	}
 
 	mutated := false
-	// Events TMA1 registers itself. The matcher is "" (all tools) — server-side
-	// dispatch decides which event types deserve injection per phase.
-	// SessionStart and PreCompact are CC-only command/MCP (HTTP hooks aren't
-	// supported there) which is fine because we always use command hooks.
-	for _, event := range []string{"UserPromptSubmit", "Stop", "PostToolUse", "SessionStart", "PreCompact"} {
+	// Events TMA1 registers itself. The matcher is "" (all tools) -- server-
+	// side dispatch decides which event types deserve injection per phase.
+	//
+	// The list must cover EVERY native CC hook event whose payload the
+	// server stores in tma1_hook_events or queries in anomaly rules.
+	// Missing PreToolUse means R-stale-view never fires (no Read events),
+	// tool counts under-count, current_focus stays empty, and follow-rate
+	// validation can't tell whether the agent re-Read the listed file.
+	// Lifecycle / subagent / notification events likewise feed the
+	// session timeline + canvas; dropping them silently strips features.
+	for _, event := range []string{
+		"UserPromptSubmit",
+		"PreToolUse",
+		"PostToolUse",
+		"SessionStart",
+		"SessionEnd",
+		"PreCompact",
+		"Stop",
+		"SubagentStop",
+		"Notification",
+	} {
 		list, _ := hooks[event].([]any)
 		idx := findEquivalentEntry(list, command, tmaID)
 

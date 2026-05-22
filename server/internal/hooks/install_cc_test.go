@@ -420,6 +420,52 @@ func TestInstallDryRunWritesNothing(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(project, "CLAUDE.md")); err == nil {
 		t.Error("dry-run wrote project CLAUDE.md")
 	}
+	// The hook script lives under ~/.tma1/hooks/. Earlier code routed it
+	// through EnsureHookScript which bypassed the DryRun sink and wrote
+	// the file anyway. Lock that regression: ~/.tma1/ must stay absent.
+	if _, err := os.Stat(filepath.Join(home, ".tma1")); err == nil {
+		t.Error("dry-run created ~/.tma1/ (hook script write leaked past DryRun)")
+	}
+	// The report should still name the would-be path so the user sees
+	// what would happen.
+	if rep.HookScript == "" {
+		t.Error("HookScript path missing from dry-run report")
+	}
+	if !strings.HasSuffix(rep.HookScript, "tma1-hook.sh") &&
+		!strings.HasSuffix(rep.HookScript, "tma1-hook.ps1") {
+		t.Errorf("HookScript path doesn't look like a hook script: %q", rep.HookScript)
+	}
+}
+
+func TestRegisterTMA1HooksCoversAllNativeEvents(t *testing.T) {
+	// Codex review caught that fresh installs only registered five hook
+	// events; PreToolUse / SessionEnd / SubagentStop / Notification were
+	// missing, which silently broke perception rules that depend on
+	// those events for new users. Lock the full set.
+	settings := map[string]any{}
+	registerTMA1Hooks(settings, "/path/to/tma1-hook.sh")
+
+	hooks, _ := settings["hooks"].(map[string]any)
+	if hooks == nil {
+		t.Fatal("hooks section not created")
+		return
+	}
+	for _, event := range []string{
+		"UserPromptSubmit",
+		"PreToolUse",
+		"PostToolUse",
+		"SessionStart",
+		"SessionEnd",
+		"PreCompact",
+		"Stop",
+		"SubagentStop",
+		"Notification",
+	} {
+		entries, _ := hooks[event].([]any)
+		if len(entries) == 0 {
+			t.Errorf("hook event %q not registered", event)
+		}
+	}
 }
 
 func readClaudeConfig(t *testing.T, path string) map[string]any {
