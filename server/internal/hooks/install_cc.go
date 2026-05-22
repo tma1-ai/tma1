@@ -258,12 +258,6 @@ func (i *ClaudeCodeInstaller) syncEmbeddedTree(src embed.FS, embedRoot, destRoot
 	return syncEmbeddedTree(i, src, embedRoot, destRoot, "tma1-")
 }
 
-// removeStaleUnder is a thin wrapper over the shared helper, scoped
-// to the "tma1-" owner prefix.
-func (i *ClaudeCodeInstaller) removeStaleUnder(root string, keep map[string]struct{}) ([]string, error) {
-	return removeStaleUnder(i, root, keep, "tma1-")
-}
-
 // installSettings updates ~/.claude/settings.json to register UserPromptSubmit
 // and Stop hooks. Returns the resolved path, whether the file changed, and any
 // error.

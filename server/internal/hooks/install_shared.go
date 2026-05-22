@@ -247,12 +247,6 @@ func containsLine(data []byte, line string) bool {
 	return false
 }
 
-// indexOf is a thin wrapper around strings.Index that takes byte
-// slices, used by the marker-matching path in installInstructions.
-func indexOf(haystack, needle []byte) int {
-	return strings.Index(string(haystack), string(needle))
-}
-
 // indexOfStandaloneLine returns the byte offset of the first occurrence
 // of marker that lives on its own line (i.e. the trimmed contents of
 // that line are exactly the marker). Returns -1 if no such line exists.
