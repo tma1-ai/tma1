@@ -31,6 +31,154 @@ type installSink interface {
 	getLogger() *slog.Logger
 }
 
+const (
+	// hookOwnerID is the canonical `id` value TMA1 stamps onto every
+	// hook entry and MCP server it registers. The install path uses it
+	// to recognise its own entries on re-install; uninstall uses it to
+	// scope deletes so user-added neighbour entries survive.
+	hookOwnerID = "tma1"
+	// hookOwnerPrefix scopes embedded skill/command file deletes during
+	// stale-sweep so we only remove things we wrote. Skills not under
+	// this prefix are assumed to be user-authored and left alone.
+	hookOwnerPrefix = "tma1-"
+)
+
+// wrapHookCommand returns the shell invocation used to run the TMA1
+// hook script. Windows wraps via PowerShell to dodge ExecutionPolicy;
+// POSIX runs the .sh directly. Shared between adapters because both
+// CC settings.json and Codex hooks.json store the same string shape.
+func wrapHookCommand(scriptPath string) string {
+	if runtime.GOOS == "windows" {
+		return fmt.Sprintf(`powershell -ExecutionPolicy Bypass -File "%s"`, scriptPath)
+	}
+	return scriptPath
+}
+
+// entryCommand returns the first hook's command string from an entry,
+// or "" if the entry has no hooks or a malformed first hook.
+func entryCommand(entry map[string]any) string {
+	hs, _ := entry["hooks"].([]any)
+	if len(hs) == 0 {
+		return ""
+	}
+	h, _ := hs[0].(map[string]any)
+	if h == nil {
+		return ""
+	}
+	cmd, _ := h["command"].(string)
+	return cmd
+}
+
+// entryEqual reports whether two hook entries match on the fields TMA1
+// manages. User-extended fields are preserved by replacing entries
+// wholesale only when the command differs.
+func entryEqual(a, b any) bool {
+	am, _ := a.(map[string]any)
+	bm, _ := b.(map[string]any)
+	if am == nil || bm == nil {
+		return false
+	}
+	if id1, _ := am["id"].(string); id1 != bm["id"] {
+		return false
+	}
+	if m1, _ := am["matcher"].(string); m1 != bm["matcher"] {
+		return false
+	}
+	return entryCommand(am) == entryCommand(bm)
+}
+
+// findEquivalentEntry returns the index of an existing TMA1-equivalent
+// entry, or -1. Per-entry equivalence is delegated to
+// matchesTMA1HookEntry so install and uninstall paths can't disagree on
+// what "ours" means.
+func findEquivalentEntry(list []any, command, tmaID string) int {
+	for i, item := range list {
+		if matchesTMA1HookEntry(item, command, tmaID) {
+			return i
+		}
+	}
+	return -1
+}
+
+// matchesTMA1HookEntry reports whether a single hook array entry is
+// owned by TMA1. An entry qualifies if EITHER its `id` field equals
+// tmaID OR its first hook's command (after ~/ expansion) resolves to
+// the same path as the requested command. The command-path check is
+// what lets us recognise legacy entries that pre-date the `id` field —
+// without it, uninstall on an old install would leave dangling hook
+// registrations.
+func matchesTMA1HookEntry(entry any, command, tmaID string) bool {
+	m, ok := entry.(map[string]any)
+	if !ok {
+		return false
+	}
+	if id, _ := m["id"].(string); id == tmaID {
+		return true
+	}
+	first := entryCommand(m)
+	if first == "" {
+		return false
+	}
+	return expandHome(first) == expandHome(command)
+}
+
+// registerTMA1HookEntries ensures `command` is registered for every
+// event in `eventNames`. Returns true if the settings map mutated. The
+// hook-entry shape is identical between Claude Code's settings.json and
+// Codex's hooks.json, so this single helper backs both adapters; only
+// the event list differs.
+//
+// Two-pass matching avoids duplicate entries:
+//  1. Look for an entry whose hooks[].command resolves to the same script
+//     (after ~/ expansion). Catches old entries installed before we added
+//     the `id` field, or entries the user hand-wrote.
+//  2. Fall back to looking for an entry with `id="tma1"`.
+//
+// The matched entry is rewritten in place (canonical id + absolute
+// path). Other entries are left alone — that's important: user-added
+// hooks for the same event must keep working.
+func registerTMA1HookEntries(settings map[string]any, eventNames []string, command string) bool {
+	hooks, _ := settings["hooks"].(map[string]any)
+	if hooks == nil {
+		hooks = map[string]any{}
+	}
+
+	mutated := false
+	for _, event := range eventNames {
+		list, _ := hooks[event].([]any)
+		idx := findEquivalentEntry(list, command, hookOwnerID)
+
+		entry := map[string]any{
+			"matcher": "",
+			"id":      hookOwnerID,
+			"hooks": []any{
+				map[string]any{
+					"type":    "command",
+					"command": command,
+				},
+			},
+		}
+
+		switch {
+		case idx >= 0:
+			if !entryEqual(list[idx], entry) {
+				list[idx] = entry
+				hooks[event] = list
+				mutated = true
+			}
+		default:
+			list = append(list, entry)
+			hooks[event] = list
+			mutated = true
+		}
+	}
+
+	if mutated {
+		settings["hooks"] = hooks
+	}
+	return mutated
+}
+
 // writeFileAtomic writes data to path via a temp-file + rename so a
 // crash or signal between truncate and full write can't leave the
 // target half-written. Critical for files that hold user-critical
@@ -185,7 +333,6 @@ func chooseInstructionsFile(projectDir, preferred string) string {
 	return preferredPath
 }
 
-// fileExists is a tiny convenience.
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil

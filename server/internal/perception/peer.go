@@ -259,7 +259,6 @@ func (b *Bundler) getPeerSessionsOneAgent(
 		// "3m ago" string matches the format the agent already sees in
 		// `<tma1-context>`. Empty when no LastActivityAt.
 		ps.LastActivityAgo = relativeAge(ps.LastActivityAt)
-		// Per-session enrichment.
 		b.enrichPeerSession(ctx, &ps, messageLimit)
 		out = append(out, ps)
 	}

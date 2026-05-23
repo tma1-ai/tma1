@@ -31,7 +31,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strconv"
 
 	"github.com/BurntSushi/toml"
@@ -205,7 +204,7 @@ func (i *CodexInstaller) Install() (InstallReport, error) {
 
 // installSkill copies the embedded codex-skills tree into
 // ~/.agents/skills/. Idempotent: identical content is left alone.
-// Stale-sweep scoped to the "tma1-" owner prefix so the user's
+// Stale-sweep scoped to the hookOwnerPrefix owner so the user's
 // personal skills in the same directory (humanizer, find-skills,
 // etc.) are never touched.
 func (i *CodexInstaller) installSkill() ([]string, error) {
@@ -214,7 +213,7 @@ func (i *CodexInstaller) installSkill() ([]string, error) {
 		return nil, err
 	}
 	dest := filepath.Join(home, ".agents", "skills")
-	return syncEmbeddedTree(i, embeddedCodexSkills, "codex-skills", dest, "tma1-")
+	return syncEmbeddedTree(i, embeddedCodexSkills, "codex-skills", dest, hookOwnerPrefix)
 }
 
 // installHooksConfig writes the Codex hook registration into
@@ -252,8 +251,8 @@ func (i *CodexInstaller) installHooksConfig(scriptPath string) (string, bool, er
 		return cfgPath, false, fmt.Errorf("refusing to overwrite %s: %w", cfgPath, err)
 	}
 
-	command := codexHookCommand(scriptPath)
-	if !registerTMA1CodexHooks(existing, command) {
+	command := wrapHookCommand(scriptPath)
+	if !registerTMA1HookEntries(existing, codexHookEvents, command) {
 		return cfgPath, false, nil
 	}
 
@@ -265,69 +264,6 @@ func (i *CodexInstaller) installHooksConfig(scriptPath string) (string, bool, er
 		return cfgPath, false, err
 	}
 	return cfgPath, true, nil
-}
-
-// codexHookCommand returns the shell command Codex will invoke per
-// hook event. Windows runs through PowerShell; everything else
-// invokes the .sh directly.
-func codexHookCommand(scriptPath string) string {
-	if runtime.GOOS == "windows" {
-		return fmt.Sprintf(`powershell -ExecutionPolicy Bypass -File "%s"`, scriptPath)
-	}
-	return scriptPath
-}
-
-// registerTMA1CodexHooks ensures the given command is registered for
-// every event in codexHookEvents. Returns true if the settings map
-// mutated. Two-pass matching:
-//  1. Look for an entry whose hooks[].command resolves to the same
-//     script (after ~/ expansion). Catches old / hand-written entries.
-//  2. Fall back to entries with `id="tma1"` (canonical marker).
-//
-// Matched entries are rewritten in place; user-added entries for the
-// same event are preserved.
-func registerTMA1CodexHooks(settings map[string]any, command string) bool {
-	const tmaID = "tma1"
-
-	hooks, _ := settings["hooks"].(map[string]any)
-	if hooks == nil {
-		hooks = map[string]any{}
-	}
-
-	mutated := false
-	for _, event := range codexHookEvents {
-		list, _ := hooks[event].([]any)
-		idx := findEquivalentEntry(list, command, tmaID)
-
-		entry := map[string]any{
-			"matcher": "",
-			"id":      tmaID,
-			"hooks": []any{
-				map[string]any{
-					"type":    "command",
-					"command": command,
-				},
-			},
-		}
-
-		switch {
-		case idx >= 0:
-			if !entryEqual(list[idx], entry) {
-				list[idx] = entry
-				hooks[event] = list
-				mutated = true
-			}
-		default:
-			list = append(list, entry)
-			hooks[event] = list
-			mutated = true
-		}
-	}
-
-	if mutated {
-		settings["hooks"] = hooks
-	}
-	return mutated
 }
 
 // installMCPServer registers `tma1` as an MCP stdio server under
@@ -380,11 +316,11 @@ func (i *CodexInstaller) installMCPServer() (string, bool, error) {
 	}
 	desired["env"] = env
 
-	if cur, ok := mcpServers["tma1"].(map[string]any); ok && mcpEntryEqual(cur, desired) {
+	if cur, ok := mcpServers[hookOwnerID].(map[string]any); ok && mcpEntryEqual(cur, desired) {
 		return cfgPath, false, nil
 	}
 
-	mcpServers["tma1"] = desired
+	mcpServers[hookOwnerID] = desired
 	existing["mcp_servers"] = mcpServers
 
 	var buf bytes.Buffer

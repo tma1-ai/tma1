@@ -163,10 +163,10 @@ func TestRegisterTMA1HooksReplacesOnCommandChange(t *testing.T) {
 			},
 		},
 	}
-	if !registerTMA1Hooks(settings, "/new/path/tma1-hook.sh") {
+	if !registerTMA1HookEntries(settings, claudeCodeHookEvents, "/new/path/tma1-hook.sh") {
 		t.Fatal("expected mutation when command changes")
 	}
-	if registerTMA1Hooks(settings, "/new/path/tma1-hook.sh") {
+	if registerTMA1HookEntries(settings, claudeCodeHookEvents, "/new/path/tma1-hook.sh") {
 		t.Error("expected no-op on second call with same command")
 	}
 }
@@ -492,7 +492,7 @@ func TestRegisterTMA1HooksCoversAllNativeEvents(t *testing.T) {
 	// missing, which silently broke perception rules that depend on
 	// those events for new users. Lock the full set.
 	settings := map[string]any{}
-	registerTMA1Hooks(settings, "/path/to/tma1-hook.sh")
+	registerTMA1HookEntries(settings, claudeCodeHookEvents, "/path/to/tma1-hook.sh")
 
 	hooks, _ := settings["hooks"].(map[string]any)
 	if hooks == nil {
@@ -573,7 +573,7 @@ func TestRegisterTMA1HooksAdoptsEquivalentLegacyEntry(t *testing.T) {
 			},
 		},
 	}
-	if !registerTMA1Hooks(settings, resolved) {
+	if !registerTMA1HookEntries(settings, claudeCodeHookEvents, resolved) {
 		t.Fatal("expected mutation when adopting legacy entry")
 	}
 	list := settings["hooks"].(map[string]any)["UserPromptSubmit"].([]any)

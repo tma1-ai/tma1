@@ -16,7 +16,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strconv"
 )
 
@@ -103,7 +102,6 @@ func (i *ClaudeCodeInstaller) writeFile(path string, data []byte, perm os.FileMo
 	return writeFileAtomic(path, data, perm)
 }
 
-// mkdirAll mirrors writeFile for directory creation.
 func (i *ClaudeCodeInstaller) mkdirAll(path string, perm os.FileMode) error {
 	if i.DryRun {
 		if i.Logger != nil {
@@ -251,11 +249,11 @@ func (i *ClaudeCodeInstaller) installCommands() ([]string, error) {
 
 // syncEmbeddedTree is a thin wrapper over the shared helper so the
 // existing call sites + tests keep their method-shaped invocation.
-// Stale-sweep is scoped to the "tma1-" owner prefix so user-installed
+// Stale-sweep is scoped to the hookOwnerPrefix owner so user-installed
 // skills / commands sitting alongside ours in ~/.claude/{skills,
 // commands}/ are never touched.
 func (i *ClaudeCodeInstaller) syncEmbeddedTree(src embed.FS, embedRoot, destRoot string) ([]string, error) {
-	return syncEmbeddedTree(i, src, embedRoot, destRoot, "tma1-")
+	return syncEmbeddedTree(i, src, embedRoot, destRoot, hookOwnerPrefix)
 }
 
 // installSettings updates ~/.claude/settings.json to register UserPromptSubmit
@@ -279,8 +277,8 @@ func (i *ClaudeCodeInstaller) installSettings(scriptPath string) (string, bool, 
 		return settingsPath, false, fmt.Errorf("refusing to overwrite %s: %w", settingsPath, err)
 	}
 
-	command := hookCommand(scriptPath)
-	if !registerTMA1Hooks(existing, command) {
+	command := wrapHookCommand(scriptPath)
+	if !registerTMA1HookEntries(existing, claudeCodeHookEvents, command) {
 		return settingsPath, false, nil
 	}
 
@@ -345,11 +343,11 @@ func (i *ClaudeCodeInstaller) installMCPServer() (string, bool, error) {
 	}
 	desired["env"] = env
 
-	if cur, ok := servers["tma1"].(map[string]any); ok && mcpEntryEqual(cur, desired) {
+	if cur, ok := servers[hookOwnerID].(map[string]any); ok && mcpEntryEqual(cur, desired) {
 		return cfgPath, false, nil
 	}
 
-	servers["tma1"] = desired
+	servers[hookOwnerID] = desired
 	existing["mcpServers"] = servers
 
 	out, err := json.MarshalIndent(existing, "", "  ")
@@ -389,155 +387,6 @@ func mcpEntryEqual(a, b map[string]any) bool {
 	return string(ae) == string(be)
 }
 
-// hookCommand returns the shell command CC will invoke for each hook.
-// Windows uses PowerShell with the .ps1 template; everything else uses bash.
-func hookCommand(scriptPath string) string {
-	if runtime.GOOS == "windows" {
-		return fmt.Sprintf(`powershell -ExecutionPolicy Bypass -File "%s"`, scriptPath)
-	}
-	return scriptPath
-}
-
-// registerTMA1Hooks ensures the given command is registered for the events
-// TMA1 cares about. Returns true if the settings map mutated.
-//
-// Schema (CC settings.json):
-//
-//	{
-//	  "hooks": {
-//	    "<EventName>": [
-//	      { "matcher": "", "hooks": [{ "type": "command", "command": "..." }] }
-//	    ]
-//	  }
-//	}
-//
-// Two-pass matching avoids duplicate entries:
-//  1. Look for an entry whose hooks[].command resolves to the same script
-//     (after ~/ expansion). This catches old entries installed before we
-//     added the `id` field, or entries the user hand-wrote.
-//  2. Fall back to looking for an entry with `id="tma1"`.
-//
-// The matched entry is rewritten in place (canonical id + absolute path).
-// Other entries are left alone — that's important: user-added hooks for the
-// same event must keep working.
-func registerTMA1Hooks(settings map[string]any, command string) bool {
-	const tmaID = "tma1"
-
-	hooks, _ := settings["hooks"].(map[string]any)
-	if hooks == nil {
-		hooks = map[string]any{}
-	}
-
-	mutated := false
-	for _, event := range claudeCodeHookEvents {
-		list, _ := hooks[event].([]any)
-		idx := findEquivalentEntry(list, command, tmaID)
-
-		entry := map[string]any{
-			"matcher": "",
-			"id":      tmaID,
-			"hooks": []any{
-				map[string]any{
-					"type":    "command",
-					"command": command,
-				},
-			},
-		}
-
-		switch {
-		case idx >= 0:
-			if !entryEqual(list[idx], entry) {
-				list[idx] = entry
-				hooks[event] = list
-				mutated = true
-			}
-		default:
-			list = append(list, entry)
-			hooks[event] = list
-			mutated = true
-		}
-	}
-
-	if mutated {
-		settings["hooks"] = hooks
-	}
-	return mutated
-}
-
-// findEquivalentEntry returns the index of an existing TMA1-equivalent
-// entry, or -1. Per-entry equivalence is delegated to
-// matchesTMA1HookEntry so the install and uninstall paths can't disagree
-// on what "ours" means.
-func findEquivalentEntry(list []any, command, tmaID string) int {
-	for i, item := range list {
-		if matchesTMA1HookEntry(item, command, tmaID) {
-			return i
-		}
-	}
-	return -1
-}
-
-// matchesTMA1HookEntry reports whether a single hooks.json /
-// settings.json array entry is owned by TMA1. An entry qualifies if
-// EITHER its `id` field equals tmaID OR its first hook's command
-// (after ~/ expansion) resolves to the same path as the requested
-// command. The command-path check is what lets us recognise legacy
-// entries that pre-date the `id` field — without it, uninstall on an
-// old install would leave dangling hook registrations.
-func matchesTMA1HookEntry(entry any, command, tmaID string) bool {
-	m, ok := entry.(map[string]any)
-	if !ok {
-		return false
-	}
-	if id, _ := m["id"].(string); id == tmaID {
-		return true
-	}
-	first := entryCommand(m)
-	if first == "" {
-		return false
-	}
-	return expandHome(first) == expandHome(command)
-}
-
-// entryCommand returns the first hook's command string from an entry, or "".
-func entryCommand(entry map[string]any) string {
-	hs, _ := entry["hooks"].([]any)
-	if len(hs) == 0 {
-		return ""
-	}
-	h, _ := hs[0].(map[string]any)
-	if h == nil {
-		return ""
-	}
-	cmd, _ := h["command"].(string)
-	return cmd
-}
-
-func entryEqual(a, b any) bool {
-	am, _ := a.(map[string]any)
-	bm, _ := b.(map[string]any)
-	if am == nil || bm == nil {
-		return false
-	}
-	// Compare only the fields we manage. User-extended fields are preserved
-	// by virtue of being replaced wholesale only when the command differs.
-	if id1, _ := am["id"].(string); id1 != bm["id"] {
-		return false
-	}
-	if m1, _ := am["matcher"].(string); m1 != bm["matcher"] {
-		return false
-	}
-	return entryCommand(am) == entryCommand(bm)
-}
-
-// readJSONFileStrict loads a JSON object map. Returns:
-//   - (empty map, nil) when the file does not exist
-//   - (parsed map, nil) when parse succeeds and the root is an object
-//   - (nil, err) when the file exists but does not contain a JSON object
-//
-// Strict on purpose: callers like installSettings / installMCPServer write
-// back to files that hold user-critical state. Silently treating a parse
-// error as "empty" would corrupt those files.
 // installInstructions / installGitignore are thin method wrappers
 // around the shared helpers in install_shared.go so existing callers
 // (Install() and the tests) keep their method-shaped invocation.

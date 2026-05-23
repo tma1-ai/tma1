@@ -44,12 +44,11 @@ func (r UninstallReport) HasErrors() bool { return len(r.Errors) > 0 }
 // map mutated. Empty event arrays are left in place — the surrounding
 // JSON shape stays comparable to what install would write next time.
 //
-// Predicate is shared with install (matchesTMA1HookEntry in install_cc.go)
+// Predicate is shared with install (matchesTMA1HookEntry in install_shared.go)
 // so legacy entries that pre-date the `id` field are recognised by their
 // command path. Without that, an uninstall on an old install would leave
 // dangling hook registrations pointing to a deleted hook script.
 func unregisterTMA1Hooks(settings map[string]any, eventNames []string, hookCommand string) (removed int) {
-	const tmaID = "tma1"
 	hooks, _ := settings["hooks"].(map[string]any)
 	if hooks == nil {
 		return 0
@@ -61,7 +60,7 @@ func unregisterTMA1Hooks(settings map[string]any, eventNames []string, hookComma
 		}
 		filtered := make([]any, 0, len(list))
 		for _, item := range list {
-			if matchesTMA1HookEntry(item, hookCommand, tmaID) {
+			if matchesTMA1HookEntry(item, hookCommand, hookOwnerID) {
 				removed++
 				continue
 			}

@@ -208,7 +208,7 @@ func (u *ClaudeCodeUninstaller) uninstallSettings(home string) (string, int, err
 	if err != nil {
 		return path, 0, fmt.Errorf("refusing to overwrite %s: %w", path, err)
 	}
-	hookCmd := hookCommand(HookScriptPathFor(AdapterClaudeCode, u.DataDir))
+	hookCmd := wrapHookCommand(HookScriptPathFor(AdapterClaudeCode, u.DataDir))
 	removed := unregisterTMA1Hooks(existing, claudeCodeHookEvents, hookCmd)
 	if removed == 0 {
 		return path, 0, nil
@@ -234,7 +234,7 @@ func (u *ClaudeCodeUninstaller) uninstallMCP(home string) (string, bool, error) 
 		return path, false, fmt.Errorf("refusing to overwrite %s: %w", path, err)
 	}
 	servers, _ := existing["mcpServers"].(map[string]any)
-	if !removeMCPServerEntry(servers, "tma1") {
+	if !removeMCPServerEntry(servers, hookOwnerID) {
 		return path, false, nil
 	}
 	existing["mcpServers"] = servers
@@ -276,8 +276,8 @@ func (u *ClaudeCodeUninstaller) uninstallInstructionsFile(path string) (bool, er
 // removeOwnedDir wipes every TMA1-owned subdirectory under root.
 //
 // Two passes:
-//  1. removeStaleUnder with the "tma1-" prefix catches the standard
-//     entries (tma1-peer, tma1-setup, …).
+//  1. removeStaleUnder with the hookOwnerPrefix prefix catches the
+//     standard entries (tma1-peer, tma1-setup, …).
 //  2. The legacy `tma1` skill (no hyphen) doesn't match that prefix
 //     but is still ours; remove it explicitly when present.
 //
@@ -288,11 +288,11 @@ func (u *ClaudeCodeUninstaller) removeOwnedDir(root string) ([]string, error) {
 	if _, err := os.Stat(root); os.IsNotExist(err) {
 		return nil, nil
 	}
-	removed, err := removeStaleUnder(u, root, map[string]struct{}{}, "tma1-")
+	removed, err := removeStaleUnder(u, root, map[string]struct{}{}, hookOwnerPrefix)
 	if err != nil {
 		return removed, err
 	}
-	legacy := filepath.Join(root, "tma1")
+	legacy := filepath.Join(root, hookOwnerID)
 	if _, statErr := os.Stat(legacy); statErr == nil {
 		if u.DryRun {
 			if u.Logger != nil {

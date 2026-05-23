@@ -180,7 +180,7 @@ func (u *CodexUninstaller) uninstallHooks(home string) (string, int, error) {
 	if err != nil {
 		return path, 0, fmt.Errorf("refusing to overwrite %s: %w", path, err)
 	}
-	hookCmd := codexHookCommand(HookScriptPathFor(AdapterCodex, u.DataDir))
+	hookCmd := wrapHookCommand(HookScriptPathFor(AdapterCodex, u.DataDir))
 	removed := unregisterTMA1Hooks(existing, codexHookEvents, hookCmd)
 	if removed == 0 {
 		return path, 0, nil
@@ -205,7 +205,7 @@ func (u *CodexUninstaller) uninstallMCP(home string) (string, bool, error) {
 		return path, false, fmt.Errorf("refusing to overwrite %s: %w", path, err)
 	}
 	servers, _ := existing["mcp_servers"].(map[string]any)
-	if !removeMCPServerEntry(servers, "tma1") {
+	if !removeMCPServerEntry(servers, hookOwnerID) {
 		return path, false, nil
 	}
 	existing["mcp_servers"] = servers
@@ -244,14 +244,14 @@ func (u *CodexUninstaller) removeOwnedDir(root string) ([]string, error) {
 	if _, err := os.Stat(root); os.IsNotExist(err) {
 		return nil, nil
 	}
-	removed, err := removeStaleUnder(u, root, map[string]struct{}{}, "tma1-")
+	removed, err := removeStaleUnder(u, root, map[string]struct{}{}, hookOwnerPrefix)
 	if err != nil {
 		return removed, err
 	}
 	// Mirror the CC removeOwnedDir's legacy-name handling. Codex's
 	// embed currently doesn't ship a hyphen-less `tma1` skill, but
 	// keeping the pass symmetric makes a future rename safe.
-	legacy := filepath.Join(root, "tma1")
+	legacy := filepath.Join(root, hookOwnerID)
 	if _, statErr := os.Stat(legacy); statErr == nil {
 		if u.DryRun {
 			if u.Logger != nil {
