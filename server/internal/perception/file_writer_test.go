@@ -62,6 +62,43 @@ func TestWriteFileAtomicNewFile(t *testing.T) {
 	}
 }
 
+// TestWriteFileAtomicDanglingSymlink guards Copilot's review finding:
+// when .tma1-context.md is a symlink to a target that doesn't yet
+// exist, EvalSymlinks fails. The previous fix would then rename onto
+// the symlink path and replace the symlink with a regular file. After
+// the dangling-symlink branch, os.WriteFile is used as a fallback;
+// it follows the symlink on open and creates the target file through
+// it, keeping the symlink itself intact.
+func TestWriteFileAtomicDanglingSymlink(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "real.md")
+	link := filepath.Join(dir, ".tma1-context.md")
+	// Symlink in place but target file deliberately not created.
+	if err := os.Symlink("real.md", link); err != nil {
+		t.Skipf("symlink unsupported on this platform: %v", err)
+	}
+
+	if err := writeFileAtomic(link, []byte("created\n"), 0o644); err != nil {
+		t.Fatalf("writeFileAtomic: %v", err)
+	}
+
+	info, err := os.Lstat(link)
+	if err != nil {
+		t.Fatalf("lstat link: %v", err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Errorf("dangling symlink was replaced by a regular file (mode=%v)", info.Mode())
+	}
+
+	got, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("read resolved target: %v", err)
+	}
+	if string(got) != "created\n" {
+		t.Errorf("target content = %q, want %q", got, "created\n")
+	}
+}
+
 // TestWriteFileAtomicPreservesExistingMode guards Copilot's review
 // finding: os.WriteFile only applied perm on first create, so a user
 // who chmod'd .tma1-context.md to a custom mode expected that to

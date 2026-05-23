@@ -60,6 +60,16 @@ func (w *FileWriter) Write(ctx context.Context, sessionID, cwd string) (string, 
 func writeFileAtomic(target string, data []byte, perm os.FileMode) error {
 	if resolved, err := filepath.EvalSymlinks(target); err == nil {
 		target = resolved
+	} else if info, lerr := os.Lstat(target); lerr == nil && info.Mode()&os.ModeSymlink != 0 {
+		// Dangling symlink: EvalSymlinks failed but the path itself is
+		// a symlink whose target doesn't exist yet. os.WriteFile follows
+		// symlinks on open(O_CREAT|O_TRUNC|O_WRONLY), so it creates the
+		// link's target file through the symlink, leaving the link
+		// itself intact. Torn-write protection has no value in this
+		// branch — a reader traversing the same dangling symlink can't
+		// read anything anyway — so trading temp+rename for a single
+		// os.WriteFile is the simpler correct path.
+		return os.WriteFile(target, data, perm)
 	}
 	// Preserve an existing target's mode rather than forcing perm on
 	// every update — os.WriteFile only applied perm on first create, so
