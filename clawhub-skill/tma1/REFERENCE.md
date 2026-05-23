@@ -670,6 +670,8 @@ ORDER BY p95_ms DESC
 
 ## Troubleshooting
 
+### Setup / installation
+
 | Symptom | Fix |
 | --- | --- |
 | `tma1-server` not starting | macOS: check `~/Library/Logs/tma1-server.log`; Linux: `journalctl --user -u tma1-server`; verify port 14318 is free |
@@ -677,6 +679,18 @@ ORDER BY p95_ms DESC
 | No data in dashboard | Verify agent OTel config points to TMA1 (Claude Code/OpenClaw: `/v1/otlp`; Codex: separate `/v1/logs`, `/v1/traces`, `/v1/metrics`) and restart the agent |
 | Port conflict on 14000 | Set `TMA1_GREPTIMEDB_HTTP_PORT=14001` and update agent endpoint config |
 | Dashboard shows "GREPTIMEDB: unreachable" | Database crashed; restart with `tma1-server` |
+
+### Agent loop runtime (v2 — hook injection + MCP)
+
+| Symptom | Fix |
+| --- | --- |
+| Agent suddenly can't see `mcp__tma1__*` tools / "Connection closed" | MCP stdio child died or stalled. In Claude Code: `/mcp` to reconnect. In Codex: restart the session. Confirm the parent is still up via `pgrep -fl tma1-server`; if it isn't, restart it and the MCP child respawns automatically |
+| `<tma1-context>` block not appearing in prompts | `UserPromptSubmit` hook isn't registered. CC: `jq '.hooks.UserPromptSubmit' ~/.claude/settings.json` (expect a non-empty array containing `id: "tma1"`). Codex: `jq '.hooks.UserPromptSubmit' ~/.codex/hooks.json`. If empty, re-run `tma1-server install --adapter claude-code` (or `--adapter codex`) |
+| Anomalies exist in dashboard but never reach the agent | Either the hook fires beyond the 300ms injection budget (GreptimeDB is slow — check `~/.tma1/config/standalone.toml` resource limits, the response falls back to empty silently), or the hook script isn't running at all. Run `~/.tma1/hooks/tma1-hook.sh` manually with `{"hook_event_name":"UserPromptSubmit","session_id":"test"}` on stdin; non-empty stdout means the path works |
+| `get_external_changes` response contains `partial_error` field | One of two underlying GreptimeDB queries failed; the partial snapshot in `human_changes` / `git_changes` is still valid. Usually transient — retry. Persistent → check DB health |
+| Shutdown logs `writeq drain timed out, some background writes may have been dropped` | The 2-second drain budget elapsed before background INSERTs landed. Last few hook events / anomaly emits lost. Acceptable on rare shutdown; recurrent → GreptimeDB under-resourced |
+| `.tma1-context.md` not updating | This file callback is **opt-in** (designed for non-MCP agents like Aider / Cursor). Set `TMA1_ENABLE_FILE_CALLBACK=1` on the tma1-server process and restart. If still missing after enabling, verify the project root resolver picked a writable directory: server log shows `tma1-context.md refresh failed` at Debug level on failure |
+| Same anomaly injected over and over within one session | InjectionCache (1h TTL) should dedupe by Channel. If this happens it's a bug — open an issue with the anomaly `Kind` and the duplicated `<tma1-context>` blocks attached |
 
 ---
 
