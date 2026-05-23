@@ -194,6 +194,33 @@ func TestNotificationsHaveNoResponse(t *testing.T) {
 	}
 }
 
+// TestNullIDRequestStillResponds guards Codex's correction: JSON-RPC 2.0
+// allows `"id": null` as a discouraged-but-legal request id. Treating it
+// as a notification (no response) would hang any client that sent one;
+// the server must reply, echoing id:null.
+func TestNullIDRequestStillResponds(t *testing.T) {
+	srv := newTestServer()
+	out := &bytes.Buffer{}
+	srv.SetIO(strings.NewReader(`{"jsonrpc":"2.0","id":null,"method":"ping"}`+"\n"), out)
+	if err := srv.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if out.Len() == 0 {
+		t.Fatal("expected response for id:null request, got nothing")
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(bytes.TrimSpace(out.Bytes()), &raw); err != nil {
+		t.Fatalf("unmarshal response: %v (raw=%q)", err, out.String())
+	}
+	// The "id" field must be present in the response and equal to null.
+	if _, has := raw["id"]; !has {
+		t.Errorf("response missing id field: %s", out.String())
+	}
+	if raw["id"] != nil {
+		t.Errorf("expected id:null in response, got %v", raw["id"])
+	}
+}
+
 func TestMalformedJSONReturnsParseError(t *testing.T) {
 	srv := newTestServer()
 	out := &bytes.Buffer{}

@@ -362,10 +362,10 @@ func (t ExternalChangesTool) Call(ctx context.Context, args map[string]any) (Cal
 	since := time.Now().Add(-time.Duration(sinceMin) * time.Minute)
 
 	changes, err := t.Bundler.GetExternalChanges(ctx, project, since)
-	if err != nil {
-		return errorResult(fmt.Sprintf("get external changes: %v", err)), nil
-	}
 	if changes == nil {
+		if err != nil {
+			return errorResult(fmt.Sprintf("get external changes: %v", err)), nil
+		}
 		out, _ := json.MarshalIndent(map[string]any{
 			"project":   project,
 			"since_min": sinceMin,
@@ -373,9 +373,17 @@ func (t ExternalChangesTool) Call(ctx context.Context, args map[string]any) (Cal
 		}, "", "  ")
 		return CallToolResult{Content: []ContentBlock{{Type: "text", Text: string(out)}}}, nil
 	}
-	out, err := json.MarshalIndent(changes, "", "  ")
+	// Partial result: when one of the two underlying queries failed but
+	// the other returned rows, GetExternalChanges returns both. Attach
+	// the error message as a top-level partial_error field so the
+	// success shape (project / human_changes / git_changes / counts at
+	// the top level) stays stable for downstream consumers.
 	if err != nil {
-		return CallToolResult{}, fmt.Errorf("marshal external changes: %w", err)
+		changes.PartialError = err.Error()
+	}
+	out, mErr := json.MarshalIndent(changes, "", "  ")
+	if mErr != nil {
+		return CallToolResult{}, fmt.Errorf("marshal external changes: %w", mErr)
 	}
 	return CallToolResult{Content: []ContentBlock{{Type: "text", Text: string(out)}}}, nil
 }

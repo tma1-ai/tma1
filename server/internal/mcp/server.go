@@ -13,6 +13,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"runtime/debug"
 	"strings"
 	"sync"
 )
@@ -111,6 +112,19 @@ func (s *Server) Run(ctx context.Context) error {
 		inflight.Add(1)
 		go func(req Request) {
 			defer inflight.Done()
+			defer func() {
+				if r := recover(); r != nil {
+					if s.logger != nil {
+						s.logger.Error("mcp: recovered panic in tool handler",
+							"panic", r,
+							"method", req.Method,
+							"stack", string(debug.Stack()))
+					}
+					if req.HasID() {
+						s.sendError(req.ID, -32603, "Internal error")
+					}
+				}
+			}()
 			s.handle(ctx, req)
 		}(req)
 	}
@@ -124,6 +138,13 @@ func (s *Server) Run(ctx context.Context) error {
 }
 
 func (s *Server) handle(ctx context.Context, req Request) {
+	// A request without "id" is a notification — no response is ever sent,
+	// regardless of method. Side effects still execute (currently none of
+	// our methods has any to retain in that case).
+	if !req.HasID() {
+		return
+	}
+
 	switch req.Method {
 	case "initialize":
 		s.sendResult(req.ID, InitializeResult{
@@ -136,9 +157,6 @@ func (s *Server) handle(ctx context.Context, req Request) {
 				Version: ServerVersion,
 			},
 		})
-
-	case "notifications/initialized":
-		// notifications never get a response
 
 	case "tools/list":
 		defs := make([]Tool, 0, len(s.tools))
@@ -175,9 +193,7 @@ func (s *Server) handle(ctx context.Context, req Request) {
 		s.sendResult(req.ID, map[string]any{})
 
 	default:
-		if req.ID != nil {
-			s.sendError(req.ID, -32601, fmt.Sprintf("Method not found: %s", req.Method))
-		}
+		s.sendError(req.ID, -32601, fmt.Sprintf("Method not found: %s", req.Method))
 	}
 }
 
