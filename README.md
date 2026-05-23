@@ -172,12 +172,17 @@ the HTTP SQL API, or MySQL protocol on port `14002`.
 ## Build Sensor
 
 Use the build wrapper when you want TMA1 to capture dev/test output and feed
-fresh failures back to the agent:
+fresh failures back to the agent. Two modes:
 
 ```bash
-tma1 build --tag npm -- npm run dev
-tma1 build --watch --tag test -- make test
+# One-shot — wrapper exits with the wrapped command's exit code:
+tma1 build --tag test -- make test
 tma1 build --filter-regex '^error|FAIL' -- pytest -v
+
+# Persistent (dev servers, watchers) — use --watch for time-debounced flush
+# and Ctrl-C signal forwarding:
+tma1 build --watch --tag dev -- npm run dev
+tma1 build --watch --tag watch -- cargo watch -x test
 ```
 
 The build sensor writes to `tma1_build_events`. Anomaly rules
@@ -189,8 +194,8 @@ Supported flags:
 
 | Flag | Purpose |
 |------|---------|
-| `--watch` | Re-run the wrapped command when files change |
-| `--debounce DUR` | Coalesce filesystem events while watching (default `2s`) |
+| `--watch` | Long-running mode: flush on a debounce interval instead of by line count, and forward SIGINT/SIGTERM to the wrapped process. Required for persistent processes like `npm run dev`. |
+| `--debounce DUR` | Flush interval for `--watch` (default `2s`) |
 | `--tag NAME` | Tag this build run so the dashboard can group it (e.g. `npm`, `pytest`) |
 | `--filter-regex PAT` | Only capture lines matching the pattern |
 | `--filter-invert` | Invert the filter — capture lines NOT matching the pattern |
@@ -242,6 +247,23 @@ the single `/v1/otlp` base.
 
 Settings changed in the dashboard are saved to `~/.tma1/settings.json`.
 Environment variables take priority.
+
+## CLI
+
+The `tma1-server` binary (aliased to `tma1` by the installer) is one
+entry point for everything.
+
+| Command | Purpose |
+|---------|---------|
+| `tma1 install --adapter <name>` | Wire a coding agent into TMA1 (`claude-code`, `codex`) |
+| `tma1 uninstall --adapter <name>` | Reverse install for one adapter |
+| `tma1 build [--watch] -- <cmd>` | Wrap a build/test command and ship its output into `tma1_build_events` |
+| `tma1 mcp-serve` | JSON-RPC MCP stdio server (spawned by agents, not run by hand) |
+| `tma1 help [SUB]` | Print top-level usage, or details for a specific subcommand |
+| `tma1 version` | Print the tma1-server version |
+
+Every subcommand accepts `-h` / `--help`. Run `tma1 help build` or
+`tma1 build --help` for the full flag list and examples.
 
 ## Development
 

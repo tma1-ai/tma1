@@ -1072,41 +1072,41 @@ function cc_setCachedTraceDetection(iv, has) {
   try { localStorage.setItem(CC_TRACE_CACHE_KEY, JSON.stringify({ iv: iv, has: has, ts: Date.now() })); } catch (e) { /* quota */ }
 }
 
-// Detect CC trace data and load trace KPI cards.
-async function cc_loadTraceCards() {
+// Detection-only: toggles Traces sub-tab visibility. KPI cards load
+// separately via cc_loadTraceCardsValues when the tab opens.
+async function cc_loadTraceCardsExistence() {
   var iv = intervalSQL();
 
-  // Fast path: use cached detection result.
   var cached = cc_getCachedTraceDetection(iv);
-  if (cached === false) {
-    ccHasTraces = false;
-    document.getElementById('cc-trace-cards').style.display = 'none';
-    document.getElementById('cc-traces-tab').style.display = 'none';
+  if (cached !== null) {
+    ccHasTraces = cached;
+    document.getElementById('cc-traces-tab').style.display = cached ? '' : 'none';
     return;
   }
 
   try {
-    // Skip detection query if cache says traces exist.
-    var cnt = 1;
-    if (cached !== true) {
-      var countRes = await query(
-        "SELECT COUNT(*) AS v FROM opentelemetry_traces " +
-        "WHERE span_name = 'claude_code.llm_request' " +
-        "AND timestamp > NOW() - INTERVAL '" + iv + "'"
-      );
-      cnt = Number(rows(countRes)?.[0]?.[0]) || 0;
-    }
+    var countRes = await query(
+      "SELECT COUNT(*) AS v FROM opentelemetry_traces " +
+      "WHERE span_name = 'claude_code.llm_request' " +
+      "AND timestamp > NOW() - INTERVAL '" + iv + "'"
+    );
+    var cnt = Number(rows(countRes)?.[0]?.[0]) || 0;
     cc_setCachedTraceDetection(iv, cnt > 0);
-    if (cnt === 0) {
-      ccHasTraces = false;
-      document.getElementById('cc-trace-cards').style.display = 'none';
-      document.getElementById('cc-traces-tab').style.display = 'none';
-      return;
-    }
-    ccHasTraces = true;
-    document.getElementById('cc-trace-cards').style.display = '';
-    document.getElementById('cc-traces-tab').style.display = '';
+    ccHasTraces = cnt > 0;
+    document.getElementById('cc-traces-tab').style.display = ccHasTraces ? '' : 'none';
+  } catch {
+    ccHasTraces = false;
+    document.getElementById('cc-traces-tab').style.display = 'none';
+  }
+}
 
+async function cc_loadTraceCardsValues() {
+  // Cold-cache deep-link: detection may still be in flight. Cached
+  // hits resolve synchronously.
+  await cc_loadTraceCardsExistence();
+  if (!ccHasTraces) return;
+  var iv = intervalSQL();
+  try {
     var results = await Promise.all([
       // Avg TTFT
       query("SELECT ROUND(AVG(\"span_attributes.ttft_ms\"), 0) FROM opentelemetry_traces WHERE span_name = 'claude_code.llm_request' AND \"span_attributes.ttft_ms\" IS NOT NULL AND timestamp > NOW() - INTERVAL '" + iv + "'"),
@@ -1132,9 +1132,7 @@ async function cc_loadTraceCards() {
     document.getElementById('cc-val-perm-wait').textContent = permWait > 0 ? fmtDurMs(permWait) : '\u2014';
     document.getElementById('cc-val-llm-latency').textContent = llmLat > 0 ? fmtDurMs(llmLat) : '\u2014';
   } catch {
-    ccHasTraces = false;
-    document.getElementById('cc-trace-cards').style.display = 'none';
-    document.getElementById('cc-traces-tab').style.display = 'none';
+    // Keep previous values on transient failure.
   }
 }
 
@@ -1142,6 +1140,8 @@ async function cc_loadTraceCards() {
 // Traces tab — 4 charts
 // ===================================================================
 async function cc_loadTracesTab() {
+  // Same cold-cache deep-link race as cc_loadTraceCardsValues.
+  await cc_loadTraceCardsExistence();
   if (!ccHasTraces) return;
   await Promise.all([
     cc_loadTTFTChart(),

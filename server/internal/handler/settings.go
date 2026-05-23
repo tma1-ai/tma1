@@ -179,9 +179,8 @@ func (s *Server) handleSaveSettings(w http.ResponseWriter, r *http.Request) {
 		s.mu.Unlock()
 	}
 
-	// Hot-reload query concurrency. The save response (handleGetSettings below)
-	// returns the updated value, and the frontend's saveSettings() applies it to
-	// the in-memory limiter. Page reload also picks up the new value via initViews().
+	// Persisted only; the live semaphore is sized at startup, so this
+	// takes effect on next restart.
 	if !s.isEnvLocked("query_concurrency") && settings.QueryConcurrency > 0 {
 		s.mu.Lock()
 		s.queryConcurrency = clampQueryConcurrency(settings.QueryConcurrency)

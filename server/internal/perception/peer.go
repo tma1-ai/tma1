@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -390,7 +391,7 @@ func (b *Bundler) enrichPeerSession(ctx context.Context, ps *PeerSession, messag
 				OutputTokens: int64At(r, 7),
 			})
 		}
-		ps.Messages = msgs
+		ps.Messages = dedupPeerMessages(msgs)
 	}()
 
 	// Token totals (use SUM separately — messages above may be capped by limit).
@@ -477,6 +478,34 @@ func clampPeerLimit(n int) int {
 		return 5
 	}
 	return n
+}
+
+// dedupPeerMessages collapses identical rows that JSONL replay (during
+// context compaction or across server restarts) writes into
+// tma1_messages. The ingester dedups within a batch but the seen-map
+// resets per batch, so historical dups accumulate. Key on
+// (ts, role, content-prefix) — ts pins distinct messages with the same
+// opening text apart; the 200-char prefix matches the ingester's own
+// dedup window.
+func dedupPeerMessages(msgs []PeerMessage) []PeerMessage {
+	if len(msgs) < 2 {
+		return msgs
+	}
+	seen := make(map[string]struct{}, len(msgs))
+	out := make([]PeerMessage, 0, len(msgs))
+	for _, m := range msgs {
+		prefix := m.Content
+		if len(prefix) > 200 {
+			prefix = prefix[:200]
+		}
+		key := strconv.FormatInt(m.Timestamp.UnixMilli(), 10) + ":" + m.Role + ":" + prefix
+		if _, dup := seen[key]; dup {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, m)
+	}
+	return out
 }
 
 // peerAgentList returns the validPeerAgents set with the Bundler's

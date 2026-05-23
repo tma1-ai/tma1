@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestNormalizePeerAgent(t *testing.T) {
@@ -255,4 +256,81 @@ func TestPeerAgentListExcludesCaller(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestDedupPeerMessages(t *testing.T) {
+	t0 := time.UnixMilli(1_000_000)
+	t1 := t0.Add(time.Second)
+	long := strings.Repeat("a", 300)
+
+	cases := []struct {
+		name string
+		in   []PeerMessage
+		want int
+	}{
+		{"nil", nil, 0},
+		{"single", []PeerMessage{{Timestamp: t0, Role: "user", Content: "x"}}, 1},
+		{
+			"three identical collapse to one",
+			[]PeerMessage{
+				{Timestamp: t0, Role: "assistant", Content: "hello"},
+				{Timestamp: t0, Role: "assistant", Content: "hello"},
+				{Timestamp: t0, Role: "assistant", Content: "hello"},
+			},
+			1,
+		},
+		{
+			"different ts preserved",
+			[]PeerMessage{
+				{Timestamp: t0, Role: "assistant", Content: "hello"},
+				{Timestamp: t1, Role: "assistant", Content: "hello"},
+			},
+			2,
+		},
+		{
+			"different role preserved",
+			[]PeerMessage{
+				{Timestamp: t0, Role: "user", Content: "hello"},
+				{Timestamp: t0, Role: "assistant", Content: "hello"},
+			},
+			2,
+		},
+		{
+			"content differs beyond the 200-char prefix → collapsed",
+			[]PeerMessage{
+				{Timestamp: t0, Role: "assistant", Content: long + "X"},
+				{Timestamp: t0, Role: "assistant", Content: long + "Y"},
+			},
+			1,
+		},
+		{
+			"chronological order preserved among unique entries",
+			[]PeerMessage{
+				{Timestamp: t0, Role: "user", Content: "first"},
+				{Timestamp: t0, Role: "user", Content: "first"}, // dup
+				{Timestamp: t1, Role: "assistant", Content: "second"},
+			},
+			2,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := dedupPeerMessages(c.in)
+			if len(got) != c.want {
+				t.Fatalf("len = %d, want %d (got %+v)", len(got), c.want, got)
+			}
+		})
+	}
+
+	t.Run("order preserved", func(t *testing.T) {
+		in := []PeerMessage{
+			{Timestamp: t0, Role: "user", Content: "first"},
+			{Timestamp: t0, Role: "user", Content: "first"},
+			{Timestamp: t1, Role: "assistant", Content: "second"},
+		}
+		got := dedupPeerMessages(in)
+		if got[0].Content != "first" || got[1].Content != "second" {
+			t.Errorf("order broken: %+v", got)
+		}
+	})
 }

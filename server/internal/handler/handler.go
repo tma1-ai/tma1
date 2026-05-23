@@ -46,7 +46,10 @@ type Server struct {
 	dataDir           string
 	dataTTL           string
 	queryConcurrency  int
-	logLevelVar       *slog.LevelVar
+	// Bounds concurrent /api/query upstreams. Sized at startup; runtime
+	// settings changes take effect on next restart.
+	querySem    chan struct{}
+	logLevelVar *slog.LevelVar
 }
 
 // ServerConfig holds additional configuration for the Server.
@@ -85,6 +88,7 @@ func New(greptimeHTTPPort int, tma1Port string, webFS http.FileSystem, logger *s
 	// writes show up in the same JSON stream as the rest of the
 	// process, not via slog.Default().
 	writeSem := writeq.NewWithLogger(64, logger)
+	qc := clampQueryConcurrency(sc.QueryConcurrency)
 	srv := &Server{
 		greptimeHTTPPort:  greptimeHTTPPort,
 		tma1Port:          tma1Port,
@@ -105,7 +109,8 @@ func New(greptimeHTTPPort int, tma1Port string, webFS http.FileSystem, logger *s
 		llmConfig:         llm,
 		dataDir:           sc.DataDir,
 		dataTTL:           sc.DataTTL,
-		queryConcurrency:  clampQueryConcurrency(sc.QueryConcurrency),
+		queryConcurrency:  qc,
+		querySem:          make(chan struct{}, qc),
 		logLevelVar:       sc.LogLevelVar,
 	}
 	// Route Detector emit-log INSERTs through the same semaphore so
@@ -259,11 +264,25 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	select {
+	case s.querySem <- struct{}{}:
+		defer func() { <-s.querySem }()
+	case <-r.Context().Done():
+		return
+	}
+
 	sqlURL := fmt.Sprintf("http://localhost:%d/v1/sql", s.greptimeHTTPPort)
 	form := url.Values{}
 	form.Set("sql", req.SQL)
 
-	resp, err := s.httpClient.Post(sqlURL, "application/x-www-form-urlencoded", strings.NewReader(form.Encode())) //nolint:gosec
+	proxyReq, err := http.NewRequestWithContext(r.Context(), http.MethodPost, sqlURL, strings.NewReader(form.Encode()))
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	proxyReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	resp, err := s.httpClient.Do(proxyReq) //nolint:gosec
 	if err != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
 		return

@@ -29,37 +29,282 @@ import (
 // Version is set at build time via -ldflags "-X main.Version=<tag>".
 var Version = "dev"
 
+const rootHelpText = `tma1-server — local-first LLM agent observability
+
+Usage:
+  tma1-server [subcommand] [flags]
+
+Without a subcommand, tma1-server runs the long-running HTTP server and
+manages a child GreptimeDB process. Dashboard, MCP, and OTLP all live
+on localhost.
+
+Subcommands:
+  install      Wire a coding agent (claude-code, codex) into TMA1
+  uninstall    Reverse install for one adapter
+  build        Wrap a build/test command and ship its output to TMA1
+  mcp-serve    Run as JSON-RPC MCP stdio server (spawned by agents)
+  help [SUB]   Print this help, or details for a specific subcommand
+  version      Print the tma1-server version
+
+Flags:
+  -h, --help     Show this help
+  -v, --version  Show the tma1-server version
+
+Environment:
+  TMA1_PORT                  HTTP / OTLP port (default 14318)
+  TMA1_DATA_DIR              Data directory (default ~/.tma1)
+  TMA1_GREPTIMEDB_HTTP_PORT  GreptimeDB HTTP port (default 14000)
+  TMA1_LOG_LEVEL             debug | info | warn | error (default info)
+  TMA1_DATA_TTL              Retention for ingested events (default 60d)
+
+Examples:
+  tma1-server                                      # start the long-running server
+  tma1-server install --adapter claude-code        # wire Claude Code into TMA1
+  tma1-server build -- make test                   # ship build output to TMA1
+  tma1-server help build                           # see all build flags
+
+See https://tma1.ai for full documentation.
+`
+
+const installHelpText = `Usage: tma1-server install [flags]
+
+Install TMA1 into a coding agent. Writes:
+  - hook script (~/.tma1/bin/tma1-hook.sh)
+  - adapter settings entry (~/.claude/settings.json for claude-code,
+    ~/.codex/config.toml for codex) that registers the hook
+  - MCP server entry pointing at "tma1-server mcp-serve"
+  - embedded skill + slash command files for the adapter
+  - when run inside a project: a CLAUDE.md / AGENTS.md instructions
+    block and a .gitignore entry for ~/.tma1 data files
+
+Flags:
+  --adapter NAME           claude-code | codex (default claude-code)
+  --project DIR            Project directory (default: current working
+                           directory)
+  --skip-project-files     Skip the CLAUDE.md/AGENTS.md block and the
+                           .gitignore line. Used by the curl-pipe
+                           installer when cwd is unpredictable.
+  -n, --dry-run            Print what would change without touching disk
+  -h, --help               Show this help
+
+Examples:
+  tma1-server install --adapter claude-code
+  tma1-server install --adapter codex --project ~/work/myrepo
+  tma1-server install --adapter claude-code --dry-run
+`
+
+const uninstallHelpText = `Usage: tma1-server uninstall --adapter NAME [flags]
+
+Reverse "tma1-server install" for one adapter: remove the hook script
+(when last referenced), the hook registration in the adapter settings,
+the MCP entry, embedded skills/commands, and the project instructions
+block. The .gitignore line and ~/.tma1/data are left in place unless
+--purge-data is passed.
+
+--adapter is required (no default): the asymmetric blast radius of
+uninstalling the wrong agent outweighs the convenience of guessing.
+
+Flags:
+  --adapter NAME    claude-code | codex (required)
+  --project DIR     Project directory (default: current working directory)
+  -n, --dry-run     Print what would be removed without touching disk
+  --purge-data      Also delete ~/.tma1/data (irreversible)
+  -h, --help        Show this help
+
+Examples:
+  tma1-server uninstall --adapter claude-code --dry-run
+  tma1-server uninstall --adapter codex --purge-data
+`
+
+const buildHelpText = `Usage: tma1-server build [flags] [--] <command> [args...]
+
+Wrap <command>, tee its stdout/stderr to your terminal, and ship batched
+output to tma1_build_events so agents can query build status through
+the perception layer (get_build_status / get_context_bundle).
+
+The "--" separator is optional in most cases — the first non-flag
+argument is treated as the start of the wrapped command. Use "--" when
+the wrapped command itself begins with a flag, e.g.
+"tma1-server build -- --version-check", otherwise that leading flag
+would be parsed by tma1-server.
+
+Flags:
+  --watch                  Run as a long-running watcher with debounced
+                           flushes. Without --watch, the wrapped command
+                           runs once and tma1-server exits with its
+                           exit code.
+  --debounce DURATION      Flush interval for --watch (default 2s)
+  --filter-regex PATTERN   Only capture lines matching the regex
+  --filter-invert          Invert the regex match (capture non-matching
+                           lines instead)
+  --tag NAME               Short identifier for this build stream
+                           (default: command name)
+  --project DIR            Project label override (default: basename of
+                           the resolved project root from cwd)
+  --no-color               Don't inject FORCE_COLOR / CLICOLOR_FORCE.
+                           Default: inject so wrapped tools keep ANSI
+                           output even though stdout is captured.
+  -h, --help               Show this help
+
+Examples:
+  tma1-server build -- make test
+  tma1-server build --watch --tag api -- go test ./...
+  tma1-server build --filter-regex 'FAIL|PASS' -- npm test
+`
+
+const mcpServeHelpText = `Usage: tma1-server mcp-serve
+
+JSON-RPC MCP stdio server. Spawned per session by coding-agent adapters
+(Claude Code, Codex, etc.) over stdio; not intended for interactive use.
+Talks to the parent tma1-server's GreptimeDB at TMA1_GREPTIMEDB_HTTP_PORT
+(default 14000); does not start its own GreptimeDB.
+
+Flags:
+  -h, --help    Show this help
+`
+
+// The _, _ = discard is intentional: errcheck flags Fprint to an
+// io.Writer parameter even though we'd take no useful action on a
+// failed write to stdout/stderr.
+func printRootHelp(out io.Writer)      { _, _ = fmt.Fprint(out, rootHelpText) }
+func printInstallHelp(out io.Writer)   { _, _ = fmt.Fprint(out, installHelpText) }
+func printUninstallHelp(out io.Writer) { _, _ = fmt.Fprint(out, uninstallHelpText) }
+func printBuildHelp(out io.Writer)     { _, _ = fmt.Fprint(out, buildHelpText) }
+func printMCPServeHelp(out io.Writer)  { _, _ = fmt.Fprint(out, mcpServeHelpText) }
+
+// hasHelpFlag reports whether args contains -h or --help before any "--"
+// sentinel.
+func hasHelpFlag(args []string) bool {
+	for _, a := range args {
+		if a == "--" {
+			return false
+		}
+		if a == "-h" || a == "--help" {
+			return true
+		}
+	}
+	return false
+}
+
+// hasBuildHelpFlag mirrors runBuild's flag boundary: help belongs to
+// tma1-server only while we are still parsing known build flags. The first
+// unknown token starts the wrapped command, even when it begins with "-".
+func hasBuildHelpFlag(args []string) bool {
+	for i := 0; i < len(args); {
+		switch args[i] {
+		case "--":
+			return false
+		case "-h", "--help":
+			return true
+		case "--watch", "--filter-invert", "--no-color":
+			i++
+		case "--debounce", "--filter-regex", "--tag", "--project":
+			if i+1 >= len(args) {
+				return false
+			}
+			i += 2
+		default:
+			return false
+		}
+	}
+	return false
+}
+
+// dispatch handles subcommand mode. Caller guarantees len(args) >= 2
+// (program name + at least one user-supplied arg). Returns the exit
+// code; the caller is responsible for os.Exit.
+//
+// Stdout/stderr are passed in so tests can capture them. Subcommand
+// handlers (runInstall, runBuild, runUninstall, runMCPServe) write
+// their own output directly to os.Stdout / os.Stderr — only dispatch's
+// own messages (help, version, unknown-subcommand) honour the writers.
+// Help requests for subcommands are short-circuited here so they remain
+// testable without invoking the underlying handler.
+func dispatch(args []string, stdout, stderr io.Writer) int {
+	switch args[1] {
+	case "-h", "--help", "help":
+		return runHelp(args[2:], stdout, stderr)
+	case "-v", "--version", "version":
+		_, _ = fmt.Fprintln(stdout, "tma1-server", Version)
+		return 0
+	case "mcp-serve":
+		// MCP stdio server. Stdout is reserved for JSON-RPC; logs → stderr.
+		if hasHelpFlag(args[2:]) {
+			printMCPServeHelp(stdout)
+			return 0
+		}
+		if err := runMCPServe(); err != nil {
+			_, _ = fmt.Fprintf(stderr, "mcp-serve: %v\n", err)
+			return 1
+		}
+		return 0
+	case "install":
+		if hasHelpFlag(args[2:]) {
+			printInstallHelp(stdout)
+			return 0
+		}
+		if err := runInstall(args[2:]); err != nil {
+			_, _ = fmt.Fprintf(stderr, "install: %v\n", err)
+			return 1
+		}
+		return 0
+	case "uninstall":
+		if hasHelpFlag(args[2:]) {
+			printUninstallHelp(stdout)
+			return 0
+		}
+		if err := runUninstall(args[2:]); err != nil {
+			_, _ = fmt.Fprintf(stderr, "uninstall: %v\n", err)
+			return 1
+		}
+		return 0
+	case "build":
+		if hasBuildHelpFlag(args[2:]) {
+			printBuildHelp(stdout)
+			return 0
+		}
+		exitCode, err := runBuild(args[2:])
+		if err != nil {
+			_, _ = fmt.Fprintf(stderr, "build: %v\n", err)
+			return 1
+		}
+		return exitCode
+	default:
+		_, _ = fmt.Fprintf(stderr, "tma1-server: unknown subcommand %q\nRun 'tma1-server help' for usage.\n", args[1])
+		return 2
+	}
+}
+
+// runHelp implements `tma1-server help [subcommand]`. Empty topic prints
+// the root help; a known topic prints that subcommand's help; an unknown
+// topic errors with exit 2.
+func runHelp(args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 {
+		printRootHelp(stdout)
+		return 0
+	}
+	switch args[0] {
+	case "install":
+		printInstallHelp(stdout)
+	case "uninstall":
+		printUninstallHelp(stdout)
+	case "build":
+		printBuildHelp(stdout)
+	case "mcp-serve":
+		printMCPServeHelp(stdout)
+	case "help", "version", "-h", "--help", "-v", "--version":
+		printRootHelp(stdout)
+	default:
+		_, _ = fmt.Fprintf(stderr, "tma1-server: unknown help topic %q\nRun 'tma1-server help' for the list of subcommands.\n", args[0])
+		return 2
+	}
+	return 0
+}
+
 func main() {
 	// Subcommand routing. The default (no args) runs the full HTTP server.
 	if len(os.Args) > 1 {
-		switch os.Args[1] {
-		case "mcp-serve":
-			// MCP stdio server. Stdout is reserved for JSON-RPC; logs → stderr.
-			if err := runMCPServe(); err != nil {
-				fmt.Fprintf(os.Stderr, "mcp-serve: %v\n", err)
-				os.Exit(1)
-			}
-			return
-		case "install":
-			if err := runInstall(os.Args[2:]); err != nil {
-				fmt.Fprintf(os.Stderr, "install: %v\n", err)
-				os.Exit(1)
-			}
-			return
-		case "uninstall":
-			if err := runUninstall(os.Args[2:]); err != nil {
-				fmt.Fprintf(os.Stderr, "uninstall: %v\n", err)
-				os.Exit(1)
-			}
-			return
-		case "build":
-			exitCode, err := runBuild(os.Args[2:])
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "build: %v\n", err)
-				os.Exit(1)
-			}
-			os.Exit(exitCode)
-		}
+		os.Exit(dispatch(os.Args, os.Stdout, os.Stderr))
 	}
 
 	cfg, err := config.Load()
@@ -333,13 +578,13 @@ func runBuild(args []string) (int, error) {
 
 	// Parse flags up to `--`.
 	var (
-		watch         bool
-		debounceStr   = "2s"
-		filterRegex   string
-		filterInvert  bool
-		tag           string
+		watch           bool
+		debounceStr     = "2s"
+		filterRegex     string
+		filterInvert    bool
+		tag             string
 		projectOverride string
-		noColor       bool // default false => ForceColor enabled
+		noColor         bool // default false => ForceColor enabled
 	)
 
 	i := 0
@@ -382,8 +627,7 @@ func runBuild(args []string) (int, error) {
 			i++
 			goto runCmd
 		case "-h", "--help":
-			fmt.Println("usage: tma1-server build [flags] -- <command> [args...]")
-			fmt.Println("flags: --watch --debounce 2s --filter-regex PAT --filter-invert --tag NAME --project DIR --no-color")
+			printBuildHelp(os.Stdout)
 			return 0, nil
 		default:
 			// Treat the first non-flag positional as the start of the command.
@@ -487,7 +731,7 @@ func runInstall(args []string) error {
 		case "--dry-run", "-n":
 			dryRun = true
 		case "-h", "--help":
-			fmt.Println("usage: tma1-server install [--adapter claude-code|codex] [--project DIR] [--skip-project-files] [--dry-run]")
+			printInstallHelp(os.Stdout)
 			return nil
 		default:
 			return fmt.Errorf("unknown flag %q", args[i])
@@ -620,7 +864,7 @@ func runUninstall(args []string) error {
 		case "--purge-data":
 			purgeData = true
 		case "-h", "--help":
-			fmt.Println("usage: tma1-server uninstall --adapter claude-code|codex [--project DIR] [--dry-run] [--purge-data]")
+			printUninstallHelp(os.Stdout)
 			return nil
 		default:
 			return fmt.Errorf("unknown flag %q", args[i])

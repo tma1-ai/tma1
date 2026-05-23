@@ -563,6 +563,45 @@ Force reinstall (wipes all data): curl -fsSL https://tma1.ai/install.sh | TMA1_F
 
 ---
 
+## Persistent processes — wrap with `tma1 build --watch`
+
+`[AGENT]` For commands that **run indefinitely** until the user stops
+them (`npm run dev`, `cargo watch`, `pytest --watch`, `hugo serve`,
+`docker compose up`), wrap with `tma1 build --watch`:
+
+```bash
+tma1 build --watch --tag dev -- npm run dev
+tma1 build --watch --tag watch -- cargo watch -x test
+```
+
+For one-shot commands (`make test`, `go test ./...`, `pytest`,
+`cargo build`), **don't bother** — just use the `Bash` tool directly.
+You already get the full output inline in the tool result, and any
+failure is visible to you immediately.
+
+### Why `tma1 build --watch` is worth it for persistent processes
+
+The `Bash` tool's `run_in_background` mode can keep a dev server alive,
+but its output is fragmented across `BashOutput` polls and disappears
+when the session ends. `tma1 build --watch` solves that:
+
+- **Persistence beyond your session** — output is written to
+  `tma1_build_events`; the next agent session (or another agent / the
+  human at the dashboard) reads it via the `get_build_status` MCP tool
+  without needing to be attached to your original process.
+- **Time-debounced flush + signal forwarding** — flushes buffered output
+  every 2s (override with `--debounce`) instead of waiting for a line
+  threshold, and forwards SIGINT/SIGTERM so `Ctrl-C` cleanly stops the
+  dev server.
+- **Anomaly detection** — `tma1_build_events` feeds the
+  `repeated_failed_build` and `build_broken_after_my_edit` rules, which
+  surface in the next `<tma1-context>` injection if the dev server
+  starts emitting failures.
+
+Run `tma1 build --help` for the full flag list.
+
+---
+
 ## Troubleshooting
 
 `[AGENT]` When diagnosing issues, check logs first, then work through the common problems below.

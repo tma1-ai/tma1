@@ -63,7 +63,13 @@ tma1-server mcp-serve                                # JSON-RPC MCP stdio server
 tma1-server install   --adapter claude-code|codex [--project DIR] [--skip-project-files] [--dry-run]
 tma1-server uninstall --adapter claude-code|codex [--project DIR] [--dry-run] [--purge-data]
 tma1-server build [--watch] [--debounce 2s] [--tag NAME] [--project DIR] [--no-color] -- <command> [args...]
+tma1-server help [SUB]                               # top-level usage, or `help build` etc. for one subcommand
+tma1-server version                                  # print the tma1-server version
 ```
+
+Every subcommand also accepts `-h` / `--help`. The installer symlinks the
+binary as `tma1`, so `tma1 build --help` is equivalent to
+`tma1-server build --help`.
 
 See `docs/hooks.md` for the full install / uninstall contract.
 
@@ -140,4 +146,5 @@ Edit/Write target.
 - Trust `external_files` over your in-memory snapshot — re-read those before editing
 - Call the MCP tool `get_session_state` if you need a fuller view of your prior tool calls
 - Call `get_context_bundle` after compaction or when context feels stale
+- Wrap persistent processes (dev servers, watchers like `npm run dev`, `cargo watch`) with `tma1 build --watch -- <cmd>` so output persists past your session; the next agent (or you, after compaction) reads it via `get_build_status`. One-shot commands don't need wrapping — use Bash directly.
 <!-- tma1:end -->

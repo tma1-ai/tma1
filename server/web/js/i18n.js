@@ -43,7 +43,8 @@ var I18N = {
     'tab.cc_events': 'Events',
     'tab.cc_cost': 'Cost',
     'tab.cc_anomalies': 'Anomalies',
-    'tab.cc_traces': 'Traces',
+    // Key stays `cc_traces` to preserve `#claude-code/cc-traces/...` bookmarks.
+    'tab.cc_traces': 'Performance',
     // Time ranges
     'time.15m': 'Last 15m',
     'time.30m': 'Last 30m',
@@ -652,7 +653,7 @@ var I18N = {
     'tab.cc_events': '\u4e8b\u4ef6',
     'tab.cc_cost': '\u8d39\u7528',
     'tab.cc_anomalies': '\u5f02\u5e38',
-    'tab.cc_traces': '\u8ffd\u8e2a',
+    'tab.cc_traces': '\u6027\u80fd',
     'time.15m': '\u6700\u8fd1 15 \u5206\u949f',
     'time.30m': '\u6700\u8fd1 30 \u5206\u949f',
     'time.1h': '\u6700\u8fd1 1 \u5c0f\u65f6',
@@ -1226,7 +1227,7 @@ var I18N = {
     'tab.cc_events': 'Eventos',
     'tab.cc_cost': 'Costos',
     'tab.cc_anomalies': 'Anomal\u00edas',
-    'tab.cc_traces': 'Trazas',
+    'tab.cc_traces': 'Rendimiento',
     'time.15m': '\u00daltimos 15m',
     'time.30m': '\u00daltimos 30m',
     'time.1h': '\u00daltima 1h',

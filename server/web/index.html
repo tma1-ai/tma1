@@ -116,36 +116,12 @@
       </div>
     </div>
 
-    <!-- Trace-based KPI cards (hidden when no CC trace data) -->
-    <div class="cards cards-5" id="cc-trace-cards" style="display:none">
-      <div class="card">
-        <div class="label" data-i18n="card.avg_ttft">Avg TTFT</div>
-        <div class="value latency" id="cc-val-ttft">&mdash;</div>
-      </div>
-      <div class="card">
-        <div class="label" data-i18n="card.output_speed">Output Speed</div>
-        <div class="value tokens" id="cc-val-throughput">&mdash;</div>
-      </div>
-      <div class="card">
-        <div class="label" data-i18n="card.cache_hit">Cache Hit</div>
-        <div class="value requests" id="cc-val-cache-hit">&mdash;</div>
-      </div>
-      <div class="card">
-        <div class="label" data-i18n="card.perm_wait">Perm Wait</div>
-        <div class="value cost" id="cc-val-perm-wait">&mdash;</div>
-      </div>
-      <div class="card">
-        <div class="label" data-i18n="card.llm_latency">Avg LLM Latency</div>
-        <div class="value latency" id="cc-val-llm-latency">&mdash;</div>
-      </div>
-    </div>
-
     <div class="tabs" id="cc-tabs">
       <button class="tab active" data-cctab="cc-overview" data-i18n="tab.cc_overview">Overview</button>
       <button class="tab" data-cctab="cc-tools" data-i18n="tab.cc_tools">Tools</button>
       <button class="tab" data-cctab="cc-cost" data-i18n="tab.cc_cost">Cost</button>
       <button class="tab" data-cctab="cc-anomalies" data-i18n="tab.cc_anomalies">Anomalies</button>
-      <button class="tab" data-cctab="cc-traces" id="cc-traces-tab" style="display:none" data-i18n="tab.cc_traces">Traces</button>
+      <button class="tab" data-cctab="cc-traces" id="cc-traces-tab" style="display:none" data-i18n="tab.cc_traces">Performance</button>
       <button class="tab" data-link="sessions" onclick="switchToSessions('claude_code')" data-i18n="tab.sessions">Sessions</button>
     </div>
 
@@ -311,6 +287,30 @@
 
     <!-- CC Traces (visible only when CC trace data exists) -->
     <div class="tab-content" id="tab-cc-traces">
+      <!-- Trace-based KPI cards (loaded lazily when this tab is opened) -->
+      <div class="cards cards-5" id="cc-trace-cards">
+        <div class="card">
+          <div class="label" data-i18n="card.avg_ttft">Avg TTFT</div>
+          <div class="value latency" id="cc-val-ttft">&mdash;</div>
+        </div>
+        <div class="card">
+          <div class="label" data-i18n="card.output_speed">Output Speed</div>
+          <div class="value tokens" id="cc-val-throughput">&mdash;</div>
+        </div>
+        <div class="card">
+          <div class="label" data-i18n="card.cache_hit">Cache Hit</div>
+          <div class="value requests" id="cc-val-cache-hit">&mdash;</div>
+        </div>
+        <div class="card">
+          <div class="label" data-i18n="card.perm_wait">Perm Wait</div>
+          <div class="value cost" id="cc-val-perm-wait">&mdash;</div>
+        </div>
+        <div class="card">
+          <div class="label" data-i18n="card.llm_latency">Avg LLM Latency</div>
+          <div class="value latency" id="cc-val-llm-latency">&mdash;</div>
+        </div>
+      </div>
+
       <div class="trace-charts">
         <div class="chart-container">
           <h3 data-i18n="section.ttft_over_time">TTFT Over Time</h3>

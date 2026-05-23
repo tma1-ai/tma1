@@ -1266,3 +1266,186 @@ func TestHookStreamSessionFilter(t *testing.T) {
 		t.Fatal("timed out waiting for broadcast")
 	}
 }
+
+func TestQueryEndpointConcurrencyLimit(t *testing.T) {
+	arrived := make(chan struct{}, 4)
+	release := make(chan struct{}, 4)
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		arrived <- struct{}{}
+		<-release
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"output":[{"records":{"rows":[[1]]}}]}`)
+	}))
+	defer fake.Close()
+
+	port := 0
+	_, _ = fmt.Sscanf(strings.TrimPrefix(fake.URL, "http://127.0.0.1:"), "%d", &port)
+
+	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
+	srv := New(port, "14318", http.Dir("."), logger, nil, NewHookBroadcaster(),
+		LLMConfig{}, ServerConfig{QueryConcurrency: 2})
+	router := srv.Router()
+
+	done := make(chan int, 3)
+	for i := 0; i < 3; i++ {
+		go func(id int) {
+			req := httptest.NewRequest(http.MethodPost, "/api/query",
+				strings.NewReader(`{"sql":"SELECT 1"}`))
+			req.Header.Set("Content-Type", "application/json")
+			rr := httptest.NewRecorder()
+			router.ServeHTTP(rr, req)
+			done <- id
+		}(i)
+	}
+
+	for i := 0; i < 2; i++ {
+		select {
+		case <-arrived:
+		case <-time.After(500 * time.Millisecond):
+			t.Fatalf("upstream got only %d requests; expected 2 to pass the gate", i)
+		}
+	}
+	select {
+	case <-arrived:
+		t.Fatal("third request reached upstream while two were in flight")
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	release <- struct{}{}
+	select {
+	case <-arrived:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("third request never reached upstream after a slot freed")
+	}
+
+	release <- struct{}{}
+	release <- struct{}{}
+	for i := 0; i < 3; i++ {
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+			t.Fatalf("client %d never completed", i)
+		}
+	}
+}
+
+func TestQueryEndpointConcurrencyCancelOnDisconnect(t *testing.T) {
+	arrived := make(chan struct{}, 2)
+	release := make(chan struct{}, 2)
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		arrived <- struct{}{}
+		<-release
+		_, _ = fmt.Fprint(w, `{"output":[]}`)
+	}))
+	defer fake.Close()
+
+	port := 0
+	_, _ = fmt.Sscanf(strings.TrimPrefix(fake.URL, "http://127.0.0.1:"), "%d", &port)
+
+	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
+	srv := New(port, "14318", http.Dir("."), logger, nil, NewHookBroadcaster(),
+		LLMConfig{}, ServerConfig{QueryConcurrency: 1})
+	router := srv.Router()
+
+	firstDone := make(chan struct{})
+	go func() {
+		req := httptest.NewRequest(http.MethodPost, "/api/query",
+			strings.NewReader(`{"sql":"SELECT 1"}`))
+		rr := httptest.NewRecorder()
+		router.ServeHTTP(rr, req)
+		close(firstDone)
+	}()
+	select {
+	case <-arrived:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("first request never reached upstream")
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	secondDone := make(chan struct{})
+	go func() {
+		req := httptest.NewRequest(http.MethodPost, "/api/query",
+			strings.NewReader(`{"sql":"SELECT 1"}`)).WithContext(ctx)
+		rr := httptest.NewRecorder()
+		router.ServeHTTP(rr, req)
+		close(secondDone)
+	}()
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+
+	select {
+	case <-secondDone:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("disconnected second request did not return")
+	}
+
+	release <- struct{}{}
+	<-firstDone
+}
+
+func TestQueryEndpointConcurrencyCancelUpstream(t *testing.T) {
+	arrived := make(chan struct{}, 2)
+	release := make(chan struct{}, 2)
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		arrived <- struct{}{}
+		<-release
+		_, _ = fmt.Fprint(w, `{"output":[]}`)
+	}))
+	defer fake.Close()
+
+	port := 0
+	_, _ = fmt.Sscanf(strings.TrimPrefix(fake.URL, "http://127.0.0.1:"), "%d", &port)
+
+	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
+	srv := New(port, "14318", http.Dir("."), logger, nil, NewHookBroadcaster(),
+		LLMConfig{}, ServerConfig{QueryConcurrency: 1})
+	router := srv.Router()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		req := httptest.NewRequest(http.MethodPost, "/api/query",
+			strings.NewReader(`{"sql":"SELECT 1"}`)).WithContext(ctx)
+		rr := httptest.NewRecorder()
+		router.ServeHTTP(rr, req)
+		close(done)
+	}()
+
+	select {
+	case <-arrived:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("request never reached upstream")
+	}
+	cancel()
+
+	select {
+	case <-done:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("handler did not return after client disconnect")
+	}
+
+	// A new request must reach upstream while the first fake handler is
+	// still blocked on release — proving the cancelled request freed its
+	// slot rather than holding it until upstream timeout.
+	secondDone := make(chan struct{})
+	go func() {
+		req := httptest.NewRequest(http.MethodPost, "/api/query",
+			strings.NewReader(`{"sql":"SELECT 1"}`))
+		rr := httptest.NewRecorder()
+		router.ServeHTTP(rr, req)
+		close(secondDone)
+	}()
+	select {
+	case <-arrived:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("slot was not released after client disconnect")
+	}
+
+	release <- struct{}{}
+	release <- struct{}{}
+	select {
+	case <-secondDone:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("second request did not complete")
+	}
+}
