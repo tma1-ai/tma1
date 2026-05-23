@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/tma1-ai/tma1/server/internal/sqlutil"
 )
 
 // Migration is one schema-evolution step. Applied in strict Version order
@@ -239,10 +241,9 @@ func currentSchemaVersion(sqlURL string) (int, error) {
 
 // recordMigration writes the success row for `m`.
 func recordMigration(sqlURL string, m Migration) error {
-	desc := strings.ReplaceAll(m.Description, "'", "''")
 	stmt := fmt.Sprintf(
 		`INSERT INTO tma1_schema_version (ts, "version", description) VALUES (%d, %d, '%s')`,
-		time.Now().UnixMilli(), m.Version, desc,
+		time.Now().UnixMilli(), m.Version, sqlutil.Escape(m.Description),
 	)
 	return execSQL(sqlURL, stmt)
 }
