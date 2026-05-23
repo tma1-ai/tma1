@@ -151,6 +151,11 @@ async function cdx_loadCards() {
       query(ttftSQL),
       // Gating: count ANY codex log (broader than requests only)
       query("SELECT COUNT(*) AS v " + base),
+      // Reasoning tokens — OpenAI o-series reports this as a separate
+      // bucket from output_token_count. Codex-specific so it lives
+      // in this view only; CC / OpenClaw don't surface it.
+      query("SELECT SUM(COALESCE(json_get_int(log_attributes, 'reasoning_token_count'), 0)) AS v " +
+        base + " AND " + reqPred),
     ]);
     var reqCount = Number(rows(results[2])?.[0]?.[0]) || 0;
     var anyCount = Number(rows(results[5])?.[0]?.[0]) || 0;
@@ -159,6 +164,7 @@ async function cdx_loadCards() {
     document.getElementById('cdx-val-requests').textContent = fmtNum(reqCount);
     document.getElementById('cdx-val-latency').textContent = fmtDurMsPrecise(rows(results[3])?.[0]?.[0]);
     document.getElementById('cdx-val-ttft').textContent = fmtDurMsPrecise(rows(results[4])?.[0]?.[0]);
+    document.getElementById('cdx-val-reasoning').textContent = fmtNum(rows(results[6])?.[0]?.[0]);
     return anyCount > 0;
   } catch (err) {
     // Fallback: check if any codex metric tables have data

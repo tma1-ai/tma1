@@ -13,6 +13,7 @@ var I18N = {
     // Cards — CC view
     'card.total_cost': 'Total Cost',
     'card.total_tokens': 'Total Tokens (incl. cache)',
+    'card.reasoning_tokens': 'Reasoning Tokens',
     'card.api_requests': 'API Requests',
     'card.avg_latency': 'Avg Latency',
     // Cards — CC burn rate
@@ -625,6 +626,7 @@ var I18N = {
     'card.latency': '\u5e73\u5747\u5ef6\u8fdf',
     'card.total_cost': '\u603b\u8d39\u7528',
     'card.total_tokens': '\u603b Token\uff08\u542b\u7f13\u5b58\uff09',
+    'card.reasoning_tokens': '\u63a8\u7406 Token',
     'card.api_requests': 'API \u8bf7\u6c42',
     'card.avg_latency': '\u5e73\u5747\u5ef6\u8fdf',
     'card.burn_rate': '\u71c3\u70e7\u7387',
@@ -1198,6 +1200,7 @@ var I18N = {
     'card.latency': 'Latencia Prom',
     'card.total_cost': 'Costo Total',
     'card.total_tokens': 'Tokens Totales (incl. cach\u00e9)',
+    'card.reasoning_tokens': 'Tokens de Razonamiento',
     'card.api_requests': 'Solicitudes API',
     'card.avg_latency': 'Latencia Prom.',
     'card.burn_rate': 'Tasa de Consumo',
