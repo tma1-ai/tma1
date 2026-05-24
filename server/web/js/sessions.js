@@ -108,7 +108,7 @@ async function sess_loadList() {
 
   var tbody = document.getElementById('sess-table-body');
   if (!idRows.length) {
-    tbody.innerHTML = '<tr><td colspan="8" class="loading">' + t('empty.no_data') + '</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="9" class="loading">' + t('empty.no_data') + '</td></tr>';
     sessHasNext = false;
     renderSessPagination();
     return;
@@ -124,7 +124,7 @@ async function sess_loadList() {
     "MAX(cwd) AS cwd " +
     "FROM tma1_hook_events WHERE session_id IN (" + idList + ") " +
     "GROUP BY session_id, agent_source " +
-    "ORDER BY MIN(ts) DESC " +
+    "ORDER BY MAX(ts) DESC " +
     "LIMIT " + (sessPageSize + 1) + " OFFSET " + (sessPage * sessPageSize);
 
   var res = await query(sql);
@@ -156,7 +156,7 @@ async function sess_loadList() {
   }
 
   if (!data.length) {
-    tbody.innerHTML = '<tr><td colspan="8" class="loading">' + t('empty.no_data') + '</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="9" class="loading">' + t('empty.no_data') + '</td></tr>';
     renderSessPagination();
     return;
   }
@@ -182,6 +182,7 @@ async function sess_loadList() {
     html += '<tr class="sess-row clickable" onclick="sess_openDetail(\x27' + escapeJSString(sid) + '\x27,\x27' + escapeJSString(agentSrc) + '\x27)">';
     html += '<td><code title="' + escapeHTML(sid) + '" style="font-size:11px;color:var(--text-dim)">' + escapeHTML(shortSid) + '</code></td>';
     html += '<td>' + (startMs ? new Date(startMs).toLocaleString() : '\u2014') + '</td>';
+    html += '<td>' + (endMs ? new Date(endMs).toLocaleString() : '\u2014') + '</td>';
     html += '<td>' + sourceBadge + '</td>';
     html += '<td>' + fmtDurSec(durSec) + '</td>';
     html += '<td>' + fmtNum(Number(d.tool_calls) || 0) + '</td>';
