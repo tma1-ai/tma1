@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -235,5 +236,40 @@ func TestStartArgsIncludeConfigFile(t *testing.T) {
 		if args[i] != want[i] {
 			t.Fatalf("args[%d] = %q, want %q", i, args[i], want[i])
 		}
+	}
+}
+
+func TestExcludeFromSpotlight(t *testing.T) {
+	t.Parallel()
+
+	dataPath := t.TempDir()
+	marker := filepath.Join(dataPath, ".metadata_never_index")
+
+	excludeFromSpotlight(dataPath, testLogger)
+
+	if runtime.GOOS != "darwin" {
+		// No-op off macOS: Spotlight only exists there.
+		if _, err := os.Stat(marker); !os.IsNotExist(err) {
+			t.Fatalf("expected no marker off macOS, stat err = %v", err)
+		}
+		return
+	}
+
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatalf("expected Spotlight marker created, stat err = %v", err)
+	}
+
+	// Idempotent: an existing marker must not be rewritten. Seed sentinel
+	// content and assert it survives a second call.
+	if err := os.WriteFile(marker, []byte("sentinel"), 0o644); err != nil {
+		t.Fatalf("seed marker: %v", err)
+	}
+	excludeFromSpotlight(dataPath, testLogger)
+	got, err := os.ReadFile(marker)
+	if err != nil {
+		t.Fatalf("read marker: %v", err)
+	}
+	if string(got) != "sentinel" {
+		t.Fatalf("marker was rewritten; content = %q, want %q", got, "sentinel")
 	}
 }

@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"time"
 )
 
@@ -37,6 +38,7 @@ func Start(cfg Config) (*Process, error) {
 	if err := os.MkdirAll(dataPath, 0755); err != nil {
 		return nil, fmt.Errorf("greptimedb: create data dir: %w", err)
 	}
+	excludeFromSpotlight(dataPath, cfg.Logger)
 
 	configPath, err := ensureDefaultConfigFile(cfg.DataDir, cfg.Logger)
 	if err != nil {
@@ -69,6 +71,28 @@ func Start(cfg Config) (*Process, error) {
 
 	cfg.Logger.Info("greptimedb healthy", "http_port", cfg.HTTPPort)
 	return p, nil
+}
+
+// excludeFromSpotlight drops a `.metadata_never_index` marker in the data dir
+// on macOS so Spotlight (mds/mdworker) skips it. GreptimeDB constantly rewrites
+// SST/WAL files here; without the marker Spotlight re-indexes them on every
+// change, and on a busy or freshly-OS-upgraded machine that mdworker churn can
+// pull system load high enough to starve the DB and slow every query.
+//
+// No-op off macOS and when the marker already exists. Best-effort: a failure
+// only forfeits the optimization, it never blocks startup.
+func excludeFromSpotlight(dataPath string, logger *slog.Logger) {
+	if runtime.GOOS != "darwin" {
+		return
+	}
+	marker := filepath.Join(dataPath, ".metadata_never_index")
+	if _, err := os.Stat(marker); err == nil {
+		return
+	}
+	if err := os.WriteFile(marker, nil, 0o644); err != nil && logger != nil {
+		logger.Warn("greptimedb: could not write Spotlight exclusion marker",
+			"path", marker, "err", err)
+	}
 }
 
 // Stop sends an interrupt signal to the GreptimeDB process and waits for it to exit.
