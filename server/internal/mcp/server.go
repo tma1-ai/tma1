@@ -16,14 +16,26 @@ import (
 	"runtime/debug"
 	"strings"
 	"sync"
+	"time"
 )
 
 const (
 	protocolVersion = "2024-11-05"
 	serverName      = "tma1"
 
-	scannerInitBuf = 256 * 1024  // 256 KB initial
+	scannerInitBuf = 256 * 1024      // 256 KB initial
 	scannerMaxBuf  = 4 * 1024 * 1024 // 4 MB max — perception bundles can be larger than devtap's
+
+	// toolCallTimeout bounds every tools/call. All tools are read-only
+	// context queries against the local GreptimeDB; the perception HTTP
+	// client caps each query at 3s, but a tool that fans out (e.g.
+	// get_context_bundle: session state + anomalies + project state, or
+	// get_peer_sessions: cwd lookup + list + per-session enrichment) had no
+	// overall ceiling, so a slow GreptimeDB could stack those past 10s and
+	// make the agent appear hung. Applied once at the dispatch boundary so
+	// every tool — current and future — is bounded; the deadline propagates
+	// through context to every in-flight query, cancelling them together.
+	toolCallTimeout = 10 * time.Second
 )
 
 // ServerVersion can be overridden by callers (e.g. main package sets it from build ldflags).
@@ -182,7 +194,9 @@ func (s *Server) handle(ctx context.Context, req Request) {
 			})
 			return
 		}
-		result, err := t.Call(ctx, params.Arguments)
+		callCtx, cancel := context.WithTimeout(ctx, toolCallTimeout)
+		defer cancel()
+		result, err := t.Call(callCtx, params.Arguments)
 		if err != nil {
 			s.sendResult(req.ID, CallToolResult{
 				Content: []ContentBlock{{Type: "text", Text: fmt.Sprintf("Tool error: %v", err)}},

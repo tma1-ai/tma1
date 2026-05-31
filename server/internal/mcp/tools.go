@@ -139,12 +139,6 @@ func (t SessionStateTool) Call(ctx context.Context, args map[string]any) (CallTo
 	return CallToolResult{Content: []ContentBlock{{Type: "text", Text: string(out)}}}, nil
 }
 
-// peerQueryTimeout bounds the entire get_peer_sessions fan-out (cwd lookup +
-// session list + per-session enrichment, across peers). Generous enough for a
-// cold GreptimeDB serving a 5-session fetch, short enough that the agent never
-// perceives a hang.
-const peerQueryTimeout = 10 * time.Second
-
 // PeerSessionsTool returns recent session content from peer coding
 // agents that worked on the same project as the caller. "Peer" is
 // relative to whichever agent invoked the MCP tool: CC sees Codex /
@@ -201,14 +195,9 @@ func (t PeerSessionsTool) Call(ctx context.Context, args map[string]any) (CallTo
 		return errorResult("bundler not configured"), nil
 	}
 
-	// Bound the whole fan-out. The per-request HTTP client timeout (3s) caps
-	// each query individually, but the serial+parallel query tree (cwd lookup
-	// → session list → per-session enrichment, across peers) had no overall
-	// ceiling, so a slow GreptimeDB could drag the call past 20s and make the
-	// agent appear hung. This deadline propagates through context to every
-	// in-flight query so they cancel together rather than each burning 3s.
-	ctx, cancel := context.WithTimeout(ctx, peerQueryTimeout)
-	defer cancel()
+	// The overall fan-out deadline (cwd lookup → session list → per-session
+	// enrichment, across peers) is applied once at the MCP dispatch boundary
+	// (toolCallTimeout in server.go), so every tool is bounded uniformly.
 
 	agent, _ := args["agent_source"].(string)
 	limit := intArg(args, "limit", 1)
