@@ -505,10 +505,22 @@ func main() {
 	if rtErr != nil {
 		logger.Warn("relay token unavailable; handoff signal disabled", "err", rtErr)
 	}
+	// Waker reliability order: tmux (pane-precise) → iterm (visible wake for
+	// iTerm users not in tmux) → worker (universal headless fallback).
 	relayCoord := relay.NewCoordinator(logger, relay.NewRegistry(
 		relay.NewTmuxWaker(logger),
+		relay.NewItermWaker(logger),
 		relay.NewWorkerWaker(logger),
 	), perception.ResolveProjectRoot)
+	// Optional transition-table override (~/.tma1/relay.json); fall back to
+	// the built-in table when absent or malformed.
+	if t, err := relay.LoadTransitions(filepath.Join(cfg.DataDir, "relay.json")); err == nil {
+		relayCoord.SetTransitions(t)
+	} else if !os.IsNotExist(err) {
+		logger.Warn("relay.json invalid; using built-in transitions", "err", err)
+	}
+	relayCoord.SetWakeTimeout(relayWakeTimeout())
+	defer relayCoord.Stop()
 	srv := handler.New(cfg.GreptimeDBHTTPPort, cfg.Port, webFileSystem(), logger, tw, bc, llmCfg, handler.ServerConfig{
 		DataDir:          cfg.DataDir,
 		DataTTL:          cfg.DataTTL,
@@ -1042,6 +1054,20 @@ func readVersionFile(path string) string {
 
 func parsePort(s string) (int, error) {
 	return strconv.Atoi(s)
+}
+
+// relayWakeTimeout reads TMA1_RELAY_WAKE_TIMEOUT (a Go duration, e.g.
+// "10m"). Unset → 10m default; "0" disables the timeout nudge.
+func relayWakeTimeout() time.Duration {
+	v := os.Getenv("TMA1_RELAY_WAKE_TIMEOUT")
+	if v == "" {
+		return 10 * time.Minute
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil {
+		return 10 * time.Minute
+	}
+	return d
 }
 
 func onUpgrade(httpPort int, logger *slog.Logger) error {

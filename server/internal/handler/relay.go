@@ -50,9 +50,9 @@ func (s *Server) handleRelaySignal(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "malformed json"})
 		return
 	}
-	if _, ok := relay.Lookup(req.Stage); !ok {
+	if !s.relayCoordinator.KnownStage(req.Stage) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{
-			"error": "unknown stage", "valid_stages": relay.ValidStages(),
+			"error": "unknown stage", "valid_stages": s.relayCoordinator.ValidStages(),
 		})
 		return
 	}

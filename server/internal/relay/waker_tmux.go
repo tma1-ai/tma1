@@ -2,9 +2,11 @@ package relay
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/exec"
+	"sync/atomic"
 )
 
 // execRunner runs a command to completion; injectable so tests assert
@@ -40,14 +42,28 @@ func (w *TmuxWaker) CanWake(t Target) bool {
 	return w.bin != "" && t.Terminals["tmux"] != ""
 }
 
-// Wake sends the prompt as a literal (-l) so tmux doesn't interpret a
-// ';' or an embedded key-name (e.g. "Enter", "C-c") inside the text,
-// then sends Enter as a separate key to submit it. The prompt is a
-// single exec argument (not a shell string), so there's no shell
-// injection surface.
+// tmuxBufferSeq makes each Wake use a distinct paste-buffer name. A shared
+// fixed name would let two concurrent handoffs clobber each other's buffer
+// between set-buffer and paste-buffer (paste the wrong prompt into the
+// wrong pane). os.Getpid()+atomic counter is unique without a clock.
+var tmuxBufferSeq atomic.Uint64
+
+// Wake loads the prompt into a per-call buffer and pastes it with
+// bracketed paste (-p) keeping LF separators (-r), then submits with a
+// separate Enter. Unlike `send-keys -l`, paste-buffer -p makes tmux wrap
+// the text in bracketed-paste markers ONLY when the foreground app
+// requested that mode — so a multi-line prompt arrives as one block
+// instead of line-by-line, and a non-paste-aware program still gets clean
+// text. -r keeps embedded newlines as LF (default would rewrite them to CR
+// = submit). The prompt is sanitised so an embedded paste-end marker can't
+// close the bracket early. Each argument is a single exec arg (no shell).
 func (w *TmuxWaker) Wake(ctx context.Context, t Target, prompt string) error {
 	pane := t.Terminals["tmux"]
-	if err := w.run(ctx, w.bin, "send-keys", "-t", pane, "-l", "--", prompt); err != nil {
+	buf := fmt.Sprintf("tma1-relay-%d-%d", os.Getpid(), tmuxBufferSeq.Add(1))
+	if err := w.run(ctx, w.bin, "set-buffer", "-b", buf, "--", sanitizeForPaste(prompt)); err != nil {
+		return err
+	}
+	if err := w.run(ctx, w.bin, "paste-buffer", "-t", pane, "-b", buf, "-p", "-r", "-d"); err != nil {
 		return err
 	}
 	return w.run(ctx, w.bin, "send-keys", "-t", pane, "Enter")

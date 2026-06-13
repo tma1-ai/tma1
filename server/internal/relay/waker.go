@@ -17,6 +17,14 @@ type Waker interface {
 var (
 	errNoWaker     = errors.New("no waker can reach the target")
 	errNoWorkerBin = errors.New("no agent binary resolved for worker fallback")
+	// errTargetBusy means the target terminal is reachable but actively
+	// processing. WakeWith stops on it (does NOT fall through to a less
+	// precise waker) so we never spawn a duplicate worker for a terminal
+	// that's simply busy.
+	errTargetBusy = errors.New("target terminal is busy")
+	// errSessionNotFound means the recorded terminal id no longer maps to
+	// a live session (closed / reused / forged). WakeWith falls through.
+	errSessionNotFound = errors.New("terminal session not found")
 )
 
 // Registry holds wakers in reliability order (most reliable first, the
@@ -53,6 +61,11 @@ func (r *Registry) WakeWith(ctx context.Context, t Target, prompt string) (strin
 		}
 		applied = true
 		if err := w.Wake(ctx, t, prompt); err != nil {
+			// A busy terminal is reachable — don't fall through to a worker
+			// and duplicate the agent. Surface it as-is.
+			if errors.Is(err, errTargetBusy) {
+				return "", err
+			}
 			lastErr = err
 			continue
 		}

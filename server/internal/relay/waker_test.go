@@ -3,6 +3,7 @@ package relay
 import (
 	"context"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -91,16 +92,61 @@ func TestTmuxWakerArgs(t *testing.T) {
 	if err := w.Wake(context.Background(), pane, "hello world"); err != nil {
 		t.Fatal(err)
 	}
-	if len(calls) != 2 {
-		t.Fatalf("want 2 send-keys calls, got %d", len(calls))
+	if len(calls) != 3 {
+		t.Fatalf("want 3 tmux calls, got %d", len(calls))
 	}
-	want0 := []string{"tmux", "send-keys", "-t", "%5", "-l", "--", "hello world"}
+	// set-buffer uses a per-call buffer name; capture it and assert the
+	// paste-buffer reuses the SAME name (else concurrent handoffs clobber).
+	if calls[0][0] != "tmux" || calls[0][1] != "set-buffer" || calls[0][2] != "-b" {
+		t.Fatalf("call[0] not set-buffer: %v", calls[0])
+	}
+	buf := calls[0][3]
+	if !strings.HasPrefix(buf, "tma1-relay-") {
+		t.Fatalf("buffer name = %q, want tma1-relay- prefix", buf)
+	}
+	want0 := []string{"tmux", "set-buffer", "-b", buf, "--", "hello world"}
 	if !reflect.DeepEqual(calls[0], want0) {
 		t.Fatalf("call[0]=%v want %v", calls[0], want0)
 	}
-	want1 := []string{"tmux", "send-keys", "-t", "%5", "Enter"}
+	want1 := []string{"tmux", "paste-buffer", "-t", "%5", "-b", buf, "-p", "-r", "-d"}
 	if !reflect.DeepEqual(calls[1], want1) {
 		t.Fatalf("call[1]=%v want %v", calls[1], want1)
+	}
+	want2 := []string{"tmux", "send-keys", "-t", "%5", "Enter"}
+	if !reflect.DeepEqual(calls[2], want2) {
+		t.Fatalf("call[2]=%v want %v", calls[2], want2)
+	}
+}
+
+func TestTmuxWakerUniqueBuffers(t *testing.T) {
+	var bufs []string
+	w := &TmuxWaker{bin: "tmux", run: func(_ context.Context, _ string, args ...string) error {
+		if len(args) >= 3 && args[0] == "set-buffer" {
+			bufs = append(bufs, args[2])
+		}
+		return nil
+	}}
+	pane := Target{Terminals: map[string]string{"tmux": "%5"}}
+	_ = w.Wake(context.Background(), pane, "a")
+	_ = w.Wake(context.Background(), pane, "b")
+	if len(bufs) != 2 || bufs[0] == bufs[1] {
+		t.Fatalf("buffers must be unique per Wake, got %v", bufs)
+	}
+}
+
+func TestTmuxWakerSanitizesPasteEnd(t *testing.T) {
+	var calls [][]string
+	w := &TmuxWaker{bin: "tmux", run: func(_ context.Context, name string, args ...string) error {
+		calls = append(calls, append([]string{name}, args...))
+		return nil
+	}}
+	pane := Target{Terminals: map[string]string{"tmux": "%5"}}
+	// An embedded paste-end marker must be stripped before set-buffer.
+	if err := w.Wake(context.Background(), pane, "a"+bracketEnd+"b"); err != nil {
+		t.Fatal(err)
+	}
+	if got := calls[0][len(calls[0])-1]; got != "ab" {
+		t.Fatalf("set-buffer payload not sanitised: %q", got)
 	}
 }
 
