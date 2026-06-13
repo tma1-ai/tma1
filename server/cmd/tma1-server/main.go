@@ -22,6 +22,7 @@ import (
 	"github.com/tma1-ai/tma1/server/internal/install"
 	"github.com/tma1-ai/tma1/server/internal/mcp"
 	"github.com/tma1-ai/tma1/server/internal/perception"
+	"github.com/tma1-ai/tma1/server/internal/relay"
 	"github.com/tma1-ai/tma1/server/internal/sensor/build"
 	"github.com/tma1-ai/tma1/server/internal/transcript"
 )
@@ -496,11 +497,25 @@ func main() {
 		Provider: cfg.LLMProvider,
 		Model:    cfg.LLMModel,
 	}
+	// Relay coordinator: per-project driver/reviewer handoff. The token is
+	// shared with MCP children via installer-written env so only local
+	// agents holding it can POST /api/relay/signal (which injects terminal
+	// text / spawns workers — not something an Origin check can guard).
+	relayToken, rtErr := relay.LoadOrCreateToken(cfg.DataDir)
+	if rtErr != nil {
+		logger.Warn("relay token unavailable; handoff signal disabled", "err", rtErr)
+	}
+	relayCoord := relay.NewCoordinator(logger, relay.NewRegistry(
+		relay.NewTmuxWaker(logger),
+		relay.NewWorkerWaker(logger),
+	), perception.ResolveProjectRoot)
 	srv := handler.New(cfg.GreptimeDBHTTPPort, cfg.Port, webFileSystem(), logger, tw, bc, llmCfg, handler.ServerConfig{
 		DataDir:          cfg.DataDir,
 		DataTTL:          cfg.DataTTL,
 		QueryConcurrency: cfg.QueryConcurrency,
 		LogLevelVar:      &logLevel,
+		RelayCoordinator: relayCoord,
+		RelayToken:       relayToken,
 	})
 	bgCtx, bgCancel := context.WithCancel(context.Background())
 	defer bgCancel()
@@ -1003,6 +1018,12 @@ func runMCPServe() error {
 		mcp.ExternalChangesTool{Bundler: bundler},
 		mcp.ProjectStateTool{Bundler: bundler},
 		mcp.PeerSessionsTool{Bundler: bundler},
+		mcp.RelayHandoffTool{
+			Port:   cfg.Port,
+			Caller: os.Getenv("TMA1_MCP_CALLER"),
+			Role:   os.Getenv("TMA1_RELAY_ROLE"),
+			Token:  os.Getenv("TMA1_RELAY_TOKEN"),
+		},
 	)
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
