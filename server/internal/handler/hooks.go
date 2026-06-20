@@ -225,7 +225,11 @@ func (s *Server) handleHooks(w http.ResponseWriter, r *http.Request) {
 
 	// Start transcript watcher on first event for this session.
 	if s.transcriptWatcher != nil && payload.TranscriptPath != "" {
-		s.transcriptWatcher.Watch(payload.SessionID, payload.TranscriptPath)
+		if agentSource == "codex" {
+			s.transcriptWatcher.WatchCodex(payload.SessionID, payload.TranscriptPath)
+		} else {
+			s.transcriptWatcher.Watch(payload.SessionID, payload.TranscriptPath)
+		}
 	}
 
 	// Stop transcript watcher on session end.
@@ -234,7 +238,11 @@ func (s *Server) handleHooks(w http.ResponseWriter, r *http.Request) {
 		// Delay slightly to let final JSONL lines flush.
 		go func() {
 			time.Sleep(2 * time.Second)
-			s.transcriptWatcher.Stop(payload.SessionID)
+			if agentSource == "codex" && payload.TranscriptPath != "" {
+				s.transcriptWatcher.StopCodex(payload.TranscriptPath)
+			} else {
+				s.transcriptWatcher.Stop(payload.SessionID)
+			}
 		}()
 	}
 

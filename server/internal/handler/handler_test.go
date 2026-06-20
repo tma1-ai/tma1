@@ -6,14 +6,19 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/tma1-ai/tma1/server/internal/perception"
+	"github.com/tma1-ai/tma1/server/internal/transcript"
 )
 
 // newTestServer returns a Server wired with greptimeHTTPPort=0 — the
@@ -488,6 +493,55 @@ func TestHooksEndpointValid(t *testing.T) {
 	}
 }
 
+func TestHooksCodexTranscriptPathUsesCodexParser(t *testing.T) {
+	dir := t.TempDir()
+	const conversationUUID = "019ee354-e4c9-7950-930c-8852ad802967"
+	transcriptPath := filepath.Join(dir, "rollout-2026-06-20T12-40-52-"+conversationUUID+".jsonl")
+	lines := []string{
+		`{"timestamp":"2026-06-20T12:40:52Z","type":"session_meta","payload":{"id":"` + conversationUUID + `","source":{"cli":"codex"},"cwd":"/tmp/project"}}`,
+		`{"timestamp":"2026-06-20T12:40:53Z","type":"event_msg","payload":{"type":"user_message","message":"hello from codex via transcript_path"}}`,
+	}
+	if err := os.WriteFile(transcriptPath, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	sqlCh := make(chan string, 8)
+	fakeGreptime := httptest.NewServer(captureSQLHandler(sqlCh))
+	defer fakeGreptime.Close()
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	tw := transcript.NewWatcher(testHTTPServerPort(t, fakeGreptime.URL), logger, nil)
+	defer tw.StopAll()
+	srv := New(0, "14318", http.Dir("."), logger, tw, NewHookBroadcaster(), LLMConfig{}, ServerConfig{})
+	r := srv.Router()
+
+	payload, err := json.Marshal(map[string]string{
+		"session_id":      conversationUUID,
+		"hook_event_name": "SessionStart",
+		"cwd":             "/tmp/project",
+		"transcript_path": transcriptPath,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/hooks?source=codex", strings.NewReader(string(payload)))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	sql := waitForCapturedSQLContaining(t, sqlCh,
+		"INSERT INTO tma1_messages",
+		conversationUUID,
+		"hello from codex via transcript_path",
+	)
+	if strings.Contains(sql, "rollout-2026-06-20T12-40-52") {
+		t.Fatalf("Codex hook transcript should use conversation UUID, got filename session id in SQL: %s", sql)
+	}
+}
+
 func TestHooksUserPromptSubmitGeneratesEmptyWhenNoData(t *testing.T) {
 	// Bundler runs against a non-existent GreptimeDB → BuildBundle returns an
 	// empty bundle → RenderSummary returns "". The endpoint must still 200.
@@ -859,6 +913,60 @@ func TestHooksEndpointMissingFields(t *testing.T) {
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+}
+
+func captureSQLHandler(sqlCh chan<- string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		sqlCh <- r.Form.Get("sql")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"output":[]}`))
+	}
+}
+
+func testHTTPServerPort(t *testing.T, rawURL string) int {
+	t.Helper()
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		t.Fatalf("parse test server URL: %v", err)
+	}
+	_, portText, err := net.SplitHostPort(u.Host)
+	if err != nil {
+		t.Fatalf("split test server host: %v", err)
+	}
+	port, err := strconv.Atoi(portText)
+	if err != nil {
+		t.Fatalf("parse test server port: %v", err)
+	}
+	return port
+}
+
+func waitForCapturedSQLContaining(t *testing.T, sqlCh <-chan string, wants ...string) string {
+	t.Helper()
+	timer := time.NewTimer(2 * time.Second)
+	defer timer.Stop()
+	var seen []string
+	for {
+		select {
+		case sql := <-sqlCh:
+			seen = append(seen, sql)
+			matches := true
+			for _, want := range wants {
+				if !strings.Contains(sql, want) {
+					matches = false
+					break
+				}
+			}
+			if matches {
+				return sql
+			}
+		case <-timer.C:
+			t.Fatalf("timed out waiting for SQL containing %q; seen %q", wants, seen)
+		}
 	}
 }
 

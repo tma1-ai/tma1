@@ -33,8 +33,8 @@ const (
 )
 
 // StartCodexScanner periodically scans ~/.codex/sessions/ for active JSONL files
-// and starts watching any new ones. Codex doesn't send hooks, so we discover
-// session files by polling the filesystem.
+// and starts watching any new ones. This remains a fallback/backfill path for
+// Codex sessions that are not surfaced through hooks.
 func (w *Watcher) StartCodexScanner(ctx context.Context) {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
@@ -140,6 +140,42 @@ func (w *Watcher) scanCodexSessions(baseDir string) {
 			w.watchCodex(p.watcherKey, p.sessionID, p.filePath)
 		}
 	}
+}
+
+// WatchCodex starts tailing a specific Codex JSONL transcript path reported by
+// a Codex hook. Unlike Watch, this routes lines through the Codex rollout parser
+// instead of the Claude Code transcript parser.
+func (w *Watcher) WatchCodex(sessionID, transcriptPath string) {
+	watcherKey, parserSessionID := codexWatcherIdentity(transcriptPath)
+	if watcherKey == "" {
+		return
+	}
+	if parserSessionID == "" {
+		parserSessionID = sessionID
+	}
+	if uuid, isMain := peekCodexMainUUID(transcriptPath); isMain && uuid != "" {
+		w.recordCodexParentSession(parserSessionID, uuid)
+	}
+	w.watchCodex(watcherKey, parserSessionID, transcriptPath)
+}
+
+// StopCodex stops a Codex transcript watcher previously started for a concrete
+// transcript path. Codex watchers are keyed by rollout filename so they dedupe
+// with the ~/.codex scanner, not by hook session_id.
+func (w *Watcher) StopCodex(transcriptPath string) {
+	watcherKey, _ := codexWatcherIdentity(transcriptPath)
+	if watcherKey == "" {
+		return
+	}
+	w.Stop(watcherKey)
+}
+
+func codexWatcherIdentity(transcriptPath string) (watcherKey, parserSessionID string) {
+	baseName := strings.TrimSuffix(filepath.Base(transcriptPath), ".jsonl")
+	if baseName == "" || baseName == "." || baseName == string(filepath.Separator) {
+		return "", ""
+	}
+	return "codex:" + baseName, codexSessionGroup(baseName)
 }
 
 // peekCodexMainUUID opens a Codex rollout file, reads only the first
