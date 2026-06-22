@@ -41,8 +41,16 @@ func greptimeBinaryName() string {
 }
 
 var (
-	versionClient  = &http.Client{Timeout: 10 * time.Second}
-	downloadClient = &http.Client{Timeout: 5 * time.Minute}
+	versionClient = &http.Client{Timeout: 10 * time.Second}
+	// downloadClient has no overall timeout on purpose: the GreptimeDB binary
+	// is large (>150 MB) and on a slow link a legitimate, still-progressing
+	// transfer can run for many minutes — a wall-clock Client.Timeout would
+	// guillotine io.Copy mid-stream and loop forever. ResponseHeaderTimeout
+	// bounds the connect/header phase so a dead endpoint still fails fast, and
+	// downloadFileResumable covers any interrupted body read by resuming.
+	downloadClient = &http.Client{
+		Transport: &http.Transport{ResponseHeaderTimeout: 60 * time.Second},
+	}
 )
 
 // EnsureGreptimeDB checks whether the GreptimeDB binary exists in dataDir/bin/.
@@ -89,14 +97,14 @@ func EnsureGreptimeDB(dataDir, version string, logger *slog.Logger) (binPath str
 		return "", err
 	}
 
-	tmpFile, err := os.CreateTemp("", "greptime-*.tar.gz")
-	if err != nil {
-		return "", fmt.Errorf("install: create temp file: %w", err)
-	}
-	defer os.Remove(tmpFile.Name())
-	defer tmpFile.Close()
+	// Download to a stable partial file keyed by version, kept in binDir so an
+	// interrupted transfer (slow link, process restart) resumes instead of
+	// restarting at zero. Keying by version stops a resume from appending onto
+	// a stale partial left by a different version.
+	partialPath := filepath.Join(binDir, "greptime-"+resolvedVersion+".tar.gz.partial")
 
-	if err := downloadFile(tmpFile, downloadURL); err != nil {
+	if err := downloadFileResumable(partialPath, downloadURL, logger); err != nil {
+		// Keep the partial on the disk: the next attempt resumes from it.
 		if binExists {
 			logger.Warn("cannot download greptimedb, using existing binary",
 				"path", binPath, "error", err)
@@ -105,7 +113,16 @@ func EnsureGreptimeDB(dataDir, version string, logger *slog.Logger) (binPath str
 		return "", fmt.Errorf("install: download %s: %w", downloadURL, err)
 	}
 
+	tmpFile, err := os.Open(partialPath)
+	if err != nil {
+		return "", fmt.Errorf("install: reopen download: %w", err)
+	}
+	defer tmpFile.Close()
+
 	if err := verifyChecksum(tmpFile, resolvedVersion, logger); err != nil {
+		// A complete-looking but corrupt file must not be resumed onto; drop it
+		// so the next attempt re-downloads cleanly rather than looping forever.
+		_ = os.Remove(partialPath)
 		return "", fmt.Errorf("install: %w", err)
 	}
 
@@ -117,6 +134,7 @@ func EnsureGreptimeDB(dataDir, version string, logger *slog.Logger) (binPath str
 		return "", fmt.Errorf("install: extract binary: %w", err)
 	}
 
+	_ = os.Remove(partialPath) // extracted — reclaim the ~150 MB
 	_ = os.WriteFile(versionFile, []byte(resolvedVersion+"\n"), 0644)
 	logger.Info("greptimedb installed", "path", binPath, "version", resolvedVersion)
 	return binPath, nil
@@ -344,19 +362,58 @@ func buildDownloadURL(version, goos, goarch string) (string, error) {
 	return fmt.Sprintf("%s/download/%s/%s", githubReleaseBase, version, filename), nil
 }
 
-func downloadFile(dst io.Writer, url string) error {
-	resp, err := downloadClient.Get(url) //nolint:gosec // URL is constructed internally
+// downloadFileResumable downloads url to path, resuming from a partial file if
+// one already exists. It issues a Range request for the bytes it is still
+// missing; the server's response decides what happens:
+//
+//   - 206 Partial Content — the body is appended to the existing partial file.
+//   - 200 OK — the server ignored the Range header (or there was nothing to
+//     resume), so the file is truncated and rewritten from the start.
+//   - 416 Range Not Satisfiable — the partial already covers the whole asset;
+//     nothing to do. Any corruption is caught later by the checksum.
+//
+// On any read error the partial file is left in place so the next call resumes.
+func downloadFileResumable(path, url string, logger *slog.Logger) error {
+	var have int64
+	if fi, err := os.Stat(path); err == nil {
+		have = fi.Size()
+	}
+
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return err
+	}
+	if have > 0 {
+		req.Header.Set("Range", fmt.Sprintf("bytes=%d-", have))
+		logger.Info("resuming greptimedb download", "have_bytes", have)
+	}
+
+	resp, err := downloadClient.Do(req) //nolint:gosec // URL is constructed internally
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
+	var f *os.File
+	switch resp.StatusCode {
+	case http.StatusPartialContent:
+		f, err = os.OpenFile(path, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0644)
+	case http.StatusOK:
+		f, err = os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+	case http.StatusRequestedRangeNotSatisfiable:
+		return nil
+	default:
 		return fmt.Errorf("HTTP %d fetching %s", resp.StatusCode, url)
 	}
+	if err != nil {
+		return err
+	}
+	defer f.Close()
 
-	_, err = io.Copy(dst, resp.Body)
-	return err
+	if _, err := io.Copy(f, resp.Body); err != nil {
+		return err // partial preserved — the next attempt resumes from here
+	}
+	return f.Sync()
 }
 
 // verifyChecksum downloads the sha256sum file for the given version and verifies
