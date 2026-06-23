@@ -162,12 +162,27 @@ func (w *Watcher) WatchCodex(sessionID, transcriptPath string) {
 // StopCodex stops a Codex transcript watcher previously started for a concrete
 // transcript path. Codex watchers are keyed by rollout filename so they dedupe
 // with the ~/.codex scanner, not by hook session_id.
+//
+// Unlike Watch/Stop, this cancels the tail goroutine WITHOUT deleting the
+// session entry, so its `seen` map survives. The rollout file stays "active"
+// for codexActiveAge after the Stop hook, so the ~/.codex scanner re-attaches
+// via watchCodex and reuses the preserved map. Deleting the entry (as w.Stop
+// does) would force a from-scratch re-read and emit duplicate rows into the
+// append-mode tma1_messages / tma1_hook_events tables. The tail goroutine's
+// defer marks the entry stopped on exit, allowing the restart.
 func (w *Watcher) StopCodex(transcriptPath string) {
 	watcherKey, _ := codexWatcherIdentity(transcriptPath)
 	if watcherKey == "" {
 		return
 	}
-	w.Stop(watcherKey)
+	w.mu.Lock()
+	sw, ok := w.sessions[watcherKey]
+	w.mu.Unlock()
+	if !ok {
+		return
+	}
+	sw.cancel()
+	w.logger.Info("stopped watching codex session", "file", transcriptPath)
 }
 
 func codexWatcherIdentity(transcriptPath string) (watcherKey, parserSessionID string) {
