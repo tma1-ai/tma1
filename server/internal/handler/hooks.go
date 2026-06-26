@@ -14,6 +14,7 @@ import (
 
 	"github.com/tma1-ai/tma1/server/internal/derive"
 	"github.com/tma1-ai/tma1/server/internal/perception"
+	"github.com/tma1-ai/tma1/server/internal/relay"
 	"github.com/tma1-ai/tma1/server/internal/sqlutil"
 	"github.com/tma1-ai/tma1/server/internal/strutil"
 )
@@ -206,6 +207,41 @@ func (s *Server) handleHooks(w http.ResponseWriter, r *http.Request) {
 	// CC has no such backstop parser; the gate is a no-op for it.
 	if agentSource == "codex" && payload.SessionID != "" {
 		codexLiveSessions.markLive(payload.SessionID)
+	}
+
+	// Relay: keep the per-project driver/reviewer terminal registry fresh
+	// so a handoff signal can wake the counterpart. Role + terminal
+	// identifiers ride in headers the hook script sets from the agent's
+	// own terminal env (TMUX_PANE, ITERM_SESSION_ID, ...) — tma1-server's
+	// own env is unrelated, so it can't read them itself. SessionStart
+	// registers; SessionEnd unregisters; every other event — INCLUDING
+	// Stop, which CC fires at every turn end (NOT just session end) —
+	// touches, refreshing LastSeen so an active session never ages out.
+	// Treating Stop as unregister would delete the driver right after it
+	// called tma1_handoff, breaking the second hop of the handoff.
+	if s.relayCoordinator != nil {
+		if role := r.Header.Get("X-Tma1-Role"); relay.ValidRole(role) {
+			switch payload.HookEventName {
+			case "SessionStart":
+				s.relayCoordinator.Register(relay.Target{
+					Role:      role,
+					SessionID: payload.SessionID,
+					Agent:     agentSource,
+					CWD:       payload.CWD,
+					Terminals: relay.ParseTerminals(r.Header.Get("X-Tma1-Terminal")),
+				})
+			case "SessionEnd":
+				s.relayCoordinator.Unregister(payload.CWD, role, payload.SessionID)
+			default:
+				s.relayCoordinator.Touch(relay.Target{
+					Role:      role,
+					SessionID: payload.SessionID,
+					Agent:     agentSource,
+					CWD:       payload.CWD,
+					Terminals: relay.ParseTerminals(r.Header.Get("X-Tma1-Terminal")),
+				})
+			}
+		}
 	}
 
 	// Normalize tool_response to string.

@@ -115,7 +115,7 @@ func (i *ClaudeCodeInstaller) mkdirAll(path string, perm os.FileMode) error {
 // dryRun / getLogger satisfy the installSink interface so the helpers
 // in install_shared.go can route DryRun + structured logging through
 // this installer.
-func (i *ClaudeCodeInstaller) dryRun() bool          { return i.DryRun }
+func (i *ClaudeCodeInstaller) dryRun() bool            { return i.DryRun }
 func (i *ClaudeCodeInstaller) getLogger() *slog.Logger { return i.Logger }
 
 // Install performs all installation steps. Errors from any step are joined
@@ -340,6 +340,11 @@ func (i *ClaudeCodeInstaller) installMCPServer() (string, bool, error) {
 	// back to 14000 and return empty results.
 	if i.GreptimeDBHTTPPort != 0 && i.GreptimeDBHTTPPort != defaultGreptimeDBHTTPPort {
 		env["TMA1_GREPTIMEDB_HTTP_PORT"] = strconv.Itoa(i.GreptimeDBHTTPPort)
+	}
+	// Relay: parent port + role + signal token so the MCP child's
+	// tma1_handoff tool can reach /api/relay/signal.
+	for k, v := range relayEnv(i.DataDir, i.Port, "driver", i.DryRun) {
+		env[k] = v
 	}
 	desired["env"] = env
 

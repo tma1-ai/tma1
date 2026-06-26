@@ -3,12 +3,19 @@
 # Reads JSON from stdin, POSTs to localhost. The response body (which may be
 # empty) is written to stdout so Claude Code can use it as injection content.
 #
+# Relay headers: the script runs in the agent's terminal, so it can read the
+# terminal identifiers tma1-server can't see from its own env. Unset env vars
+# interpolate to empty and the server drops empty terminal values.
+#
 # Fail-safe: any error → empty stdout, exit 0. Never blocks the agent.
 $ErrorActionPreference = 'SilentlyContinue'
 $body = [Console]::In.ReadToEnd()
+$role = if ($env:TMA1_RELAY_ROLE) { $env:TMA1_RELAY_ROLE } else { '{{ROLE}}' }
+$term = "tmux=$($env:TMUX_PANE);iterm=$($env:ITERM_SESSION_ID);wezterm=$($env:WEZTERM_PANE);kitty=$($env:KITTY_LISTEN_ON)"
+$headers = @{ 'X-Tma1-Role' = $role; 'X-Tma1-Terminal' = $term }
 try {
     $resp = Invoke-WebRequest -Uri 'http://127.0.0.1:{{PORT}}/api/hooks' `
-        -Method POST -ContentType 'application/json' -Body $body -TimeoutSec 1 -UseBasicParsing
+        -Method POST -ContentType 'application/json' -Headers $headers -Body $body -TimeoutSec 1 -UseBasicParsing
     if ($resp.Content) { [Console]::Out.Write($resp.Content) }
 } catch {
     exit 0

@@ -17,6 +17,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/tma1-ai/tma1/server/internal/perception"
+	"github.com/tma1-ai/tma1/server/internal/relay"
 	"github.com/tma1-ai/tma1/server/internal/sensor/git"
 	"github.com/tma1-ai/tma1/server/internal/sensor/project"
 	"github.com/tma1-ai/tma1/server/internal/transcript"
@@ -50,6 +51,9 @@ type Server struct {
 	// settings changes take effect on next restart.
 	querySem    chan struct{}
 	logLevelVar *slog.LevelVar
+
+	relayCoordinator *relay.Coordinator
+	relayToken       string
 }
 
 // ServerConfig holds additional configuration for the Server.
@@ -58,6 +62,8 @@ type ServerConfig struct {
 	DataTTL          string
 	QueryConcurrency int
 	LogLevelVar      *slog.LevelVar
+	RelayCoordinator *relay.Coordinator
+	RelayToken       string
 }
 
 // New creates a new Server.
@@ -112,6 +118,8 @@ func New(greptimeHTTPPort int, tma1Port string, webFS http.FileSystem, logger *s
 		queryConcurrency:  qc,
 		querySem:          make(chan struct{}, qc),
 		logLevelVar:       sc.LogLevelVar,
+		relayCoordinator:  sc.RelayCoordinator,
+		relayToken:        sc.RelayToken,
 	}
 	// Route Detector emit-log INSERTs through the same semaphore so
 	// hook handlers and anomaly emits share a single capacity budget
@@ -177,6 +185,11 @@ func (s *Server) Router() http.Handler {
 	// Hook events from Claude Code / Codex.
 	r.Post("/api/hooks", s.handleHooks)
 	r.Get("/api/hooks/stream", s.handleHookStream)
+
+	// Relay handoff signal — wakes the peer agent's terminal at a
+	// workflow milestone. Token-authenticated (not origin-gated: the
+	// MCP-child caller is not a browser and sends no Origin).
+	r.Post("/api/relay/signal", s.handleRelaySignal)
 
 	// Anomalies aggregation for the dashboard's Anomalies tab.
 	r.Get("/api/anomalies", s.handleAnomaliesQuery)
