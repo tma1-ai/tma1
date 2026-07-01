@@ -299,8 +299,9 @@ type resolverFunc func(ctx context.Context, sessionID string, a Anomaly, lastEmi
 
 // resolverFor returns the resolution check for a given anomaly Kind, or
 // nil when the anomaly has no programmatic "resolved" signal (e.g.
-// context_pressure is a session-wide measurement that doesn't resolve
-// until a new session starts; human_modified_during_session decays purely
+// context_pressure has no resolver — it simply stops firing once occupancy
+// recedes, e.g. after the agent compacts history, and otherwise re-emits
+// after the silence window; human_modified_during_session decays purely
 // by time).
 func (d *Detector) resolverFor(kind string) resolverFunc {
 	switch kind {
@@ -952,44 +953,65 @@ func (d *Detector) ruleHumanModifiedDuringSession(ctx context.Context, sessionID
 }
 
 // ───────────────────────────────────────────────────────────────────────
-// R-context-pressure — input_tokens accumulated over the session crosses
-// a configurable threshold (default 100k = 50% of CC Sonnet 4's 200k)
+// R-context-pressure — current context-window OCCUPANCY crosses a
+// configurable threshold (default 700k ≈ 70% of a 1M-token window).
+//
+// Occupancy is a point-in-time measurement, NOT a running total. Each
+// main-loop request resends the whole conversation, so one request's
+// (input_tokens + cache_read_tokens + cache_creation_tokens) is the size of
+// the prompt currently in the window. Two reasons the old SUM(input_tokens)
+// was wrong: (1) it accumulated across every turn, so it crossed any fixed
+// threshold on long sessions regardless of real occupancy and never receded
+// after the agent compacted history; (2) input_tokens alone undercounts the
+// live prompt badly, because prompt caching moves most of the prefix into
+// cache_read_tokens — the uncached remainder can be a few K while the window
+// is nearly full. We take the MAX over the most recent usage-bearing rows so
+// an occasional small subagent/sidechain request can't mask the main-loop
+// occupancy, while the value still recedes once history is compacted.
 // ───────────────────────────────────────────────────────────────────────
 
 func (d *Detector) ruleContextPressure(ctx context.Context, sessionID string) ([]Anomaly, error) {
 	threshold := contextPressureThreshold()
 	sql := fmt.Sprintf(
-		`SELECT COALESCE(SUM(input_tokens), 0)
-		 FROM tma1_messages WHERE session_id = '%s'`,
+		`SELECT COALESCE(MAX(occ), 0) FROM (
+		   SELECT COALESCE(input_tokens, 0) + COALESCE(cache_read_tokens, 0) + COALESCE(cache_creation_tokens, 0) AS occ
+		   FROM tma1_messages
+			 WHERE session_id = '%s'
+			   AND (input_tokens IS NOT NULL OR cache_read_tokens IS NOT NULL OR cache_creation_tokens IS NOT NULL)
+		   ORDER BY ts DESC
+		   LIMIT 20
+		 ) AS recent`,
 		escapeSQL(sessionID),
 	)
 	_, rows, err := d.client.Query(ctx, sql)
 	if err != nil || len(rows) == 0 {
 		return nil, err
 	}
-	tokens := int64At(rows[0], 0)
-	if tokens < threshold {
+	occupancy := int64At(rows[0], 0)
+	if occupancy < threshold {
 		return nil, nil
 	}
 	return []Anomaly{{
 		Kind:       "context_pressure",
 		Severity:   SeverityMedium,
 		Channel:    ChannelUserPromptSubmit,
-		Evidence:   fmt.Sprintf("Session has consumed %d input tokens (threshold %d).", tokens, threshold),
+		Evidence:   fmt.Sprintf("Context window is ~%d tokens full (threshold %d).", occupancy, threshold),
 		Suggestion: "Summarise current progress, commit partial work, and start a fresh session before context window fills.",
 	}}, nil
 }
 
-// contextPressureThreshold returns the configured token budget.
-// `TMA1_CONTEXT_PRESSURE_THRESHOLD=<int>` env var overrides the default of
-// 100,000 (≈ 50% of CC Sonnet 4's 200k context window).
+// contextPressureThreshold returns the configured occupancy threshold, in
+// tokens of the current context window. `TMA1_CONTEXT_PRESSURE_THRESHOLD=<int>`
+// overrides the default of 700,000 (≈70% of a 1M-token window — the size of
+// current frontier coding models: Claude Opus/Sonnet, Gemini, GPT-4.1-class).
+// Agents on a smaller window (e.g. a 200k model) should set the env var lower.
 func contextPressureThreshold() int64 {
 	if v := os.Getenv("TMA1_CONTEXT_PRESSURE_THRESHOLD"); v != "" {
 		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
 			return n
 		}
 	}
-	return 100_000
+	return 700_000
 }
 
 // ───────────────────────────────────────────────────────────────────────
