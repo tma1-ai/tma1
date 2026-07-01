@@ -976,7 +976,8 @@ func (d *Detector) ruleContextPressure(ctx context.Context, sessionID string) ([
 		`SELECT COALESCE(MAX(occ), 0) FROM (
 		   SELECT COALESCE(input_tokens, 0) + COALESCE(cache_read_tokens, 0) + COALESCE(cache_creation_tokens, 0) AS occ
 		   FROM tma1_messages
-		   WHERE session_id = '%s'
+			 WHERE session_id = '%s'
+			   AND (input_tokens IS NOT NULL OR cache_read_tokens IS NOT NULL OR cache_creation_tokens IS NOT NULL)
 		   ORDER BY ts DESC
 		   LIMIT 20
 		 ) AS recent`,
