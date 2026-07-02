@@ -87,6 +87,28 @@ var codexHookEvents = []string{
 	"Stop",
 }
 
+// codexMatcherlessEvents lists the Codex hook events that do not
+// support matchers. Codex itself drops the matcher for these events
+// before computing a hook's trust identity hash (codex-rs
+// hooks/src/events/common.rs, matcher_pattern_for_event:
+// `UserPromptSubmit | Stop => None`), so writing `"matcher": ""` on
+// them is not just redundant — it desyncs any tool that re-derives the
+// trust hash from the hooks.json definition verbatim. Concretely,
+// Stably Orca's managed CODEX_HOME re-hashes hook definitions
+// (including the empty matcher) and deletes runtime trust entries
+// whose hash doesn't match its expectation, trapping the user in an
+// endless "review hook / press t to trust" loop for exactly these two
+// events on every launch.
+//
+// Omitting the key entirely is safe on both axes: Codex treats an
+// absent matcher as match-all at dispatch time, and its own trust hash
+// for these events is unchanged (it already ignored the matcher), so
+// existing trusted installs are migrated without a re-trust prompt.
+var codexMatcherlessEvents = map[string]bool{
+	"UserPromptSubmit": true,
+	"Stop":             true,
+}
+
 func (i *CodexInstaller) writeFile(path string, data []byte, perm os.FileMode) error {
 	if i.DryRun {
 		if i.Logger != nil {
@@ -233,6 +255,9 @@ func (i *CodexInstaller) installSkill() ([]string, error) {
 //	  }
 //	}
 //
+// Events in codexMatcherlessEvents (UserPromptSubmit, Stop) are written
+// WITHOUT the "matcher" key — see that var for the trust-hash rationale.
+//
 // Idempotent: the `id: "tma1"` marker lets us find + rewrite our own
 // entry in place rather than appending duplicates. User-added entries
 // for the same event are preserved.
@@ -252,7 +277,7 @@ func (i *CodexInstaller) installHooksConfig(scriptPath string) (string, bool, er
 	}
 
 	command := wrapHookCommand(scriptPath)
-	if !registerTMA1HookEntries(existing, codexHookEvents, command) {
+	if !registerTMA1HookEntries(existing, codexHookEvents, command, codexMatcherlessEvents) {
 		return cfgPath, false, nil
 	}
 

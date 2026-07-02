@@ -59,6 +59,18 @@ func TestCodexInstallEndToEndIdempotent(t *testing.T) {
 		if id, _ := first["id"].(string); id != "tma1" {
 			t.Errorf("%s entry missing id=tma1, got %v", event, first)
 		}
+		// Codex ignores matchers on UserPromptSubmit/Stop and drops
+		// them from the trust-identity hash, so the key must be absent
+		// there — a spurious `"matcher": ""` desyncs tools that
+		// re-derive the trust hash from the definition verbatim.
+		_, hasMatcher := first["matcher"]
+		if codexMatcherlessEvents[event] {
+			if hasMatcher {
+				t.Errorf("%s entry must not carry a matcher key, got %v", event, first)
+			}
+		} else if !hasMatcher {
+			t.Errorf("%s entry missing matcher key, got %v", event, first)
+		}
 	}
 
 	// config.toml's [mcp_servers.tma1] must carry the TMA1_MCP_CALLER
@@ -98,6 +110,86 @@ func TestCodexInstallEndToEndIdempotent(t *testing.T) {
 	}
 	if len(rep2.Changed) != 0 {
 		t.Errorf("second install should be a no-op, got changes: %v", rep2.Changed)
+	}
+}
+
+// TestCodexInstallMigratesEmptyMatcher seeds a hooks.json in the
+// legacy shape — `"matcher": ""` on every event, as written by older
+// TMA1 versions — and asserts one install pass strips the key from the
+// matcherless events (UserPromptSubmit/Stop), keeps it elsewhere, and
+// that a second pass is a no-op. Guards both directions of the
+// presence-aware entryEqual: it must fire once for the migration and
+// then never again.
+func TestCodexInstallMigratesEmptyMatcher(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	inst := &CodexInstaller{
+		DataDir: filepath.Join(home, ".tma1"),
+		Port:    14318,
+		Logger:  slog.Default(),
+	}
+	scriptPath := filepath.Join(home, ".tma1", "hooks", "tma1-hook-codex.sh")
+	command := wrapHookCommand(scriptPath)
+
+	legacy := map[string]any{"hooks": map[string]any{}}
+	for _, event := range codexHookEvents {
+		legacy["hooks"].(map[string]any)[event] = []any{
+			map[string]any{
+				"id":      "tma1",
+				"matcher": "",
+				"hooks": []any{
+					map[string]any{"type": "command", "command": command},
+				},
+			},
+		}
+	}
+	raw, err := json.Marshal(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfgPath := filepath.Join(home, ".codex", "hooks.json")
+	if err := os.MkdirAll(filepath.Dir(cfgPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cfgPath, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, changed, err := inst.installHooksConfig(scriptPath)
+	if err != nil {
+		t.Fatalf("installHooksConfig: %v", err)
+	}
+	if !changed {
+		t.Fatal("migration pass should rewrite legacy empty-matcher entries")
+	}
+
+	var parsed map[string]any
+	if err := json.Unmarshal(mustRead(t, cfgPath), &parsed); err != nil {
+		t.Fatal(err)
+	}
+	hookSection, _ := parsed["hooks"].(map[string]any)
+	for _, event := range codexHookEvents {
+		entries, _ := hookSection[event].([]any)
+		if len(entries) != 1 {
+			t.Fatalf("%s: want 1 entry, got %v", event, entries)
+		}
+		entry, _ := entries[0].(map[string]any)
+		_, hasMatcher := entry["matcher"]
+		if codexMatcherlessEvents[event] && hasMatcher {
+			t.Errorf("%s: matcher key should be stripped, got %v", event, entry)
+		}
+		if !codexMatcherlessEvents[event] && !hasMatcher {
+			t.Errorf("%s: matcher key should be kept, got %v", event, entry)
+		}
+	}
+
+	_, changed, err = inst.installHooksConfig(scriptPath)
+	if err != nil {
+		t.Fatalf("second installHooksConfig: %v", err)
+	}
+	if changed {
+		t.Error("second pass should be a no-op after migration")
 	}
 }
 
