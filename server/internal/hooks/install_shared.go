@@ -95,9 +95,9 @@ func entryEqual(a, b any) bool {
 		return false
 	}
 	if aok {
-		a1, _ := av.(string)
-		b1, _ := bv.(string)
-		if a1 != b1 {
+		a1, a1ok := av.(string)
+		b1, b1ok := bv.(string)
+		if !a1ok || !b1ok || a1 != b1 {
 			return false
 		}
 	}
