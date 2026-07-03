@@ -72,6 +72,14 @@ func entryCommand(entry map[string]any) string {
 // entryEqual reports whether two hook entries match on the fields TMA1
 // manages. User-extended fields are preserved by replacing entries
 // wholesale only when the command differs.
+//
+// The matcher comparison is presence-aware: `"matcher": ""` and no
+// matcher key at all are NOT equal. Codex hashes hook definitions into
+// trust identities, and for matcherless events an empty-string matcher
+// and an absent matcher can hash differently in tools that re-derive
+// that hash — so when the desired shape drops the key, an existing
+// entry that still carries it must be rewritten (one-time migration),
+// after which re-installs are no-ops again.
 func entryEqual(a, b any) bool {
 	am, _ := a.(map[string]any)
 	bm, _ := b.(map[string]any)
@@ -81,8 +89,17 @@ func entryEqual(a, b any) bool {
 	if id1, _ := am["id"].(string); id1 != bm["id"] {
 		return false
 	}
-	if m1, _ := am["matcher"].(string); m1 != bm["matcher"] {
+	av, aok := am["matcher"]
+	bv, bok := bm["matcher"]
+	if aok != bok {
 		return false
+	}
+	if aok {
+		a1, a1ok := av.(string)
+		b1, b1ok := bv.(string)
+		if !a1ok || !b1ok || a1 != b1 {
+			return false
+		}
 	}
 	return entryCommand(am) == entryCommand(bm)
 }
@@ -128,6 +145,12 @@ func matchesTMA1HookEntry(entry any, command, tmaID string) bool {
 // Codex's hooks.json, so this single helper backs both adapters; only
 // the event list differs.
 //
+// Events listed in `matcherlessEvents` get their entry written WITHOUT
+// a matcher key (nil means "none"). Agents that don't support matchers
+// on an event treat "" and absent identically at dispatch time, but the
+// raw definition can feed trust-hash computations (Codex), where the
+// spurious key changes the hash — see codexMatcherlessEvents.
+//
 // Two-pass matching avoids duplicate entries:
 //  1. Look for an entry whose hooks[].command resolves to the same script
 //     (after ~/ expansion). Catches old entries installed before we added
@@ -137,7 +160,7 @@ func matchesTMA1HookEntry(entry any, command, tmaID string) bool {
 // The matched entry is rewritten in place (canonical id + absolute
 // path). Other entries are left alone — that's important: user-added
 // hooks for the same event must keep working.
-func registerTMA1HookEntries(settings map[string]any, eventNames []string, command string) bool {
+func registerTMA1HookEntries(settings map[string]any, eventNames []string, command string, matcherlessEvents map[string]bool) bool {
 	hooks, _ := settings["hooks"].(map[string]any)
 	if hooks == nil {
 		hooks = map[string]any{}
@@ -149,14 +172,16 @@ func registerTMA1HookEntries(settings map[string]any, eventNames []string, comma
 		idx := findEquivalentEntry(list, command, hookOwnerID)
 
 		entry := map[string]any{
-			"matcher": "",
-			"id":      hookOwnerID,
+			"id": hookOwnerID,
 			"hooks": []any{
 				map[string]any{
 					"type":    "command",
 					"command": command,
 				},
 			},
+		}
+		if !matcherlessEvents[event] {
+			entry["matcher"] = ""
 		}
 
 		switch {

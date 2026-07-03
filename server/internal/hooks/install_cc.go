@@ -278,7 +278,7 @@ func (i *ClaudeCodeInstaller) installSettings(scriptPath string) (string, bool, 
 	}
 
 	command := wrapHookCommand(scriptPath)
-	if !registerTMA1HookEntries(existing, claudeCodeHookEvents, command) {
+	if !registerTMA1HookEntries(existing, claudeCodeHookEvents, command, nil) {
 		return settingsPath, false, nil
 	}
 
