@@ -29,7 +29,7 @@ const (
 	// even if the user configured "latest" (which normally skips network checks).
 	// Bump this when a new GreptimeDB release contains important fixes or
 	// breaking changes that tma1 depends on.
-	minRequiredVersion = "v1.0.2"
+	minRequiredVersion = "v1.1.2"
 )
 
 // greptimeBinaryName returns the platform-appropriate binary name.
