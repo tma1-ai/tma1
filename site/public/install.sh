@@ -279,7 +279,7 @@ setup_launchd() {
   <string>${log_path}</string>
 
   <key>ProcessType</key>
-  <string>Background</string>
+  <string>Standard</string>
 
   <key>SoftResourceLimits</key>
   <dict>
