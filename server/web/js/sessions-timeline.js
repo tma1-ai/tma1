@@ -6,6 +6,14 @@
 
 var sessActiveToolFilter = '';
 
+// Windowed (lazy) rendering: only the tail SESS_RENDER_WINDOW items of the
+// filtered timeline are put in the DOM; a "load earlier" header exposes
+// older chunks on demand. Large sessions (20k+ items) previously rendered
+// everything in one innerHTML assignment, blocking the main thread.
+var SESS_RENDER_WINDOW = 500;   // chunk size
+var sessFilteredData = [];      // current filtered array
+var sessRenderStart = 0;        // index of first rendered item within sessFilteredData
+
 function sess_filterByTool(btn, toolName) {
   sessActiveToolFilter = toolName;
   document.querySelectorAll('.sess-chip').forEach(function(c) { c.classList.remove('active'); });
@@ -22,8 +30,17 @@ function sess_filterTimeline() {
 }
 
 function sess_applyFilters() {
-  var keyword = (document.getElementById('sess-detail-filter').value || '').toLowerCase().trim();
-  var filtered = sessTimelineData.filter(function(item) {
+  sess_renderTimelineWindow(true);
+}
+
+// Single render path for both the initial detail render and filter changes.
+// Recomputes sessFilteredData and renders only the tail window into
+// #sess-timeline-items. reset=true re-anchors the window to the tail
+// (new detail open or filter change).
+function sess_renderTimelineWindow(reset) {
+  var filterEl = document.getElementById('sess-detail-filter');
+  var keyword = ((filterEl && filterEl.value) || '').toLowerCase().trim();
+  sessFilteredData = sessTimelineData.filter(function(item) {
     if (sessActiveToolFilter) {
       var tn = null;
       if (item.source === 'tool_pair') tn = item.data.tool_name;
@@ -42,9 +59,53 @@ function sess_applyFilters() {
   });
   var container = document.getElementById('sess-timeline-items');
   if (!container) return;
+  if (reset) sessRenderStart = Math.max(0, sessFilteredData.length - SESS_RENDER_WINDOW);
+  container.innerHTML = sessFilteredData.length
+    ? sess_windowHTML()
+    : '<div class="loading">' + t('empty.no_data') + '</div>';
+}
+
+// HTML for the current window: "load earlier" header (when items are
+// hidden above) + the rendered items from sessRenderStart to the end.
+function sess_windowHTML() {
+  var html = sess_loadEarlierHTML();
+  for (var i = sessRenderStart; i < sessFilteredData.length; i++) html += renderTimelineItem(sessFilteredData[i]);
+  return html;
+}
+
+function sess_loadEarlierHTML() {
+  if (sessRenderStart <= 0) return '';
+  return '<div class="tl-load-earlier" id="sess-load-earlier" onclick="sess_loadEarlier()">\u2B06 ' +
+    t('sessions.load_earlier').replace('{n}', String(sessRenderStart)) + '</div>';
+}
+
+// "Load earlier" click: expose the previous SESS_RENDER_WINDOW items by
+// prepending them, preserving the scroll position (content above the
+// viewport grows, so scrollTop is shifted by the height delta).
+function sess_loadEarlier() {
+  var container = document.getElementById('sess-timeline-items');
+  if (!container || sessRenderStart <= 0) return;
+  var newStart = Math.max(0, sessRenderStart - SESS_RENDER_WINDOW);
   var html = '';
-  for (var i = 0; i < filtered.length; i++) html += renderTimelineItem(filtered[i]);
-  container.innerHTML = html || '<div class="loading">' + t('empty.no_data') + '</div>';
+  for (var i = newStart; i < sessRenderStart; i++) html += renderTimelineItem(sessFilteredData[i]);
+  sessRenderStart = newStart;
+  var header = document.getElementById('sess-load-earlier');
+  if (header) header.parentNode.removeChild(header);
+  var scrollEl = document.getElementById('sess-timeline-scroll');
+  var oldHeight = scrollEl ? scrollEl.scrollHeight : 0;
+  container.insertAdjacentHTML('afterbegin', sess_loadEarlierHTML() + html);
+  if (scrollEl) scrollEl.scrollTop += (scrollEl.scrollHeight - oldHeight);
+}
+
+// Expand the rendered window so the item at idx (within sessFilteredData)
+// is in the DOM — used by scroll-to navigation targeting a non-rendered
+// region. Re-renders the window with some context above the target.
+function sess_expandWindowTo(idx) {
+  if (idx >= sessRenderStart) return;
+  var container = document.getElementById('sess-timeline-items');
+  if (!container) return;
+  sessRenderStart = Math.max(0, idx - 50);
+  container.innerHTML = sess_windowHTML();
 }
 
 // ── Timeline item rendering ───────────────────────────────────────────

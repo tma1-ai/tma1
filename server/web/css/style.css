@@ -674,6 +674,10 @@ tr.active-trace td { background: var(--bg-hover); }
 .tl-highlight { background: rgba(121,192,255,0.18); box-shadow: inset 0 0 0 2px rgba(121,192,255,0.4); }
 [data-theme="light"] .tl-highlight { background: rgba(31,111,235,0.1); box-shadow: inset 0 0 0 2px rgba(31,111,235,0.25); }
 
+/* --- Windowed timeline: "load earlier" header --- */
+.tl-load-earlier { text-align: center; padding: 6px 12px; margin-bottom: 4px; border: 1px dashed var(--border); border-radius: 6px; color: var(--blue); font-size: 12px; cursor: pointer; user-select: none; }
+.tl-load-earlier:hover { border-color: var(--blue); background: rgba(121,192,255,0.08); }
+
 /* --- Timeline items --- */
 .tl-item { display: flex; align-items: flex-start; gap: 8px; padding: 6px 12px; border-radius: 6px; font-size: 13px; line-height: 1.5; }
 .tl-time { color: var(--text-dim); font-size: 11px; min-width: 72px; flex-shrink: 0; font-variant-numeric: tabular-nums; }

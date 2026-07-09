@@ -3,7 +3,9 @@
    sessExpandedId, sessTimelineData, sessTargetTs, sessApiCallFP,
    sess_renderContextBar, sess_renderWaterfall, sess_renderAPICalls, sess_renderFileHeatmap,
    sess_renderAgentTree, sess_renderSubagentGantt, sess_renderTraceInsights, sess_initWaterfallClicks,
-   renderTimelineItem, sess_filterByTool, sess_filterTimeline, AgentCanvas */
+   renderTimelineItem, sess_renderTimelineWindow, sess_expandWindowTo,
+   sessActiveToolFilter, sessFilteredData, sessRenderStart,
+   sess_filterByTool, sess_filterTimeline, AgentCanvas */
 
 // ── Render Session Detail (two-column overlay) ────────────────────────
 
@@ -131,16 +133,21 @@ function renderSessionDetail(timeline, stats) {
   }
   html += '</div></div>';
 
-  // Timeline.
+  // Timeline. Items are rendered lazily by sess_renderTimelineWindow
+  // (windowed tail render) after the structure is in the DOM.
   html += '<div class="sess-timeline-scroll" id="sess-timeline-scroll">';
   html += '<div class="sess-timeline" id="sess-timeline-items">';
-  for (var m = 0; m < timeline.length; m++) html += renderTimelineItem(timeline[m]);
   html += '</div></div>';
 
   html += '</div>'; // .sess-timeline-panel
   html += '</div>'; // .sess-overlay-body
 
   content.innerHTML = html;
+  // The chips above were rebuilt with "All" active — reset the module-level
+  // tool filter so a stale filter from a previously opened detail doesn't
+  // leak into this session's windowed render.
+  sessActiveToolFilter = '';
+  sess_renderTimelineWindow(true);
   sess_initWaterfallClicks();
   if (sessExpandedId) sess_loadDetailAnomalies(sessExpandedId);
   var scrollEl = document.getElementById('sess-timeline-scroll');
@@ -178,7 +185,16 @@ function sess_toggleErrors() {
 // ── Scroll / highlight navigation ─────────────────────────────────────
 
 // Scroll to the timeline item closest to the target timestamp and highlight it.
+// With windowed rendering the target may live before the rendered window —
+// locate it in sessFilteredData by the same criterion (closest data-ts)
+// and expand the window first so the DOM search below can find it.
 function sess_scrollToEvent(scrollEl, targetMs) {
+  var bestIdx = -1, bestDataDiff = Infinity;
+  for (var d = 0; d < sessFilteredData.length; d++) {
+    var dDiff = Math.abs((sessFilteredData[d].ts || 0) - targetMs);
+    if (dDiff < bestDataDiff) { bestDataDiff = dDiff; bestIdx = d; }
+  }
+  if (bestIdx >= 0 && bestIdx < sessRenderStart) sess_expandWindowTo(bestIdx);
   var items = scrollEl.querySelectorAll('.tl-item-wrap[data-ts]');
   var best = null, bestDiff = Infinity;
   for (var i = 0; i < items.length; i++) {
@@ -198,6 +214,16 @@ function sess_scrollToEvent(scrollEl, targetMs) {
 function sess_scrollToToolUseId(toolUseId) {
   var scrollEl = document.getElementById('sess-timeline-scroll');
   if (!scrollEl) return;
+  // The data-tool-use-id attribute is only emitted for tool_pair items
+  // (renderTimelineItem) — match the same field on the data objects and
+  // expand the rendered window if the target sits above it.
+  for (var d = 0; d < sessFilteredData.length; d++) {
+    var it = sessFilteredData[d];
+    if (it.source === 'tool_pair' && it.data.tool_use_id === toolUseId) {
+      if (d < sessRenderStart) sess_expandWindowTo(d);
+      break;
+    }
+  }
   var items = scrollEl.querySelectorAll('.tl-item-wrap[data-tool-use-id]');
   var target = null;
   for (var i = 0; i < items.length; i++) {
