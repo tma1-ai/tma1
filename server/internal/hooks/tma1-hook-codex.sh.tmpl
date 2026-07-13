@@ -8,9 +8,15 @@
 # (session_id / hook_event_name / cwd / tool_name / …). stdout = JSON
 # object. Empty stdout (or {}) is the silent-no-op signal.
 #
+# Relay headers: see tma1-hook.sh.tmpl. Codex's baked role is "reviewer".
+#
 # Fail-safe: any error → empty stdout, exit 0. Never blocks the agent.
+TMA1_ROLE="${TMA1_RELAY_ROLE:-{{ROLE}}}"
+TMA1_TERM="tmux=${TMUX_PANE};iterm=${ITERM_SESSION_ID};wezterm=${WEZTERM_PANE};kitty=${KITTY_LISTEN_ON}"
 RESPONSE=$(curl -sf -m 0.5 -X POST \
   -H 'Content-Type: application/json' \
+  -H "X-Tma1-Role: ${TMA1_ROLE}" \
+  -H "X-Tma1-Terminal: ${TMA1_TERM}" \
   --data-binary @- \
   "http://127.0.0.1:{{PORT}}/api/hooks?source=codex&envelope=codex" 2>/dev/null) || exit 0
 printf '%s' "$RESPONSE"

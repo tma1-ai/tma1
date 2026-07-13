@@ -22,6 +22,7 @@ import (
 	"github.com/tma1-ai/tma1/server/internal/install"
 	"github.com/tma1-ai/tma1/server/internal/mcp"
 	"github.com/tma1-ai/tma1/server/internal/perception"
+	"github.com/tma1-ai/tma1/server/internal/relay"
 	"github.com/tma1-ai/tma1/server/internal/sensor/build"
 	"github.com/tma1-ai/tma1/server/internal/transcript"
 )
@@ -496,11 +497,37 @@ func main() {
 		Provider: cfg.LLMProvider,
 		Model:    cfg.LLMModel,
 	}
+	// Relay coordinator: per-project driver/reviewer handoff. The token is
+	// shared with MCP children via installer-written env so only local
+	// agents holding it can POST /api/relay/signal (which injects terminal
+	// text / spawns workers — not something an Origin check can guard).
+	relayToken, rtErr := relay.LoadOrCreateToken(cfg.DataDir)
+	if rtErr != nil {
+		logger.Warn("relay token unavailable; handoff signal disabled", "err", rtErr)
+	}
+	// Waker reliability order: tmux (pane-precise) → iterm (visible wake for
+	// iTerm users not in tmux) → worker (universal headless fallback).
+	relayCoord := relay.NewCoordinator(logger, relay.NewRegistry(
+		relay.NewTmuxWaker(logger),
+		relay.NewItermWaker(logger),
+		relay.NewWorkerWaker(logger),
+	), perception.ResolveProjectRoot)
+	// Optional transition-table override (~/.tma1/relay.json); fall back to
+	// the built-in table when absent or malformed.
+	if t, err := relay.LoadTransitions(filepath.Join(cfg.DataDir, "relay.json")); err == nil {
+		relayCoord.SetTransitions(t)
+	} else if !os.IsNotExist(err) {
+		logger.Warn("relay.json invalid; using built-in transitions", "err", err)
+	}
+	relayCoord.SetWakeTimeout(relayWakeTimeout())
+	defer relayCoord.Stop()
 	srv := handler.New(cfg.GreptimeDBHTTPPort, cfg.Port, webFileSystem(), logger, tw, bc, llmCfg, handler.ServerConfig{
 		DataDir:          cfg.DataDir,
 		DataTTL:          cfg.DataTTL,
 		QueryConcurrency: cfg.QueryConcurrency,
 		LogLevelVar:      &logLevel,
+		RelayCoordinator: relayCoord,
+		RelayToken:       relayToken,
 	})
 	bgCtx, bgCancel := context.WithCancel(context.Background())
 	defer bgCancel()
@@ -1003,6 +1030,12 @@ func runMCPServe() error {
 		mcp.ExternalChangesTool{Bundler: bundler},
 		mcp.ProjectStateTool{Bundler: bundler},
 		mcp.PeerSessionsTool{Bundler: bundler},
+		mcp.RelayHandoffTool{
+			Port:   cfg.Port,
+			Caller: os.Getenv("TMA1_MCP_CALLER"),
+			Role:   os.Getenv("TMA1_RELAY_ROLE"),
+			Token:  os.Getenv("TMA1_RELAY_TOKEN"),
+		},
 	)
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -1021,6 +1054,20 @@ func readVersionFile(path string) string {
 
 func parsePort(s string) (int, error) {
 	return strconv.Atoi(s)
+}
+
+// relayWakeTimeout reads TMA1_RELAY_WAKE_TIMEOUT (a Go duration, e.g.
+// "10m"). Unset → 10m default; "0" disables the timeout nudge.
+func relayWakeTimeout() time.Duration {
+	v := os.Getenv("TMA1_RELAY_WAKE_TIMEOUT")
+	if v == "" {
+		return 10 * time.Minute
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil {
+		return 10 * time.Minute
+	}
+	return d
 }
 
 func onUpgrade(httpPort int, logger *slog.Logger) error {

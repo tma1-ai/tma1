@@ -63,12 +63,12 @@ type CodexInstaller struct {
 //   - PostToolUse       → injects per-tool anomaly notes (rare)
 //   - Stop              → blocks on unresolved HIGH-severity anomalies
 //   - PreToolUse        → telemetry-only; Codex does not consume
-//                         `additionalContext` from PreToolUse hooks
-//                         per developers.openai.com/codex/hooks +
-//                         openai/codex#19385. We still register it so
-//                         the anomaly rules that query
-//                         `event_type = 'PreToolUse'` (file edits,
-//                         Bash commands) get the event stream.
+//     `additionalContext` from PreToolUse hooks
+//     per developers.openai.com/codex/hooks +
+//     openai/codex#19385. We still register it so
+//     the anomaly rules that query
+//     `event_type = 'PreToolUse'` (file edits,
+//     Bash commands) get the event stream.
 //
 // PreCompact is deliberately NOT registered: it doesn't exist in
 // Codex's hook catalogue (SessionStart / PreToolUse / PermissionRequest
@@ -338,6 +338,11 @@ func (i *CodexInstaller) installMCPServer() (string, bool, error) {
 	// results.
 	if i.GreptimeDBHTTPPort != 0 && i.GreptimeDBHTTPPort != defaultGreptimeDBHTTPPort {
 		env["TMA1_GREPTIMEDB_HTTP_PORT"] = strconv.Itoa(i.GreptimeDBHTTPPort)
+	}
+	// Relay: parent port + role + signal token so the MCP child's
+	// tma1_handoff tool can reach /api/relay/signal.
+	for k, v := range relayEnv(i.DataDir, i.Port, "reviewer", i.DryRun) {
+		env[k] = v
 	}
 	desired["env"] = env
 
