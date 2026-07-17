@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -67,91 +68,58 @@ func TestProbeBinaryVersion(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// readVersionFile
-// ---------------------------------------------------------------------------
-
-func TestReadVersionFile(t *testing.T) {
-	t.Run("normal", func(t *testing.T) {
-		f := filepath.Join(t.TempDir(), ".version")
-		if err := os.WriteFile(f, []byte("v0.12.0\n"), 0644); err != nil {
-			t.Fatal(err)
-		}
-		if got := readVersionFile(f); got != "v0.12.0" {
-			t.Errorf("got %q, want %q", got, "v0.12.0")
-		}
-	})
-
-	t.Run("file_not_found", func(t *testing.T) {
-		if got := readVersionFile("/no/such/file"); got != "" {
-			t.Errorf("got %q, want empty", got)
-		}
-	})
-
-	t.Run("empty_file", func(t *testing.T) {
-		f := filepath.Join(t.TempDir(), ".version")
-		if err := os.WriteFile(f, []byte(""), 0644); err != nil {
-			t.Fatal(err)
-		}
-		if got := readVersionFile(f); got != "" {
-			t.Errorf("got %q, want empty", got)
-		}
-	})
-
-	t.Run("trailing_whitespace", func(t *testing.T) {
-		f := filepath.Join(t.TempDir(), ".version")
-		if err := os.WriteFile(f, []byte("  v0.13.0 \n\n"), 0644); err != nil {
-			t.Fatal(err)
-		}
-		if got := readVersionFile(f); got != "v0.13.0" {
-			t.Errorf("got %q, want %q", got, "v0.13.0")
-		}
-	})
-}
-
-// ---------------------------------------------------------------------------
 // checkVersionMismatch
 // ---------------------------------------------------------------------------
 
 func TestCheckVersionMismatch(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell script trick not available on Windows")
+	}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 
-	writeVersion := func(t *testing.T, content string) string {
+	// fakeBin writes a stub that prints the greptime --version format for a
+	// bare semver (e.g. "1.1.3"), so probeBinaryVersion resolves it to "v1.1.3".
+	fakeBin := func(t *testing.T, ver string) string {
 		t.Helper()
-		f := filepath.Join(t.TempDir(), ".version")
-		if err := os.WriteFile(f, []byte(content), 0644); err != nil {
+		f := filepath.Join(t.TempDir(), "greptime")
+		content := "#!/bin/sh\ncat <<'EOF'\ngreptime\nversion: " + ver + "\nEOF\n"
+		if err := os.WriteFile(f, []byte(content), 0755); err != nil {
 			t.Fatal(err)
 		}
 		return f
 	}
 
-	// binPath is unused when .version file exists; pass a non-existent path.
-	noBin := "/no/such/binary"
+	// minRequiredVersion without the leading "v", to build an at-minimum binary.
+	minBare := strings.TrimPrefix(minRequiredVersion, "v")
 
 	t.Run("latest_with_current_version_skips_upgrade", func(t *testing.T) {
-		vf := writeVersion(t, minRequiredVersion+"\n")
-		needs, resolved := checkVersionMismatch("latest", vf, noBin, logger)
+		needs, resolved, installed := checkVersionMismatch("latest", fakeBin(t, minBare), logger)
 		if needs {
 			t.Error("expected no upgrade needed")
 		}
 		if resolved != minRequiredVersion {
 			t.Errorf("resolved = %q, want %q", resolved, minRequiredVersion)
 		}
+		if installed != minRequiredVersion {
+			t.Errorf("installed = %q, want %q", installed, minRequiredVersion)
+		}
 	})
 
 	t.Run("latest_with_old_version_triggers_upgrade", func(t *testing.T) {
-		vf := writeVersion(t, "v0.12.0\n")
-		needs, resolved := checkVersionMismatch("latest", vf, noBin, logger)
+		needs, resolved, installed := checkVersionMismatch("latest", fakeBin(t, "0.12.0"), logger)
 		if !needs {
 			t.Error("expected upgrade needed for version below minimum")
 		}
 		if resolved != "latest" {
 			t.Errorf("resolved = %q, want %q", resolved, "latest")
 		}
+		if installed != "v0.12.0" {
+			t.Errorf("installed = %q, want %q", installed, "v0.12.0")
+		}
 	})
 
 	t.Run("exact_match_no_upgrade", func(t *testing.T) {
-		vf := writeVersion(t, "v0.12.0\n")
-		needs, resolved := checkVersionMismatch("v0.12.0", vf, noBin, logger)
+		needs, resolved, _ := checkVersionMismatch("v0.12.0", fakeBin(t, "0.12.0"), logger)
 		if needs {
 			t.Error("expected no upgrade needed")
 		}
@@ -161,8 +129,7 @@ func TestCheckVersionMismatch(t *testing.T) {
 	})
 
 	t.Run("mismatch_needs_upgrade", func(t *testing.T) {
-		vf := writeVersion(t, "v0.11.0\n")
-		needs, resolved := checkVersionMismatch("v0.12.0", vf, noBin, logger)
+		needs, resolved, _ := checkVersionMismatch("v0.12.0", fakeBin(t, "0.11.0"), logger)
 		if !needs {
 			t.Error("expected upgrade needed")
 		}
@@ -171,33 +138,32 @@ func TestCheckVersionMismatch(t *testing.T) {
 		}
 	})
 
-	t.Run("latest_with_unparseable_version_triggers_upgrade", func(t *testing.T) {
-		vf := writeVersion(t, "nightly-20260401\n")
-		needs, resolved := checkVersionMismatch("latest", vf, noBin, logger)
+	t.Run("latest_with_nonsemver_build_triggers_upgrade", func(t *testing.T) {
+		// A nightly / non-semver build can't be probed to a comparable version,
+		// so we upgrade to a resolvable release.
+		needs, resolved, _ := checkVersionMismatch("latest", fakeBin(t, "nightly-20260401"), logger)
 		if !needs {
-			t.Error("expected upgrade needed for unparseable version")
+			t.Error("expected upgrade needed for non-semver build")
 		}
 		if resolved != "latest" {
 			t.Errorf("resolved = %q, want %q", resolved, "latest")
 		}
 	})
 
-	t.Run("no_version_file_no_binary_triggers_upgrade_latest", func(t *testing.T) {
-		// Legacy install: no .version, binary can't be probed → upgrade.
-		needs, resolved := checkVersionMismatch("latest", "/no/such/file", noBin, logger)
+	t.Run("unprobeable_binary_triggers_upgrade_latest", func(t *testing.T) {
+		needs, resolved, _ := checkVersionMismatch("latest", "/no/such/binary", logger)
 		if !needs {
-			t.Error("expected upgrade for legacy install without .version")
+			t.Error("expected upgrade when the binary can't be probed")
 		}
 		if resolved != "latest" {
 			t.Errorf("resolved = %q, want %q", resolved, "latest")
 		}
 	})
 
-	t.Run("no_version_file_no_binary_triggers_upgrade_explicit", func(t *testing.T) {
-		// Explicit version requested, no .version, binary can't be probed → upgrade.
-		needs, resolved := checkVersionMismatch("v1.0.0", "/no/such/file", noBin, logger)
+	t.Run("unprobeable_binary_triggers_upgrade_explicit", func(t *testing.T) {
+		needs, resolved, _ := checkVersionMismatch("v1.0.0", "/no/such/binary", logger)
 		if !needs {
-			t.Error("expected upgrade for legacy install with explicit version")
+			t.Error("expected upgrade when the binary can't be probed")
 		}
 		if resolved != "v1.0.0" {
 			t.Errorf("resolved = %q, want %q", resolved, "v1.0.0")
@@ -218,30 +184,30 @@ func TestVersionLessThan(t *testing.T) {
 		{"v0.9.0", "v0.12.0", true},
 		{"v1.0.0", "v1.0.0", false},
 		{"v1.0.1", "v1.0.0", false},
-		{"v1.0.0", "v1.0.2", true},      // pins the v1.0.2 minRequiredVersion floor
+		{"v1.0.0", "v1.0.2", true}, // pins the v1.0.2 minRequiredVersion floor
 		{"v1.0.1", "v1.0.2", true},
 		{"v1.0.2", "v1.0.2", false},
-		{"v1.0.2", "v1.1.2", true},      // pins the v1.1.2 minRequiredVersion floor
+		{"v1.0.2", "v1.1.2", true}, // pins the v1.1.2 minRequiredVersion floor
 		{"v1.1.1", "v1.1.2", true},
 		{"v1.1.2", "v1.1.2", false},
-		{"v1.1.0", "v1.1.3", true},      // pins the v1.1.3 minRequiredVersion floor
+		{"v1.1.0", "v1.1.3", true}, // pins the v1.1.3 minRequiredVersion floor
 		{"v1.1.2", "v1.1.3", true},
 		{"v1.1.3", "v1.1.3", false},
 		{"v2.0.0", "v1.0.0", false},
 		{"v0.12.0", "v0.12.1", true},
-		{"v1.0.0-alpha", "v1.0.0", true},  // pre-release < release
+		{"v1.0.0-alpha", "v1.0.0", true}, // pre-release < release
 		{"v1.0.0-beta", "v1.0.0", true},
 		{"v1.0.0-rc1", "v1.0.0", true},
-		{"v1.0.0", "v1.0.0-rc1", false},   // release is NOT less than pre-release
-		{"v1.0.0-rc.1", "v1.0.0-rc.2", true},   // rc.1 < rc.2
+		{"v1.0.0", "v1.0.0-rc1", false},      // release is NOT less than pre-release
+		{"v1.0.0-rc.1", "v1.0.0-rc.2", true}, // rc.1 < rc.2
 		{"v1.0.0-rc.2", "v1.0.0-rc.1", false},
-		{"v1.0.0-rc.1", "v1.0.0-rc.1", false},  // equal
-		{"v1.0.0-alpha", "v1.0.0-beta", true},   // alpha < beta lexically
-		{"v1.0.0-beta", "v1.0.0-rc", true},      // beta < rc lexically
+		{"v1.0.0-rc.1", "v1.0.0-rc.1", false}, // equal
+		{"v1.0.0-alpha", "v1.0.0-beta", true}, // alpha < beta lexically
+		{"v1.0.0-beta", "v1.0.0-rc", true},    // beta < rc lexically
 		{"v1.0.0-alpha.1", "v1.0.0-alpha.2", true},
-		{"v1.0.0-rc", "v1.0.0-rc.1", true},      // shorter < longer when prefix matches
+		{"v1.0.0-rc", "v1.0.0-rc.1", true}, // shorter < longer when prefix matches
 		{"v0.9.0-rc1", "v1.0.0", true},
-		{"invalid", "v1.0.0", false},       // parse error → conservative false
+		{"invalid", "v1.0.0", false}, // parse error → conservative false
 		{"v1.0.0", "invalid", false},
 	}
 	for _, tt := range tests {
@@ -326,7 +292,7 @@ func TestExtractBinary(t *testing.T) {
 	t.Run("finds_greptime", func(t *testing.T) {
 		content := []byte("fake-binary-content")
 		archive := makeTarGz(t, map[string][]byte{
-			"some-dir/README.md":                    []byte("readme"),
+			"some-dir/README.md":               []byte("readme"),
 			"some-dir/" + greptimeBinaryName(): content,
 		})
 

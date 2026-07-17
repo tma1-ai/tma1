@@ -56,18 +56,17 @@ func EnsureGreptimeDB(dataDir, version string, logger *slog.Logger) (binPath str
 	}
 
 	binPath = filepath.Join(binDir, greptimeBinaryName())
-	versionFile := filepath.Join(binDir, ".version")
 
 	binExists := false
 	if _, err := os.Stat(binPath); err == nil {
 		binExists = true
-		needsUpgrade, resolvedVer := checkVersionMismatch(version, versionFile, binPath, logger)
+		needsUpgrade, resolvedVer, installed := checkVersionMismatch(version, binPath, logger)
 		if !needsUpgrade {
 			logger.Info("greptimedb binary already present", "path", binPath, "version", resolvedVer)
 			return binPath, nil
 		}
 		logger.Info("greptimedb version mismatch, upgrading",
-			"installed", readVersionFile(versionFile), "requested", resolvedVer)
+			"installed", installed, "requested", resolvedVer)
 	}
 
 	resolvedVersion, err := resolveVersion(version)
@@ -117,47 +116,41 @@ func EnsureGreptimeDB(dataDir, version string, logger *slog.Logger) (binPath str
 		return "", fmt.Errorf("install: extract binary: %w", err)
 	}
 
-	_ = os.WriteFile(versionFile, []byte(resolvedVersion+"\n"), 0644)
 	logger.Info("greptimedb installed", "path", binPath, "version", resolvedVersion)
 	return binPath, nil
 }
 
-// checkVersionMismatch returns true if the installed version doesn't match the
-// requested version and an upgrade is needed. binPath is used to probe the
-// binary's version when the .version file is missing (legacy installs).
-func checkVersionMismatch(requestedVersion, versionFile, binPath string, logger *slog.Logger) (needsUpgrade bool, resolvedVer string) {
-	installed := readVersionFile(versionFile)
-	if installed == "" {
-		// Legacy install without .version file — probe the binary directly.
-		installed = probeBinaryVersion(binPath, logger)
-	}
+// checkVersionMismatch reports whether the installed binary needs an upgrade.
+// The binary itself is the source of truth: its --version output is probed
+// directly. There is no cached .version ledger — a cache buys a negligible
+// startup saving but drifts whenever the binary is upgraded out-of-band (the
+// install.sh / official installer path never wrote it), which silently forces
+// perpetual re-downloads on every start. installed is the probed version
+// (empty when the binary can't be probed) and is returned for logging.
+func checkVersionMismatch(requestedVersion, binPath string, logger *slog.Logger) (needsUpgrade bool, resolvedVer, installed string) {
+	installed = probeBinaryVersion(binPath, logger)
 
 	if requestedVersion == "latest" {
-		// If the installed version can't be determined, upgrade to be safe.
+		// Probe failed (binary missing/corrupt, or a non-semver nightly build)
+		// — upgrade to a resolvable release to be safe.
 		if installed == "" {
 			logger.Info("installed greptimedb version unknown, upgrading to latest")
-			return true, "latest"
-		}
-		// If the installed version can't be parsed, fall back to re-resolving.
-		if _, _, _, _, ok := parseSemver(installed); !ok {
-			logger.Info("installed greptimedb version unparseable, upgrading to latest",
-				"installed", installed)
-			return true, "latest"
+			return true, "latest", installed
 		}
 		// Check if the installed version is below the minimum required.
 		if versionLessThan(installed, minRequiredVersion) {
 			logger.Info("installed greptimedb is below minimum required version",
 				"installed", installed, "minimum", minRequiredVersion)
-			return true, "latest"
+			return true, "latest", installed
 		}
-		return false, installed
+		return false, installed, installed
 	}
 
 	if installed == "" {
 		// Can't determine version, re-download the requested one.
-		return true, requestedVersion
+		return true, requestedVersion, installed
 	}
-	return requestedVersion != installed, requestedVersion
+	return requestedVersion != installed, requestedVersion, installed
 }
 
 // probeBinaryVersion runs "greptime --version" and extracts the version tag.
@@ -193,14 +186,6 @@ func probeBinaryVersion(binPath string, logger *slog.Logger) string {
 	}
 	logger.Info("could not parse greptimedb version output", "output", string(out))
 	return ""
-}
-
-func readVersionFile(path string) string {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(data))
 }
 
 // versionLessThan compares two semver strings (e.g., "v1.0.0", "v0.12.0").
