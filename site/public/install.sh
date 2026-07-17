@@ -128,7 +128,7 @@ download() {
 # --- Download GreptimeDB binary via official install script ---
 # Minimum GreptimeDB version required by TMA1. Keep in sync with
 # minRequiredVersion in server/internal/install/install.go.
-MIN_GREPTIMEDB_VERSION="1.1.2"
+MIN_GREPTIMEDB_VERSION="1.1.3"
 
 # version_lt returns 0 (true) if $1 < $2.
 # Compares major.minor.patch numerically; when equal, a pre-release
