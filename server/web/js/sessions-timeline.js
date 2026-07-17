@@ -59,7 +59,13 @@ function sess_renderTimelineWindow(reset) {
   });
   var container = document.getElementById('sess-timeline-items');
   if (!container) return;
-  if (reset) sessRenderStart = Math.max(0, sessFilteredData.length - SESS_RENDER_WINDOW);
+  if (reset) {
+    // A reset rebuilds the whole container, so the show-more registry from
+    // the previous render/session is dead. Clear it to avoid retaining prior
+    // sessions' message bodies; sess_msgBody re-registers on this pass.
+    sessLongMsgs = [];
+    sessRenderStart = Math.max(0, sessFilteredData.length - SESS_RENDER_WINDOW);
+  }
   container.innerHTML = sessFilteredData.length
     ? sess_windowHTML()
     : '<div class="loading">' + t('empty.no_data') + '</div>';
@@ -75,8 +81,8 @@ function sess_windowHTML() {
 
 function sess_loadEarlierHTML() {
   if (sessRenderStart <= 0) return '';
-  return '<div class="tl-load-earlier" id="sess-load-earlier" onclick="sess_loadEarlier()">\u2B06 ' +
-    t('sessions.load_earlier').replace('{n}', String(sessRenderStart)) + '</div>';
+  return '<button type="button" class="tl-load-earlier" id="sess-load-earlier" onclick="sess_loadEarlier()">\u2B06 ' +
+    t('sessions.load_earlier').replace('{n}', String(sessRenderStart)) + '</button>';
 }
 
 // "Load earlier" click: expose the previous SESS_RENDER_WINDOW items by
@@ -85,14 +91,17 @@ function sess_loadEarlierHTML() {
 function sess_loadEarlier() {
   var container = document.getElementById('sess-timeline-items');
   if (!container || sessRenderStart <= 0) return;
+  // Capture scrollHeight before any mutation — removing the old header and
+  // inserting the new chunk both change it, so measuring after would
+  // overcompensate scrollTop by roughly the header height.
+  var scrollEl = document.getElementById('sess-timeline-scroll');
+  var oldHeight = scrollEl ? scrollEl.scrollHeight : 0;
   var newStart = Math.max(0, sessRenderStart - SESS_RENDER_WINDOW);
   var html = '';
   for (var i = newStart; i < sessRenderStart; i++) html += renderTimelineItem(sessFilteredData[i]);
   sessRenderStart = newStart;
   var header = document.getElementById('sess-load-earlier');
   if (header) header.parentNode.removeChild(header);
-  var scrollEl = document.getElementById('sess-timeline-scroll');
-  var oldHeight = scrollEl ? scrollEl.scrollHeight : 0;
   container.insertAdjacentHTML('afterbegin', sess_loadEarlierHTML() + html);
   if (scrollEl) scrollEl.scrollTop += (scrollEl.scrollHeight - oldHeight);
 }
@@ -315,8 +324,14 @@ function sess_showFullMessage(link, id) {
 // show-more toggle so huge messages don't dominate build + paint time.
 function sess_msgBody(msg, content) {
   if (content.length <= 2000) return escapeHTML(content);
-  if (msg._longId === undefined) { msg._longId = sessLongMsgs.length; sessLongMsgs.push(msg); }
-  return escapeHTML(content.slice(0, 2000)) + '\u2026 <a class="tl-show-more" onclick="sess_showFullMessage(this, ' + msg._longId + ')">' + t('ui.expand') + '</a>';
+  // Re-register when the stored id no longer maps back to this message \u2014
+  // sessLongMsgs may have been cleared on a reset render while the msg
+  // object (living in sessTimelineData) survives with a stale _longId.
+  if (msg._longId === undefined || sessLongMsgs[msg._longId] !== msg) {
+    msg._longId = sessLongMsgs.length;
+    sessLongMsgs.push(msg);
+  }
+  return escapeHTML(content.slice(0, 2000)) + '\u2026 <button type="button" class="tl-show-more" onclick="sess_showFullMessage(this, ' + msg._longId + ')">' + t('ui.expand') + '</button>';
 }
 
 function renderMessage(msg, ts) {
