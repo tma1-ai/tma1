@@ -6,6 +6,14 @@
 
 var sessActiveToolFilter = '';
 
+// Windowed (lazy) rendering: only the tail SESS_RENDER_WINDOW items of the
+// filtered timeline are put in the DOM; a "load earlier" header exposes
+// older chunks on demand. Large sessions (20k+ items) previously rendered
+// everything in one innerHTML assignment, blocking the main thread.
+var SESS_RENDER_WINDOW = 500;   // chunk size
+var sessFilteredData = [];      // current filtered array
+var sessRenderStart = 0;        // index of first rendered item within sessFilteredData
+
 function sess_filterByTool(btn, toolName) {
   sessActiveToolFilter = toolName;
   document.querySelectorAll('.sess-chip').forEach(function(c) { c.classList.remove('active'); });
@@ -13,11 +21,26 @@ function sess_filterByTool(btn, toolName) {
   sess_applyFilters();
 }
 
-function sess_filterTimeline() { sess_applyFilters(); }
+// Debounced keyword filter (mirrors sess_debouncedFilter in sessions.js) —
+// avoids re-filtering + rebuilding the full timeline DOM on every keystroke.
+var sessDetailFilterTimer = null;
+function sess_filterTimeline() {
+  if (sessDetailFilterTimer) clearTimeout(sessDetailFilterTimer);
+  sessDetailFilterTimer = setTimeout(sess_applyFilters, 180);
+}
 
 function sess_applyFilters() {
-  var keyword = (document.getElementById('sess-detail-filter').value || '').toLowerCase().trim();
-  var filtered = sessTimelineData.filter(function(item) {
+  sess_renderTimelineWindow(true);
+}
+
+// Single render path for both the initial detail render and filter changes.
+// Recomputes sessFilteredData and renders only the tail window into
+// #sess-timeline-items. reset=true re-anchors the window to the tail
+// (new detail open or filter change).
+function sess_renderTimelineWindow(reset) {
+  var filterEl = document.getElementById('sess-detail-filter');
+  var keyword = ((filterEl && filterEl.value) || '').toLowerCase().trim();
+  sessFilteredData = sessTimelineData.filter(function(item) {
     if (sessActiveToolFilter) {
       var tn = null;
       if (item.source === 'tool_pair') tn = item.data.tool_name;
@@ -36,9 +59,62 @@ function sess_applyFilters() {
   });
   var container = document.getElementById('sess-timeline-items');
   if (!container) return;
+  if (reset) {
+    // A reset rebuilds the whole container, so the show-more registry from
+    // the previous render/session is dead. Clear it to avoid retaining prior
+    // sessions' message bodies; sess_msgBody re-registers on this pass.
+    sessLongMsgs = [];
+    sessRenderStart = Math.max(0, sessFilteredData.length - SESS_RENDER_WINDOW);
+  }
+  container.innerHTML = sessFilteredData.length
+    ? sess_windowHTML()
+    : '<div class="loading">' + t('empty.no_data') + '</div>';
+}
+
+// HTML for the current window: "load earlier" header (when items are
+// hidden above) + the rendered items from sessRenderStart to the end.
+function sess_windowHTML() {
+  var html = sess_loadEarlierHTML();
+  for (var i = sessRenderStart; i < sessFilteredData.length; i++) html += renderTimelineItem(sessFilteredData[i]);
+  return html;
+}
+
+function sess_loadEarlierHTML() {
+  if (sessRenderStart <= 0) return '';
+  return '<button type="button" class="tl-load-earlier" id="sess-load-earlier" onclick="sess_loadEarlier()">\u2B06 ' +
+    t('sessions.load_earlier').replace('{n}', String(sessRenderStart)) + '</button>';
+}
+
+// "Load earlier" click: expose the previous SESS_RENDER_WINDOW items by
+// prepending them, preserving the scroll position (content above the
+// viewport grows, so scrollTop is shifted by the height delta).
+function sess_loadEarlier() {
+  var container = document.getElementById('sess-timeline-items');
+  if (!container || sessRenderStart <= 0) return;
+  // Capture scrollHeight before any mutation — removing the old header and
+  // inserting the new chunk both change it, so measuring after would
+  // overcompensate scrollTop by roughly the header height.
+  var scrollEl = document.getElementById('sess-timeline-scroll');
+  var oldHeight = scrollEl ? scrollEl.scrollHeight : 0;
+  var newStart = Math.max(0, sessRenderStart - SESS_RENDER_WINDOW);
   var html = '';
-  for (var i = 0; i < filtered.length; i++) html += renderTimelineItem(filtered[i]);
-  container.innerHTML = html || '<div class="loading">' + t('empty.no_data') + '</div>';
+  for (var i = newStart; i < sessRenderStart; i++) html += renderTimelineItem(sessFilteredData[i]);
+  sessRenderStart = newStart;
+  var header = document.getElementById('sess-load-earlier');
+  if (header) header.parentNode.removeChild(header);
+  container.insertAdjacentHTML('afterbegin', sess_loadEarlierHTML() + html);
+  if (scrollEl) scrollEl.scrollTop += (scrollEl.scrollHeight - oldHeight);
+}
+
+// Expand the rendered window so the item at idx (within sessFilteredData)
+// is in the DOM — used by scroll-to navigation targeting a non-rendered
+// region. Re-renders the window with some context above the target.
+function sess_expandWindowTo(idx) {
+  if (idx >= sessRenderStart) return;
+  var container = document.getElementById('sess-timeline-items');
+  if (!container) return;
+  sessRenderStart = Math.max(0, idx - 50);
+  container.innerHTML = sess_windowHTML();
 }
 
 // ── Timeline item rendering ───────────────────────────────────────────
@@ -64,7 +140,7 @@ function renderToolPair(tc, ts) {
   var statusClass = tc.failed ? 'tl-tool-card-err' : 'tl-tool-card-ok';
   var statusIcon = tc.failed ? '\u2717' : '\u2713';
   var result = tc.tool_result || '';
-  var argsSummary = summarizeToolArgs(tc.tool_name, tc.tool_input);
+  var argsSummary = summarizeToolArgs(tc.tool_name, tc.tool_input, sess_parseJSONField(tc, 'tool_input'));
 
   var html = '<div class="tl-tool-card ' + statusClass + '">';
   html += '<div class="tl-tool-card-header">';
@@ -76,23 +152,35 @@ function renderToolPair(tc, ts) {
   if (argsSummary) html += '<div class="tl-tool-card-args">' + escapeHTML(argsSummary) + '</div>';
   if (result) {
     html += '<details class="tl-tool-card-result"><summary>' + t('sessions.result') + '</summary>';
-    html += formatToolResult(tc.tool_name, result);
+    html += formatToolResult(tc.tool_name, result, sess_parseJSONField(tc, 'tool_result'));
     html += '</details>';
   }
   html += '</div>';
   return html;
 }
 
-function formatToolResult(toolName, result) {
-  if (!result) return '';
-  try {
-    var obj = JSON.parse(result);
-    if (typeof obj !== 'object' || obj === null) throw new Error('not an object');
-    return '<div class="tl-result-structured">' + formatResultObj(toolName, obj) + '</div>';
-  } catch (e) {
-    var text = result.length > 2000 ? result.slice(0, 2000) + '\u2026' : result;
-    return '<pre>' + escapeHTML(text) + '</pre>';
+// Memoized JSON.parse for a string field on a timeline data object. The
+// parsed value is cached on the object itself so repeated render passes
+// (every filter change re-renders each item) skip re-parsing. Returns null
+// when the field is empty or not valid JSON.
+function sess_parseJSONField(data, field) {
+  var key = '_parsed_' + field;
+  if (!(key in data)) {
+    var parsed = null;
+    try { parsed = JSON.parse(data[field]); } catch (e) { parsed = null; }
+    data[key] = parsed;
   }
+  return data[key];
+}
+
+function formatToolResult(toolName, result, parsedResult) {
+  if (!result) return '';
+  var obj = parsedResult;
+  if (typeof obj === 'object' && obj !== null) {
+    return '<div class="tl-result-structured">' + formatResultObj(toolName, obj) + '</div>';
+  }
+  var text = result.length > 2000 ? result.slice(0, 2000) + '\u2026' : result;
+  return '<pre>' + escapeHTML(text) + '</pre>';
 }
 
 function formatResultObj(toolName, obj) {
@@ -124,10 +212,10 @@ function truncResultText(s) {
   return s.length > 2000 ? s.slice(0, 2000) + '\u2026' : s;
 }
 
-function summarizeToolArgs(toolName, argsStr) {
+function summarizeToolArgs(toolName, argsStr, parsedArgs) {
   if (!argsStr) return '';
   try {
-    var obj = JSON.parse(argsStr);
+    var obj = parsedArgs;
     if (toolName === 'Read' || toolName === 'Write') return obj.file_path || obj.path || argsStr;
     if (toolName === 'Edit') return obj.file_path || obj.path || argsStr;
     if (toolName === 'Bash') return obj.command || argsStr;
@@ -143,7 +231,12 @@ function summarizeToolArgs(toolName, argsStr) {
 
 function hookMeta(ev) {
   if (!ev.metadata) return {};
-  try { return typeof ev.metadata === 'string' ? JSON.parse(ev.metadata) : ev.metadata; } catch (e) { return {}; }
+  if (ev._parsedMeta === undefined) {
+    var meta;
+    try { meta = typeof ev.metadata === 'string' ? JSON.parse(ev.metadata) : ev.metadata; } catch (e) { meta = {}; }
+    ev._parsedMeta = meta;
+  }
+  return ev._parsedMeta;
 }
 
 function renderHookEvent(ev, ts) {
@@ -165,7 +258,7 @@ function renderHookEvent(ev, ts) {
 
   // Tool calls.
   if (type === 'PreToolUse') {
-    var args = summarizeToolArgs(ev.tool_name, ev.tool_input);
+    var args = summarizeToolArgs(ev.tool_name, ev.tool_input, sess_parseJSONField(ev, 'tool_input'));
     return '<div class="tl-tool-card tl-tool-card-pending"><div class="tl-tool-card-header"><span class="tl-time">' + time + '</span><span class="tl-tool-name">' + escapeHTML(ev.tool_name || 'unknown') + '</span><span class="tl-tool-dur">\u2026</span></div>' + (args ? '<div class="tl-tool-card-args">' + escapeHTML(args) + '</div>' : '') + '</div>';
   }
 
@@ -214,16 +307,43 @@ function renderHookEvent(ev, ts) {
   return '<div class="tl-item"><span class="tl-time">' + time + '</span> <span class="tl-badge" style="background:rgba(255,255,255,0.06);color:var(--text-dim)">' + escapeHTML(type) + '</span></div>';
 }
 
+// Full message bodies for the show-more toggle on long user/assistant
+// messages. renderMessage truncates bodies over 2000 chars and registers
+// the message here; sess_showFullMessage fills the full text back in.
+var sessLongMsgs = [];
+
+// Reveal the full body of a truncated message. Uses textContent (not
+// innerHTML) so the raw content needs no HTML escaping.
+function sess_showFullMessage(link, id) {
+  var msg = sessLongMsgs[id];
+  if (!msg || !link.parentNode) return;
+  link.parentNode.textContent = msg.content || '';
+}
+
+// Render a message body, capping very long user/assistant content with a
+// show-more toggle so huge messages don't dominate build + paint time.
+function sess_msgBody(msg, content) {
+  if (content.length <= 2000) return escapeHTML(content);
+  // Re-register when the stored id no longer maps back to this message \u2014
+  // sessLongMsgs may have been cleared on a reset render while the msg
+  // object (living in sessTimelineData) survives with a stale _longId.
+  if (msg._longId === undefined || sessLongMsgs[msg._longId] !== msg) {
+    msg._longId = sessLongMsgs.length;
+    sessLongMsgs.push(msg);
+  }
+  return escapeHTML(content.slice(0, 2000)) + '\u2026 <button type="button" class="tl-show-more" onclick="sess_showFullMessage(this, ' + msg._longId + ')">' + t('ui.expand') + '</button>';
+}
+
 function renderMessage(msg, ts) {
   var time = ts ? new Date(ts).toLocaleTimeString() : '';
   var type = msg.message_type;
   var content = msg.content || '';
-  if (type === 'user') return '<div class="tl-item tl-msg-user"><span class="tl-time">' + time + '</span> <span class="tl-role tl-role-user">' + t('sessions.role_user') + '</span> <div class="tl-content">' + escapeHTML(content) + '</div></div>';
-  if (type === 'assistant') return '<div class="tl-item tl-msg-assistant"><span class="tl-time">' + time + '</span> <span class="tl-role tl-role-assistant">' + t('sessions.role_assistant') + '</span> <div class="tl-content">' + escapeHTML(content) + '</div></div>';
+  if (type === 'user') return '<div class="tl-item tl-msg-user"><span class="tl-time">' + time + '</span> <span class="tl-role tl-role-user">' + t('sessions.role_user') + '</span> <div class="tl-content">' + sess_msgBody(msg, content) + '</div></div>';
+  if (type === 'assistant') return '<div class="tl-item tl-msg-assistant"><span class="tl-time">' + time + '</span> <span class="tl-role tl-role-assistant">' + t('sessions.role_assistant') + '</span> <div class="tl-content">' + sess_msgBody(msg, content) + '</div></div>';
   if (type === 'thinking') return '<div class="tl-item tl-msg-thinking" onclick="this.classList.toggle(\x27expanded\x27)"><span class="tl-time">' + time + '</span> <span class="tl-role" style="color:var(--purple)">' + t('sessions.role_thinking') + '</span> <div class="tl-content tl-thinking-content">' + escapeHTML(content) + '</div></div>';
   if (type === 'tool_use') {
     var toolLabel = msg.tool_name || 'tool';
-    var as = summarizeToolArgs(toolLabel, content);
+    var as = summarizeToolArgs(toolLabel, content, sess_parseJSONField(msg, 'content'));
     return '<div class="tl-tool-card tl-tool-card-ok"><div class="tl-tool-card-header"><span class="tl-time">' + time + '</span><span class="tl-tool-name">' + escapeHTML(toolLabel) + '</span></div>' + (as ? '<div class="tl-tool-card-args">' + escapeHTML(as) + '</div>' : '') + '</div>';
   }
   if (type === 'tool_result') return '<div class="tl-item tl-tool-result"><span class="tl-time">' + time + '</span> <span class="tl-badge tl-badge-ok">\u2713</span> <span class="tl-result">' + escapeHTML(content.length > 200 ? content.slice(0, 200) + '\u2026' : content) + '</span></div>';
