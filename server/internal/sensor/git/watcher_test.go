@@ -76,7 +76,7 @@ func TestAddRecursiveRespectsCap(t *testing.T) {
 		}
 		defer fsw.Close()
 
-		added, stopped, err := addRecursive(fsw, root, 3)
+		added, stopped, err := addRecursive(fsw, root, 3, maxWatchFiles, noIgnore)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -95,7 +95,7 @@ func TestAddRecursiveRespectsCap(t *testing.T) {
 		}
 		defer fsw.Close()
 
-		added, stopped, err := addRecursive(fsw, root, 100)
+		added, stopped, err := addRecursive(fsw, root, 100, maxWatchFiles, noIgnore)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -116,7 +116,7 @@ func TestAddRecursiveRespectsCap(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		added, stopped, err := addRecursive(fsw, root, 3)
+		added, stopped, err := addRecursive(fsw, root, 3, maxWatchFiles, noIgnore)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -125,6 +125,90 @@ func TestAddRecursiveRespectsCap(t *testing.T) {
 		}
 		if added != 0 {
 			t.Errorf("added = %d, want 0 after watcher is closed", added)
+		}
+	})
+}
+
+func noIgnore(string) bool { return false }
+
+func TestAddRecursivePrunesAndBudgets(t *testing.T) {
+	root := t.TempDir()
+	writeFiles := func(dir string, n int) {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		for i := 0; i < n; i++ {
+			if err := os.WriteFile(filepath.Join(dir, "f"+strconv.Itoa(i)), nil, 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
+	t.Run("ignore predicate prunes a subtree", func(t *testing.T) {
+		src := filepath.Join(root, "src")
+		skip := filepath.Join(root, "skipme")
+		writeFiles(src, 1)
+		writeFiles(skip, 1)
+
+		fsw, err := fsnotify.NewWatcher()
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer fsw.Close()
+
+		ignore := func(dir string) bool { return filepath.Base(dir) == "skipme" }
+		added, _, err := addRecursive(fsw, root, maxWatchDirs, maxWatchFiles, ignore)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if added != 2 { // root + src; skipme pruned
+			t.Errorf("added = %d, want 2", added)
+		}
+	})
+
+	t.Run("asset-heavy dir is skipped but subdirs still watched", func(t *testing.T) {
+		assets := filepath.Join(root, "assets")
+		writeFiles(assets, maxWatchDirEntries+1)
+		nested := filepath.Join(assets, "nested")
+		writeFiles(nested, 1)
+
+		fsw, err := fsnotify.NewWatcher()
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer fsw.Close()
+
+		added, _, err := addRecursive(fsw, filepath.Join(root, "assets"), maxWatchDirs, maxWatchFiles, noIgnore)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if added != 1 { // assets skipped (too many files), nested watched
+			t.Errorf("added = %d, want 1", added)
+		}
+	})
+
+	t.Run("file budget stops the walk", func(t *testing.T) {
+		froot := t.TempDir()
+		for i := 0; i < 3; i++ {
+			writeFiles(filepath.Join(froot, "d"+strconv.Itoa(i)), 3)
+		}
+
+		fsw, err := fsnotify.NewWatcher()
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer fsw.Close()
+
+		// fileLimit 5: root(0) + d0(3) + d1(3=6) trips the budget before d2.
+		added, stopped, err := addRecursive(fsw, froot, maxWatchDirs, 5, noIgnore)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !stopped {
+			t.Fatal("stopped = false, want true (file budget hit)")
+		}
+		if added != 3 { // root + d0 + d1; d2 cut by the file budget
+			t.Errorf("added = %d, want 3 (root + d0 + d1 before budget)", added)
 		}
 	})
 }

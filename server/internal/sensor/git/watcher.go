@@ -24,14 +24,18 @@ const (
 	// emit Create + Remove + Write within a few ms).
 	fsEventDebounce = 500 * time.Millisecond
 
-	// maxWatchDirs bounds how many directories one watcher tries to register
-	// with fsnotify. On macOS each watched dir costs file descriptors (kqueue
-	// opens the dir and its entries), so an unbounded walk over a giant
-	// monorepo — or a root that resolved too wide — can exhaust the process
-	// fd limit and wedge the HTTP listener with EMFILE. 2048 covers real
-	// projects with headroom; past it we stop adding and warn once rather
-	// than leak descriptors or keep walking after Add starts failing.
 	maxWatchDirs = 2048
+
+	// On macOS fsnotify uses kqueue, which opens one fd per file in every
+	// watched dir — so the fd budget that matters is files, not dirs.
+	maxWatchFiles = 4096
+
+	// A dir with this many files is almost certainly an asset/content folder,
+	// not hand-edited source; skip it rather than spend an fd per file. Well
+	// above a typical source dir (usually <100, occasionally a few hundred for
+	// large packages / codegen), so real code is never dropped — only the
+	// genuinely huge asset/generated folders (which run to thousands) get cut.
+	maxWatchDirEntries = 512
 )
 
 // projectWatcher watches one project root. It blends fsnotify (file
@@ -86,14 +90,14 @@ func (w *projectWatcher) start() error {
 	// Best-effort recursive watch by walking once at start. Subdirectories
 	// created later don't auto-attach — for Phase 1.2 this is acceptable;
 	// most projects have stable directory layouts.
-	added, stopped, err := addRecursive(fsw, w.cfg.Root, maxWatchDirs)
+	added, stopped, err := addRecursive(fsw, w.cfg.Root, maxWatchDirs, maxWatchFiles, w.dirShouldIgnore)
 	if err != nil {
 		_ = fsw.Close()
 		return err
 	}
 	if stopped {
-		w.logger.Warn("git watcher: stopped registering watches early (cap or fd limit); deeper subdirs unwatched",
-			"root", w.cfg.Root, "cap", maxWatchDirs, "watched", added)
+		w.logger.Warn("git watcher: stopped registering watches early (dir/file cap or fd limit); deeper subdirs unwatched",
+			"root", w.cfg.Root, "dir_cap", maxWatchDirs, "file_cap", maxWatchFiles, "watched_dirs", added)
 	}
 
 	w.wg.Add(2)
@@ -271,12 +275,24 @@ var staticIgnoreFragments = []string{
 	"/dist/",
 	"/build/",
 	"/target/",
-	"/bin/",    // Go build outputs (server/bin, tooling). Dropped here
-	"/out/",    // Java / generic build output dir
-	"/vendor/", // Go / PHP / Ruby vendored deps
-	"/.venv/",  // Python venv
-	"/venv/",   // Python venv (alt)
-	"/.tma1/",  // tma1's own data dir (avoids self-noise loop)
+	"/bin/",              // Go build outputs (server/bin, tooling). Dropped here
+	"/out/",              // Java / generic build output dir
+	"/vendor/",           // Go / PHP / Ruby vendored deps
+	"/.venv/",            // Python venv
+	"/venv/",             // Python venv (alt)
+	"/.gocache/",         // Go build cache (projects that set GOCACHE in-tree)
+	"/.gradle/",          // Gradle build state
+	"/.turbo/",           // Turborepo cache
+	"/.svelte-kit/",      // SvelteKit generated
+	"/.nuxt/",            // Nuxt generated
+	"/.parcel-cache/",    // Parcel cache
+	"/.angular/",         // Angular cache
+	"/.vitepress/cache/", // VitePress dev cache
+	"/.vitepress/dist/",  // VitePress build output
+	"/.mypy_cache/",      // mypy cache
+	"/.ruff_cache/",      // ruff cache
+	"/.terraform/",       // Terraform provider/plugin cache
+	"/.tma1/",            // tma1's own data dir (avoids self-noise loop)
 	"/.idea/",
 	"/.vscode/",
 	"/__pycache__/",
@@ -366,18 +382,32 @@ func (w *projectWatcher) shouldIgnorePath(p string) bool {
 	return false
 }
 
-// addRecursive walks root and registers up to limit directories with the
-// watcher, skipping ignored paths. It returns the number of directories
-// successfully added and whether the walk stopped early — either because it
-// hit limit or because fsnotify.Add began failing. Walk errors are non-fatal
-// (partial coverage beats none).
+// dirShouldIgnore prunes a directory at walk time. Unlike shouldIgnorePath,
+// which only drops a change record after the fact, pruning here stops the dir's
+// files from ever costing a descriptor — the whole point of honouring
+// .gitignore against build/cache dirs. The trailing slash is what the static
+// fragment list matches directories on.
+func (w *projectWatcher) dirShouldIgnore(dir string) bool {
+	if staticShouldIgnorePath(dir + "/") {
+		return true
+	}
+	if w.gitignore != nil && w.gitignore.matches(dir, w.cfg.Root) {
+		return true
+	}
+	return false
+}
+
+// addRecursive walks root and registers directories with the watcher. It
+// returns how many dirs were added and whether the walk stopped early — on the
+// dir cap, the file cap, or the first fsnotify.Add failure. Walk errors are
+// non-fatal (partial coverage beats none).
 //
-// Stopping on the first Add failure matters: once Add returns EMFILE/ENOSPC
-// the fd/watch table is full, so every further Add fails too. Continuing the
-// traversal would just burn time and IO on a doomed walk — exactly the cost
-// this watcher cap exists to avoid.
-func addRecursive(fsw *fsnotify.Watcher, root string, limit int) (int, bool, error) {
-	added := 0
+// Stopping on the first Add failure matters: once Add returns EMFILE/ENOSPC the
+// fd table is full, so every further Add fails too — continuing just burns IO
+// on a doomed walk.
+func addRecursive(fsw *fsnotify.Watcher, root string, dirLimit, fileLimit int, ignore func(dir string) bool) (int, bool, error) {
+	dirs := 0
+	files := 0
 	stopped := false
 	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -386,21 +416,42 @@ func addRecursive(fsw *fsnotify.Watcher, root string, limit int) (int, bool, err
 		if !info.IsDir() {
 			return nil
 		}
-		if staticShouldIgnorePath(path + "/") {
+		if ignore(path) {
 			return filepath.SkipDir
 		}
-		if added >= limit {
-			stopped = true // hit the watch cap
+		if dirs >= dirLimit || files >= fileLimit {
+			stopped = true
 			return filepath.SkipAll
 		}
+
+		fileCount := countFiles(path)
+		if fileCount > maxWatchDirEntries {
+			return nil // skip the dir, but keep descending into its subdirs
+		}
+
 		if fsw.Add(path) != nil {
-			stopped = true // Add failing (fd/watch exhaustion) — abandon the walk
+			stopped = true // fd/watch table full — every further Add fails too
 			return filepath.SkipAll
 		}
-		added++
+		dirs++
+		files += fileCount
 		return nil
 	})
-	return added, stopped, err
+	return dirs, stopped, err
+}
+
+func countFiles(dir string) int {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return 0
+	}
+	n := 0
+	for _, e := range entries {
+		if !e.IsDir() {
+			n++
+		}
+	}
+	return n
 }
 
 // readGitHead returns the SHA of HEAD or "" on failure. The context lets a
