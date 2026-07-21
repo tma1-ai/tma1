@@ -41,16 +41,19 @@ async function detectDataSources() {
     result.hasCodex = result.codexMetrics.length > 0;
     result.hasOpenClaw = result.ocMetrics.length > 0;
     if (result.hasLogs) {
+      // Existence probes, not aggregates: an unbounded SUM/COUNT over
+      // opentelemetry_logs (>1M rows) blows GreptimeDB's 512MiB per-query
+      // limit. "LIMIT 1" streams and short-circuits — O(1) memory. We can't
+      // add a time bound here: presence is a "has this agent EVER produced
+      // logs" question, and bounding it would drop a view for an agent idle
+      // longer than the window.
       try {
-        var logKindRes = await query(
-          "SELECT " +
-          "SUM(CASE WHEN body LIKE 'claude_code.%' OR scope_name = 'com.anthropic.claude_code.events' THEN 1 ELSE 0 END) AS claude_rows, " +
-          "SUM(CASE WHEN scope_name LIKE 'codex_%' THEN 1 ELSE 0 END) AS codex_rows " +
-          "FROM opentelemetry_logs"
-        );
-        var logKindRow = rows(logKindRes)?.[0] || [];
-        result.hasClaudeLogs = result.hasClaudeLogs || (Number(logKindRow[0]) || 0) > 0;
-        result.hasCodex = result.hasCodex || (Number(logKindRow[1]) || 0) > 0;
+        var logKindRes = await Promise.all([
+          query("SELECT 1 FROM opentelemetry_logs WHERE body LIKE 'claude_code.%' OR scope_name = 'com.anthropic.claude_code.events' LIMIT 1").catch(function() { return null; }),
+          query("SELECT 1 FROM opentelemetry_logs WHERE scope_name LIKE 'codex_%' LIMIT 1").catch(function() { return null; }),
+        ]);
+        result.hasClaudeLogs = result.hasClaudeLogs || (rows(logKindRes[0]) || []).length > 0;
+        result.hasCodex = result.hasCodex || (rows(logKindRes[1]) || []).length > 0;
       } catch { /* ignore */ }
     }
     if (result.hasTraces) {
@@ -66,9 +69,9 @@ async function detectDataSources() {
       if (!result.hasCodex) {
         try {
           var codexTraceRes = await query(
-            "SELECT COUNT(*) AS cnt FROM opentelemetry_traces WHERE service_name = 'codex_cli_rs'"
+            "SELECT 1 FROM opentelemetry_traces WHERE service_name = 'codex_cli_rs' LIMIT 1"
           );
-          result.hasCodex = (Number(rows(codexTraceRes)?.[0]?.[0]) || 0) > 0;
+          result.hasCodex = (rows(codexTraceRes) || []).length > 0;
         } catch { /* ignore */ }
       }
       // Detect OpenClaw via span_name when columns are not yet registered.
@@ -541,8 +544,8 @@ async function checkDataFreshness() {
     // Check both logs and metrics — use whichever is newer
     try {
       var ccResults = await Promise.all([
-        query("SELECT MAX(timestamp) AS last_ts FROM opentelemetry_logs").catch(function() { return null; }),
-        query("SELECT MAX(greptime_timestamp) AS last_ts FROM claude_code_token_usage_tokens_total").catch(function() { return null; }),
+        query("SELECT MAX(timestamp) AS last_ts FROM opentelemetry_logs WHERE timestamp >= now() - INTERVAL '1 day'").catch(function() { return null; }),
+        query("SELECT MAX(greptime_timestamp) AS last_ts FROM claude_code_token_usage_tokens_total WHERE greptime_timestamp >= now() - INTERVAL '1 day'").catch(function() { return null; }),
       ]);
       var ts1 = ccResults[0] && rows(ccResults[0])?.[0]?.[0];
       var ts2 = ccResults[1] && rows(ccResults[1])?.[0]?.[0];
@@ -554,8 +557,8 @@ async function checkDataFreshness() {
   } else if (currentView === 'codex') {
     try {
       var codexResults = await Promise.all([
-        query("SELECT MAX(timestamp) AS last_ts FROM opentelemetry_logs WHERE scope_name LIKE 'codex_%'").catch(function() { return null; }),
-        query("SELECT MAX(greptime_timestamp) AS last_ts FROM codex_turn_token_usage_sum").catch(function() { return null; }),
+        query("SELECT MAX(timestamp) AS last_ts FROM opentelemetry_logs WHERE scope_name LIKE 'codex_%' AND timestamp >= now() - INTERVAL '1 day'").catch(function() { return null; }),
+        query("SELECT MAX(greptime_timestamp) AS last_ts FROM codex_turn_token_usage_sum WHERE greptime_timestamp >= now() - INTERVAL '1 day'").catch(function() { return null; }),
       ]);
       var cTs1 = codexResults[0] && rows(codexResults[0])?.[0]?.[0];
       var cTs2 = codexResults[1] && rows(codexResults[1])?.[0]?.[0];
@@ -567,14 +570,14 @@ async function checkDataFreshness() {
     } catch { el.textContent = ''; el.className = 'data-freshness'; }
     return;
   } else if (currentView === 'openclaw') {
-    sql = "SELECT MAX(timestamp) AS last_ts FROM opentelemetry_traces WHERE span_name LIKE 'openclaw.%'";
+    sql = "SELECT MAX(timestamp) AS last_ts FROM opentelemetry_traces WHERE span_name LIKE 'openclaw.%' AND timestamp >= now() - INTERVAL '1 day'";
   } else if (currentView === 'sessions') {
-    sql = "SELECT MAX(ts) AS last_ts FROM tma1_hook_events";
+    sql = "SELECT MAX(ts) AS last_ts FROM tma1_hook_events WHERE ts >= now() - INTERVAL '1 day'";
   } else if (currentView === 'prompts') {
-    sql = "SELECT MAX(ts) AS last_ts FROM tma1_messages WHERE message_type = 'user'";
+    sql = "SELECT MAX(ts) AS last_ts FROM tma1_messages WHERE message_type = 'user' AND ts >= now() - INTERVAL '1 day'";
   } else if (currentView === 'traces') {
     var cols = await genai_getTraceColumns();
-    sql = "SELECT MAX(timestamp) AS last_ts FROM opentelemetry_traces WHERE " + genaiSpanWhere(cols);
+    sql = "SELECT MAX(timestamp) AS last_ts FROM opentelemetry_traces WHERE (" + genaiSpanWhere(cols) + ") AND timestamp >= now() - INTERVAL '1 day'";
   } else {
     el.textContent = '';
     return;

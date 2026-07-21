@@ -103,7 +103,7 @@ func TestMatchesWindowsPathsAgainstPOSIXPatterns(t *testing.T) {
 		path string
 		want bool
 	}{
-		{`C:\repo\bin\tma1-server.exe`, true},  // dir pattern
+		{`C:\repo\bin\tma1-server.exe`, true}, // dir pattern
 		{`C:\repo\node_modules\react\index.js`, true},
 		{`C:\repo\var\app.log`, true}, // suffix pattern
 		{`C:\repo\docs\secrets.md`, true},

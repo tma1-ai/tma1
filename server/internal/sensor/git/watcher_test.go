@@ -1,13 +1,34 @@
 package git
 
 import (
+	"math"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"testing"
 
 	"github.com/fsnotify/fsnotify"
 )
+
+func TestPlatformWatchLimits(t *testing.T) {
+	l := platformWatchLimits()
+	if l.dirs != maxWatchDirs {
+		t.Errorf("dirs = %d, want %d on every platform", l.dirs, maxWatchDirs)
+	}
+	if runtime.GOOS == "darwin" {
+		// kqueue charges a descriptor per file — file caps stay active.
+		if l.files != maxWatchFiles || l.dirEntries != maxWatchDirEntries {
+			t.Errorf("darwin file caps = (%d,%d), want (%d,%d)",
+				l.files, l.dirEntries, maxWatchFiles, maxWatchDirEntries)
+		}
+	} else {
+		// inotify / Windows watch per directory — file caps must be disabled.
+		if l.files != math.MaxInt || l.dirEntries != math.MaxInt {
+			t.Errorf("non-darwin file caps = (%d,%d), want disabled (MaxInt)", l.files, l.dirEntries)
+		}
+	}
+}
 
 func TestStaticShouldIgnorePath(t *testing.T) {
 	cases := []struct {
@@ -76,7 +97,7 @@ func TestAddRecursiveRespectsCap(t *testing.T) {
 		}
 		defer fsw.Close()
 
-		added, stopped, err := addRecursive(fsw, root, 3)
+		added, stopped, err := addRecursive(fsw, root, dirCap(3), noIgnore)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -95,7 +116,7 @@ func TestAddRecursiveRespectsCap(t *testing.T) {
 		}
 		defer fsw.Close()
 
-		added, stopped, err := addRecursive(fsw, root, 100)
+		added, stopped, err := addRecursive(fsw, root, dirCap(100), noIgnore)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -116,7 +137,7 @@ func TestAddRecursiveRespectsCap(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		added, stopped, err := addRecursive(fsw, root, 3)
+		added, stopped, err := addRecursive(fsw, root, dirCap(3), noIgnore)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -125,6 +146,152 @@ func TestAddRecursiveRespectsCap(t *testing.T) {
 		}
 		if added != 0 {
 			t.Errorf("added = %d, want 0 after watcher is closed", added)
+		}
+	})
+}
+
+func noIgnore(string) bool { return false }
+
+func fullLimits() watchLimits {
+	return watchLimits{dirs: maxWatchDirs, files: maxWatchFiles, dirEntries: maxWatchDirEntries}
+}
+
+func dirCap(n int) watchLimits {
+	l := fullLimits()
+	l.dirs = n
+	return l
+}
+
+func TestAddRecursivePrunesAndBudgets(t *testing.T) {
+	root := t.TempDir()
+	writeFiles := func(dir string, n int) {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		for i := 0; i < n; i++ {
+			if err := os.WriteFile(filepath.Join(dir, "f"+strconv.Itoa(i)), nil, 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
+	t.Run("ignore predicate prunes a subtree", func(t *testing.T) {
+		src := filepath.Join(root, "src")
+		skip := filepath.Join(root, "skipme")
+		writeFiles(src, 1)
+		writeFiles(skip, 1)
+
+		fsw, err := fsnotify.NewWatcher()
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer fsw.Close()
+
+		ignore := func(dir string) bool { return filepath.Base(dir) == "skipme" }
+		added, _, err := addRecursive(fsw, root, fullLimits(), ignore)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if added != 2 { // root + src; skipme pruned
+			t.Errorf("added = %d, want 2", added)
+		}
+	})
+
+	t.Run("asset-heavy dir is skipped but subdirs still watched", func(t *testing.T) {
+		assets := filepath.Join(root, "assets")
+		writeFiles(assets, maxWatchDirEntries+1)
+		nested := filepath.Join(assets, "nested")
+		writeFiles(nested, 1)
+
+		fsw, err := fsnotify.NewWatcher()
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer fsw.Close()
+
+		added, _, err := addRecursive(fsw, filepath.Join(root, "assets"), fullLimits(), noIgnore)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if added != 1 { // assets skipped (too many files), nested watched
+			t.Errorf("added = %d, want 1", added)
+		}
+	})
+
+	t.Run("file budget stops the walk", func(t *testing.T) {
+		froot := t.TempDir()
+		for i := 0; i < 3; i++ {
+			writeFiles(filepath.Join(froot, "d"+strconv.Itoa(i)), 3)
+		}
+
+		fsw, err := fsnotify.NewWatcher()
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer fsw.Close()
+
+		// fileLimit 5: root(0) + d0(3) = 3 fits; d1 (3) would push to 6 > 5,
+		// so it's cut before Add — the budget is never exceeded.
+		limits := fullLimits()
+		limits.files = 5
+		added, stopped, err := addRecursive(fsw, froot, limits, noIgnore)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !stopped {
+			t.Fatal("stopped = false, want true (file budget hit)")
+		}
+		if added != 2 { // root + d0; d1 cut before Add to keep files <= 5
+			t.Errorf("added = %d, want 2 (root + d0; d1 would exceed budget)", added)
+		}
+	})
+
+	t.Run("disabled file caps watch asset-heavy dirs", func(t *testing.T) {
+		aroot := t.TempDir()
+		writeFiles(filepath.Join(aroot, "assets"), maxWatchDirEntries+1)
+
+		fsw, err := fsnotify.NewWatcher()
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer fsw.Close()
+
+		// Off kqueue the file caps are MaxInt: a file-heavy dir must still be
+		// watched, and countFiles is skipped entirely.
+		uncapped := watchLimits{dirs: maxWatchDirs, files: math.MaxInt, dirEntries: math.MaxInt}
+		added, stopped, err := addRecursive(fsw, aroot, uncapped, noIgnore)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if stopped {
+			t.Fatal("stopped = true, want false (no file caps)")
+		}
+		if added != 2 { // root + assets; not skipped despite file count
+			t.Errorf("added = %d, want 2 (asset dir watched when caps disabled)", added)
+		}
+	})
+
+	t.Run("root is never pruned by the ignore predicate", func(t *testing.T) {
+		proot := t.TempDir()
+		writeFiles(filepath.Join(proot, "src"), 1)
+
+		fsw, err := fsnotify.NewWatcher()
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer fsw.Close()
+
+		// Mirrors a repo whose .gitignore lists an artifact sharing its own
+		// name, making the matcher hit the root. The root must still be
+		// watched — otherwise the walk registers zero watches and every
+		// change is silently missed.
+		ignoreAll := func(string) bool { return true }
+		added, _, err := addRecursive(fsw, proot, fullLimits(), ignoreAll)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if added < 1 {
+			t.Errorf("added = %d, want >=1 (root watched despite ignore match)", added)
 		}
 	})
 }

@@ -17,10 +17,10 @@ import (
 //
 // The sensor is closed by canceling the context passed to Start.
 type Sensor struct {
-	writer  EventWriter
-	attr    Attributor
-	logger  *slog.Logger
-	host    string
+	writer EventWriter
+	attr   Attributor
+	logger *slog.Logger
+	host   string
 
 	mu       sync.Mutex
 	watching map[string]*projectWatcher // project_root → watcher
