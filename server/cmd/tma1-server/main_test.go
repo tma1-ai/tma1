@@ -2,9 +2,51 @@ package main
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestRotateLogIfLarge(t *testing.T) {
+	newFile := func(size int) *os.File {
+		f, err := os.CreateTemp(t.TempDir(), "log")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.Write(make([]byte, size)); err != nil {
+			t.Fatal(err)
+		}
+		return f
+	}
+
+	t.Run("truncates when at or over threshold", func(t *testing.T) {
+		f := newFile(100)
+		defer f.Close()
+		rotateLogIfLarge(f, 50)
+		if fi, _ := f.Stat(); fi.Size() != 0 {
+			t.Errorf("size = %d, want 0", fi.Size())
+		}
+	})
+
+	t.Run("keeps when under threshold", func(t *testing.T) {
+		f := newFile(30)
+		defer f.Close()
+		rotateLogIfLarge(f, 50)
+		if fi, _ := f.Stat(); fi.Size() != 30 {
+			t.Errorf("size = %d, want 30", fi.Size())
+		}
+	})
+
+	t.Run("no-op on non-regular file", func(t *testing.T) {
+		d, err := os.Open(filepath.Dir(t.TempDir()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer d.Close()
+		rotateLogIfLarge(d, 0) // must not panic or truncate a directory
+	})
+}
 
 func TestDispatch(t *testing.T) {
 	tests := []struct {

@@ -301,6 +301,25 @@ func runHelp(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
+// logRotateThreshold is the size past which the redirected stdout log is
+// truncated at startup. High enough that a crash loop won't reach it in one
+// sitting (so the crash log survives), low enough to cap disk use.
+const logRotateThreshold = 128 << 20 // 128 MiB
+
+// rotateLogIfLarge truncates f in place when it is a regular file grown past
+// maxBytes. It targets the service manager's redirected stdout/stderr: both
+// are appended (O_APPEND) to one file, so a plain Truncate(0) resets it and
+// subsequent writes resume from the new EOF — no path lookup, and stderr
+// (same inode) is reclaimed too. When f is a tty or pipe (interactive run, or
+// journald on Linux) Stat reports a non-regular file and this is a no-op.
+func rotateLogIfLarge(f *os.File, maxBytes int64) {
+	fi, err := f.Stat()
+	if err != nil || !fi.Mode().IsRegular() || fi.Size() < maxBytes {
+		return
+	}
+	_ = f.Truncate(0)
+}
+
 func main() {
 	// Subcommand routing. The default (no args) runs the full HTTP server.
 	if len(os.Args) > 1 {
@@ -328,6 +347,12 @@ func main() {
 	default:
 		logLevel.Set(slog.LevelInfo)
 	}
+
+	// Reclaim the redirected stdout/stderr log before we start writing to it.
+	// Under launchd/systemd both streams append to one file that would grow
+	// without bound (every HTTP request is access-logged). No-op when stdout
+	// isn't a regular file (tty, or a journald pipe on Linux).
+	rotateLogIfLarge(os.Stdout, logRotateThreshold)
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 		Level: &logLevel,
