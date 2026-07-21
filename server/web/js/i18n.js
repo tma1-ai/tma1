@@ -231,7 +231,7 @@ var I18N = {
     'ui.system': 'System',
     // Data freshness
     'freshness.last_data': 'Last data: ',
-    'freshness.no_data': 'No data',
+    'freshness.no_data': 'No data in 24h',
     // Errors
     'error.greptimedb': 'Could not reach GreptimeDB: ',
     'error.cc_metrics': 'Could not load Claude Code metrics: ',
@@ -824,7 +824,7 @@ var I18N = {
     'ui.dark': '\u6df1\u8272',
     'ui.system': '\u7cfb\u7edf',
     'freshness.last_data': '\u6700\u540e\u6570\u636e: ',
-    'freshness.no_data': '\u65e0\u6570\u636e',
+    'freshness.no_data': '24 \u5c0f\u65f6\u5185\u65e0\u6570\u636e',
     'error.greptimedb': '\u65e0\u6cd5\u8fde\u63a5 GreptimeDB\uff1a',
     'error.cc_metrics': '\u65e0\u6cd5\u52a0\u8f7d Claude Code \u6307\u6807\uff1a',
     'error.search': '\u641c\u7d22\u9519\u8bef\uff1a',
@@ -1400,7 +1400,7 @@ var I18N = {
     'ui.dark': 'Oscuro',
     'ui.system': 'Sistema',
     'freshness.last_data': '\u00dalt. datos: ',
-    'freshness.no_data': 'Sin datos',
+    'freshness.no_data': 'Sin datos en 24h',
     'error.greptimedb': 'No se pudo conectar a GreptimeDB: ',
     'error.cc_metrics': 'No se pudieron cargar m\u00e9tricas de Claude Code: ',
     'error.search': 'Error de b\u00fasqueda: ',

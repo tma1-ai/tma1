@@ -3,9 +3,11 @@ package git
 import (
 	"context"
 	"log/slog"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -26,8 +28,12 @@ const (
 
 	maxWatchDirs = 2048
 
-	// On macOS fsnotify uses kqueue, which opens one fd per file in every
-	// watched dir — so the fd budget that matters is files, not dirs.
+	// maxWatchFiles / maxWatchDirEntries only apply on kqueue (macOS), where
+	// fsnotify opens one fd per file in every watched dir — there the fd budget
+	// that matters is files, not dirs. On inotify (Linux) and Windows a watch
+	// is per-directory, so file counts don't track resource use; both limits
+	// are disabled there (see platformWatchLimits) to avoid dropping changes in
+	// large repos.
 	maxWatchFiles = 4096
 
 	// A dir with this many files is almost certainly an asset/content folder,
@@ -37,6 +43,28 @@ const (
 	// genuinely huge asset/generated folders (which run to thousands) get cut.
 	maxWatchDirEntries = 512
 )
+
+// watchLimits bounds a single project walk. dirs caps registered directories
+// (meaningful on every backend); files and dirEntries cap file-descriptor cost
+// and only bite on kqueue (see platformWatchLimits).
+type watchLimits struct {
+	dirs       int
+	files      int
+	dirEntries int
+}
+
+// platformWatchLimits returns the walk caps for the current OS. Only kqueue
+// charges a descriptor per watched file, so the file-count caps are disabled
+// off macOS — there a watch is per-directory and file counts would needlessly
+// truncate coverage of large repos.
+func platformWatchLimits() watchLimits {
+	l := watchLimits{dirs: maxWatchDirs, files: maxWatchFiles, dirEntries: maxWatchDirEntries}
+	if runtime.GOOS != "darwin" {
+		l.files = math.MaxInt
+		l.dirEntries = math.MaxInt
+	}
+	return l
+}
 
 // projectWatcher watches one project root. It blends fsnotify (file
 // modifications) with a periodic git poll (commit / branch movement).
@@ -90,14 +118,15 @@ func (w *projectWatcher) start() error {
 	// Best-effort recursive watch by walking once at start. Subdirectories
 	// created later don't auto-attach — for Phase 1.2 this is acceptable;
 	// most projects have stable directory layouts.
-	added, stopped, err := addRecursive(fsw, w.cfg.Root, maxWatchDirs, maxWatchFiles, w.dirShouldIgnore)
+	limits := platformWatchLimits()
+	added, stopped, err := addRecursive(fsw, w.cfg.Root, limits, w.dirShouldIgnore)
 	if err != nil {
 		_ = fsw.Close()
 		return err
 	}
 	if stopped {
 		w.logger.Warn("git watcher: stopped registering watches early (dir/file cap or fd limit); deeper subdirs unwatched",
-			"root", w.cfg.Root, "dir_cap", maxWatchDirs, "file_cap", maxWatchFiles, "watched_dirs", added)
+			"root", w.cfg.Root, "dir_cap", limits.dirs, "file_cap", limits.files, "watched_dirs", added)
 	}
 
 	w.wg.Add(2)
@@ -402,10 +431,16 @@ func (w *projectWatcher) dirShouldIgnore(dir string) bool {
 // dir cap, the file cap, or the first fsnotify.Add failure. Walk errors are
 // non-fatal (partial coverage beats none).
 //
+// The root directory itself is never subject to the ignore predicate: it is
+// the thing we were asked to watch, and a project whose .gitignore lists an
+// artifact sharing the repo's own name (e.g. `/codora` in a repo named codora)
+// would otherwise prune the root and start with zero watches, silently missing
+// every change.
+//
 // Stopping on the first Add failure matters: once Add returns EMFILE/ENOSPC the
 // fd table is full, so every further Add fails too — continuing just burns IO
 // on a doomed walk.
-func addRecursive(fsw *fsnotify.Watcher, root string, dirLimit, fileLimit int, ignore func(dir string) bool) (int, bool, error) {
+func addRecursive(fsw *fsnotify.Watcher, root string, limits watchLimits, ignore func(dir string) bool) (int, bool, error) {
 	dirs := 0
 	files := 0
 	stopped := false
@@ -416,16 +451,16 @@ func addRecursive(fsw *fsnotify.Watcher, root string, dirLimit, fileLimit int, i
 		if !info.IsDir() {
 			return nil
 		}
-		if ignore(path) {
+		if path != root && ignore(path) {
 			return filepath.SkipDir
 		}
-		if dirs >= dirLimit || files >= fileLimit {
+		if dirs >= limits.dirs || files >= limits.files {
 			stopped = true
 			return filepath.SkipAll
 		}
 
 		fileCount := countFiles(path)
-		if fileCount > maxWatchDirEntries {
+		if fileCount > limits.dirEntries {
 			return nil // skip the dir, but keep descending into its subdirs
 		}
 

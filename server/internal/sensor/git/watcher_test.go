@@ -1,13 +1,34 @@
 package git
 
 import (
+	"math"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"testing"
 
 	"github.com/fsnotify/fsnotify"
 )
+
+func TestPlatformWatchLimits(t *testing.T) {
+	l := platformWatchLimits()
+	if l.dirs != maxWatchDirs {
+		t.Errorf("dirs = %d, want %d on every platform", l.dirs, maxWatchDirs)
+	}
+	if runtime.GOOS == "darwin" {
+		// kqueue charges a descriptor per file — file caps stay active.
+		if l.files != maxWatchFiles || l.dirEntries != maxWatchDirEntries {
+			t.Errorf("darwin file caps = (%d,%d), want (%d,%d)",
+				l.files, l.dirEntries, maxWatchFiles, maxWatchDirEntries)
+		}
+	} else {
+		// inotify / Windows watch per directory — file caps must be disabled.
+		if l.files != math.MaxInt || l.dirEntries != math.MaxInt {
+			t.Errorf("non-darwin file caps = (%d,%d), want disabled (MaxInt)", l.files, l.dirEntries)
+		}
+	}
+}
 
 func TestStaticShouldIgnorePath(t *testing.T) {
 	cases := []struct {
@@ -76,7 +97,7 @@ func TestAddRecursiveRespectsCap(t *testing.T) {
 		}
 		defer fsw.Close()
 
-		added, stopped, err := addRecursive(fsw, root, 3, maxWatchFiles, noIgnore)
+		added, stopped, err := addRecursive(fsw, root, dirCap(3), noIgnore)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -95,7 +116,7 @@ func TestAddRecursiveRespectsCap(t *testing.T) {
 		}
 		defer fsw.Close()
 
-		added, stopped, err := addRecursive(fsw, root, 100, maxWatchFiles, noIgnore)
+		added, stopped, err := addRecursive(fsw, root, dirCap(100), noIgnore)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -116,7 +137,7 @@ func TestAddRecursiveRespectsCap(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		added, stopped, err := addRecursive(fsw, root, 3, maxWatchFiles, noIgnore)
+		added, stopped, err := addRecursive(fsw, root, dirCap(3), noIgnore)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -130,6 +151,16 @@ func TestAddRecursiveRespectsCap(t *testing.T) {
 }
 
 func noIgnore(string) bool { return false }
+
+func fullLimits() watchLimits {
+	return watchLimits{dirs: maxWatchDirs, files: maxWatchFiles, dirEntries: maxWatchDirEntries}
+}
+
+func dirCap(n int) watchLimits {
+	l := fullLimits()
+	l.dirs = n
+	return l
+}
 
 func TestAddRecursivePrunesAndBudgets(t *testing.T) {
 	root := t.TempDir()
@@ -157,7 +188,7 @@ func TestAddRecursivePrunesAndBudgets(t *testing.T) {
 		defer fsw.Close()
 
 		ignore := func(dir string) bool { return filepath.Base(dir) == "skipme" }
-		added, _, err := addRecursive(fsw, root, maxWatchDirs, maxWatchFiles, ignore)
+		added, _, err := addRecursive(fsw, root, fullLimits(), ignore)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -178,7 +209,7 @@ func TestAddRecursivePrunesAndBudgets(t *testing.T) {
 		}
 		defer fsw.Close()
 
-		added, _, err := addRecursive(fsw, filepath.Join(root, "assets"), maxWatchDirs, maxWatchFiles, noIgnore)
+		added, _, err := addRecursive(fsw, filepath.Join(root, "assets"), fullLimits(), noIgnore)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -200,7 +231,9 @@ func TestAddRecursivePrunesAndBudgets(t *testing.T) {
 		defer fsw.Close()
 
 		// fileLimit 5: root(0) + d0(3) + d1(3=6) trips the budget before d2.
-		added, stopped, err := addRecursive(fsw, froot, maxWatchDirs, 5, noIgnore)
+		limits := fullLimits()
+		limits.files = 5
+		added, stopped, err := addRecursive(fsw, froot, limits, noIgnore)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -209,6 +242,30 @@ func TestAddRecursivePrunesAndBudgets(t *testing.T) {
 		}
 		if added != 3 { // root + d0 + d1; d2 cut by the file budget
 			t.Errorf("added = %d, want 3 (root + d0 + d1 before budget)", added)
+		}
+	})
+
+	t.Run("root is never pruned by the ignore predicate", func(t *testing.T) {
+		proot := t.TempDir()
+		writeFiles(filepath.Join(proot, "src"), 1)
+
+		fsw, err := fsnotify.NewWatcher()
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer fsw.Close()
+
+		// Mirrors a repo whose .gitignore lists an artifact sharing its own
+		// name, making the matcher hit the root. The root must still be
+		// watched — otherwise the walk registers zero watches and every
+		// change is silently missed.
+		ignoreAll := func(string) bool { return true }
+		added, _, err := addRecursive(fsw, proot, fullLimits(), ignoreAll)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if added < 1 {
+			t.Errorf("added = %d, want >=1 (root watched despite ignore match)", added)
 		}
 	})
 }
