@@ -230,7 +230,8 @@ func TestAddRecursivePrunesAndBudgets(t *testing.T) {
 		}
 		defer fsw.Close()
 
-		// fileLimit 5: root(0) + d0(3) + d1(3=6) trips the budget before d2.
+		// fileLimit 5: root(0) + d0(3) = 3 fits; d1 (3) would push to 6 > 5,
+		// so it's cut before Add — the budget is never exceeded.
 		limits := fullLimits()
 		limits.files = 5
 		added, stopped, err := addRecursive(fsw, froot, limits, noIgnore)
@@ -240,8 +241,33 @@ func TestAddRecursivePrunesAndBudgets(t *testing.T) {
 		if !stopped {
 			t.Fatal("stopped = false, want true (file budget hit)")
 		}
-		if added != 3 { // root + d0 + d1; d2 cut by the file budget
-			t.Errorf("added = %d, want 3 (root + d0 + d1 before budget)", added)
+		if added != 2 { // root + d0; d1 cut before Add to keep files <= 5
+			t.Errorf("added = %d, want 2 (root + d0; d1 would exceed budget)", added)
+		}
+	})
+
+	t.Run("disabled file caps watch asset-heavy dirs", func(t *testing.T) {
+		aroot := t.TempDir()
+		writeFiles(filepath.Join(aroot, "assets"), maxWatchDirEntries+1)
+
+		fsw, err := fsnotify.NewWatcher()
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer fsw.Close()
+
+		// Off kqueue the file caps are MaxInt: a file-heavy dir must still be
+		// watched, and countFiles is skipped entirely.
+		uncapped := watchLimits{dirs: maxWatchDirs, files: math.MaxInt, dirEntries: math.MaxInt}
+		added, stopped, err := addRecursive(fsw, aroot, uncapped, noIgnore)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if stopped {
+			t.Fatal("stopped = true, want false (no file caps)")
+		}
+		if added != 2 { // root + assets; not skipped despite file count
+			t.Errorf("added = %d, want 2 (asset dir watched when caps disabled)", added)
 		}
 	})
 

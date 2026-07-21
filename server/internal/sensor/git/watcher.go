@@ -53,6 +53,13 @@ type watchLimits struct {
 	dirEntries int
 }
 
+// fileCapped reports whether the per-file caps are active. When both are
+// disabled (off kqueue) the walk can skip counting a directory's files
+// entirely — the count would only feed limits that never trip.
+func (l watchLimits) fileCapped() bool {
+	return l.files != math.MaxInt || l.dirEntries != math.MaxInt
+}
+
 // platformWatchLimits returns the walk caps for the current OS. Only kqueue
 // charges a descriptor per watched file, so the file-count caps are disabled
 // off macOS — there a watch is per-directory and file counts would needlessly
@@ -454,14 +461,23 @@ func addRecursive(fsw *fsnotify.Watcher, root string, limits watchLimits, ignore
 		if path != root && ignore(path) {
 			return filepath.SkipDir
 		}
-		if dirs >= limits.dirs || files >= limits.files {
+		if dirs >= limits.dirs {
 			stopped = true
 			return filepath.SkipAll
 		}
 
-		fileCount := countFiles(path)
-		if fileCount > limits.dirEntries {
-			return nil // skip the dir, but keep descending into its subdirs
+		// File/entry accounting only matters on kqueue, where each watched
+		// file costs an fd. Off it the countFiles scan is pure wasted IO.
+		fileCount := 0
+		if limits.fileCapped() {
+			fileCount = countFiles(path)
+			if fileCount > limits.dirEntries {
+				return nil // skip the asset dir, but keep descending its subdirs
+			}
+			if files+fileCount > limits.files {
+				stopped = true // Adding this dir would exceed the fd budget
+				return filepath.SkipAll
+			}
 		}
 
 		if fsw.Add(path) != nil {
