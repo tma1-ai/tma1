@@ -239,6 +239,42 @@ column lists + sample queries that get published with the skill.
 | `TMA1_DEBUG_POSTTOOLUSE` | (unset) | Set to `1` to emit a debug marker on every PostToolUse hook regardless of anomalies. Plumbing aid. |
 | `TMA1_CONTEXT_PRESSURE_THRESHOLD` | `100000` | Input-token threshold (whole-session sum) for the R-context-pressure anomaly. ≈ 50 % of CC Sonnet 4's 200 k context. |
 | `OPENCLAW_STATE_DIR` | `~/.openclaw` (with `~/.clawdbot` legacy fallback) | Override the OpenClaw session base directory the transcript scanner watches. |
+| `TMA1_RELAY_WAKE_TIMEOUT` | `10m` | How long the relay waits for a woken peer to hand back before nudging the originator's terminal. `0` disables the nudge. Go duration syntax. |
+| `TMA1_RELAY_BRACKETED_PASTE` | `1` | iTerm waker wraps multi-line prompts in bracketed-paste markers so the REPL takes them as one block. Set `0` to fall back to single-line injection (collapse newlines) for a REPL that doesn't honour `ESC[?2004h`. |
+| `TMA1_RELAY_ITERM_BUSY_GATE` | `1` | iTerm waker skips injection (returns busy, no worker fallback) when the target session `is processing`. Set `0` to inject regardless. |
+| `TMA1_OSASCRIPT_PATH` / `TMA1_TMUX_PATH` / `TMA1_CODEX_PATH` / `TMA1_CLAUDE_PATH` | (LookPath) | Override the resolved binary for a waker when launchd's narrow PATH can't find it. |
+
+## Relay handoff (`internal/relay`)
+
+Cross-agent driver↔reviewer auto-handoff. At a milestone the driver/reviewer
+calls the `tma1_handoff` MCP tool → `POST /api/relay/signal` (token-gated) →
+the `Coordinator` looks up the transition, resolves the counterpart's
+registered terminal, and a `Waker` injects the next instruction (with the
+peer's summary inline).
+
+- **Wakers**, tried in reliability order (`Registry`): `tmux` (pane-precise,
+  `set-buffer` + `paste-buffer -p` bracketed paste + `Enter`) → `iterm`
+  (osascript locates the session by its `ITERM_SESSION_ID` UUID, injects via
+  `write text … newline no` + a submit Enter; the prompt is passed as
+  osascript **argv**, never interpolated into the AppleScript source) →
+  `worker` (universal headless fallback: `codex exec` / `claude -p`, detached).
+  A busy iTerm session stops the chain (no duplicate worker); a dead/closed
+  session id falls through.
+- **Terminal registry**: hook scripts report `X-Tma1-Role` +
+  `X-Tma1-Terminal` (`tmux=$TMUX_PANE;iterm=$ITERM_SESSION_ID;…`) on every
+  event. `SessionStart` registers, `SessionEnd` unregisters, every other
+  event (including CC's per-turn `Stop`) refreshes `LastSeen`.
+- **Busy-debounce + timeout**: once a role is woken it's marked pending; a
+  re-signal to a still-pending role is dropped honestly (caller retries),
+  and if the peer never hands back within `TMA1_RELAY_WAKE_TIMEOUT` the
+  originator is nudged. Pending clears on the peer's own next signal or
+  `SessionEnd`.
+- **Configurable transitions**: an optional `~/.tma1/relay.json`
+  (`{"transitions":{"plan_ready":{"wake_role":"reviewer","prompt":"…"}}}`)
+  overrides the built-in 4-stage table; malformed → built-in defaults.
+- **macOS TCC**: the first osascript that controls iTerm triggers an
+  Automation-permission prompt. Under launchd (no GUI session) it fails
+  silently with `-1743` → the iterm waker surfaces it and falls through.
 
 ## Where to look
 

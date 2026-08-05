@@ -6,6 +6,8 @@
 # Codex hook protocol: stdin = JSON object with snake_case keys. stdout =
 # JSON object. Empty stdout (or {}) is the silent-no-op signal.
 #
+# Relay headers: see tma1-hook.ps1.tmpl. Codex's baked role is "reviewer".
+#
 # Fail-safe: any error → empty stdout, exit 0. Never blocks the agent.
 # PowerShell's Invoke-WebRequest only accepts whole-second timeouts; we
 # trade ~500 ms of latency on Windows for keeping the script dependency-
@@ -13,9 +15,12 @@
 # 300 ms `hookInjectionTimeout` cap.
 $ErrorActionPreference = 'SilentlyContinue'
 $body = [Console]::In.ReadToEnd()
+$role = if ($env:TMA1_RELAY_ROLE) { $env:TMA1_RELAY_ROLE } else { '{{ROLE}}' }
+$term = "tmux=$($env:TMUX_PANE);iterm=$($env:ITERM_SESSION_ID);wezterm=$($env:WEZTERM_PANE);kitty=$($env:KITTY_LISTEN_ON)"
+$headers = @{ 'X-Tma1-Role' = $role; 'X-Tma1-Terminal' = $term }
 try {
     $resp = Invoke-WebRequest -Uri 'http://127.0.0.1:{{PORT}}/api/hooks?source=codex&envelope=codex' `
-        -Method POST -ContentType 'application/json' -Body $body -TimeoutSec 1 -UseBasicParsing
+        -Method POST -ContentType 'application/json' -Headers $headers -Body $body -TimeoutSec 1 -UseBasicParsing
     if ($resp.Content) { [Console]::Out.Write($resp.Content) }
 } catch {
     exit 0

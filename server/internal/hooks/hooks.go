@@ -8,7 +8,10 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
+
+	"github.com/tma1-ai/tma1/server/internal/relay"
 )
 
 //go:embed tma1-hook.sh.tmpl
@@ -44,8 +47,9 @@ func EnsureHookScript(dataDir string, port int, logger *slog.Logger) (string, er
 
 // EnsureHookScriptFor writes the hook script for the requested adapter
 // to <dataDir>/hooks/. Unix gets a `.sh`, Windows gets a `.ps1`. The
-// content is the embedded template with `{{PORT}}` substituted.
-// Idempotent — the file is only rewritten if its content differs.
+// content is the embedded template with `{{PORT}}` and `{{ROLE}}`
+// substituted. Idempotent — the file is only rewritten if its content
+// differs.
 func EnsureHookScriptFor(adapter Adapter, dataDir string, port int, logger *slog.Logger) (string, error) {
 	dir := filepath.Join(dataDir, "hooks")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -55,7 +59,43 @@ func EnsureHookScriptFor(adapter Adapter, dataDir string, port int, logger *slog
 	portStr := fmt.Sprintf("%d", port)
 	tmpl, name := selectHookTemplate(adapter)
 	content := strings.ReplaceAll(tmpl, "{{PORT}}", portStr)
+	content = strings.ReplaceAll(content, "{{ROLE}}", defaultRole(adapter))
 	return writeScript(filepath.Join(dir, name), content, logger)
+}
+
+// defaultRole maps an adapter to its relay role: Claude Code drives the
+// workflow (driver), Codex reviews (reviewer). Baked into the hook
+// script as the {{ROLE}} default and overridable at runtime via the
+// TMA1_RELAY_ROLE env in the agent's shell. Deriving from the adapter
+// (rather than an install flag) keeps the server-startup EnsureHookScript
+// and the installer writing identical script content for a given adapter,
+// so neither clobbers the other.
+func defaultRole(adapter Adapter) string {
+	if adapter == AdapterCodex {
+		return relay.RoleReviewer
+	}
+	return relay.RoleDriver
+}
+
+// relayEnv returns the MCP-child env entries the relay handoff tool needs:
+// the parent server port to POST signals to, the agent's role, and the
+// shared signal-auth token. Merged into each adapter's MCP server env.
+func relayEnv(dataDir string, port int, role string, dryRun bool) map[string]any {
+	env := map[string]any{
+		"TMA1_PORT":       strconv.Itoa(port),
+		"TMA1_RELAY_ROLE": role,
+	}
+	var tok string
+	if dryRun {
+		// Dry-run must not create the token file; only surface an existing one.
+		tok, _ = relay.LoadToken(dataDir)
+	} else if t, err := relay.LoadOrCreateToken(dataDir); err == nil {
+		tok = t
+	}
+	if tok != "" {
+		env["TMA1_RELAY_TOKEN"] = tok
+	}
+	return env
 }
 
 // HookScriptPath returns the CC hook script path EnsureHookScript

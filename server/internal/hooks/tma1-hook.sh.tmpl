@@ -5,9 +5,18 @@
 # empty) is written to stdout so Claude Code can use it as injection content
 # (UserPromptSubmit prepend, PostToolUse append, etc).
 #
+# Relay headers: the script runs in the agent's terminal, so it can read the
+# terminal identifiers (TMUX_PANE, ITERM_SESSION_ID, ...) that tma1-server
+# can't see from its own env. X-Tma1-Role defaults to the adapter's baked
+# role and is overridable via TMA1_RELAY_ROLE in the agent's shell.
+#
 # Fail-safe: any error → empty stdout, exit 0. Never blocks the agent.
+TMA1_ROLE="${TMA1_RELAY_ROLE:-{{ROLE}}}"
+TMA1_TERM="tmux=${TMUX_PANE};iterm=${ITERM_SESSION_ID};wezterm=${WEZTERM_PANE};kitty=${KITTY_LISTEN_ON}"
 RESPONSE=$(curl -sf -m 0.5 -X POST \
   -H 'Content-Type: application/json' \
+  -H "X-Tma1-Role: ${TMA1_ROLE}" \
+  -H "X-Tma1-Terminal: ${TMA1_TERM}" \
   --data-binary @- \
   "http://127.0.0.1:{{PORT}}/api/hooks" 2>/dev/null) || exit 0
 printf '%s' "$RESPONSE"
