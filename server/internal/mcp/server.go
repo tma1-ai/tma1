@@ -23,14 +23,18 @@ const (
 	protocolVersion = "2024-11-05"
 	serverName      = "tma1"
 
-	scannerInitBuf = 256 * 1024
-	scannerMaxBuf  = 4 * 1024 * 1024
+	scannerInitBuf = 256 * 1024      // 256 KB initial
+	scannerMaxBuf  = 4 * 1024 * 1024 // 4 MB max — perception bundles can be larger than devtap's
 
 	// toolCallTimeout bounds every tools/call. All tools are read-only
 	// context queries against the local GreptimeDB; the perception HTTP
-	// client caps each query at 3s, but a tool that fans out had no overall
-	// ceiling. Applied once at the dispatch boundary so every tool is bounded
-	// and the deadline propagates through context to in-flight queries.
+	// client caps each query at 3s, but a tool that fans out (e.g.
+	// get_context_bundle: session state + anomalies + project state, or
+	// get_peer_sessions: cwd lookup + list + per-session enrichment) had no
+	// overall ceiling, so a slow GreptimeDB could stack those past 10s and
+	// make the agent appear hung. Applied once at the dispatch boundary so
+	// every tool — current and future — is bounded; the deadline propagates
+	// through context to every in-flight query, cancelling them together.
 	toolCallTimeout = 10 * time.Second
 )
 
@@ -40,7 +44,12 @@ var ServerVersion = "dev"
 // ToolHandler implements a single MCP tool. Each tools/call dispatch
 // runs in its own goroutine, so individual Call invocations can race
 // each other within one Server. Every tma1 Bundler/Detector method
-// called from a tool must be safe for concurrent use.
+// called from a tool must be safe for concurrent use (they are).
+//
+// Why concurrent: a single slow or stuck tool call must NOT block
+// stdin from being read or other replies from being written. The
+// previous serial loop wedged the whole MCP child the first time any
+// call took long enough for the agent's stdout pipe to buffer up.
 type ToolHandler interface {
 	Definition() Tool
 	Call(ctx context.Context, args map[string]any) (CallToolResult, error)
@@ -53,12 +62,13 @@ type Server struct {
 	in     io.Reader
 	out    io.Writer
 	// writeMu serialises writes to s.out so concurrent tool-call
-	// goroutines can't interleave JSON frames mid-line.
+	// goroutines can't interleave JSON frames mid-line. Single mutex
+	// is enough — Fprintf is fast vs the SQL roundtrips upstream.
 	writeMu sync.Mutex
 }
 
 // NewServer creates a Server with the given tools.
-// logger MUST write to stderr (not stdout), see package doc.
+// logger MUST write to stderr (not stdout) — see package doc.
 func NewServer(logger *slog.Logger, tools ...ToolHandler) *Server {
 	m := make(map[string]ToolHandler, len(tools))
 	for _, t := range tools {
@@ -81,18 +91,17 @@ func (s *Server) SetIO(in io.Reader, out io.Writer) {
 // Run reads JSON-RPC frames from s.in and writes responses to s.out.
 // Each tools/call is dispatched in its own goroutine so a slow tool
 // can't block stdin or other replies. Returns when stdin reaches EOF,
-// the scanner fails, or ctx is canceled. When the input implements
-// io.Closer (os.Stdin and io.PipeReader do), cancellation closes it so
-// an idle scanner.Scan is interrupted rather than pinning shutdown.
+// the scanner fails, or ctx is canceled; in-flight tool goroutines are
+// then allowed to finish via the WaitGroup so we don't drop responses.
+// When input is closable, cancellation closes it to unblock an idle Scan.
 func (s *Server) Run(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 
-	// bufio.Scanner has no context-aware Scan method. Closing the stdio input is
-	// the portable way to wake a blocked Read during process shutdown. The
-	// watcher goroutine also exits on normal Run completion, so an EOF return
-	// does not leave a goroutine waiting on ctx forever.
+	// bufio.Scanner has no context-aware Scan method. Production input is
+	// os.Stdin, so closing it on cancellation wakes a blocked Read. Stop the
+	// helper on normal EOF so Run doesn't retain a goroutine waiting on ctx.
 	inputWatcherDone := make(chan struct{})
 	if closer, ok := s.in.(io.Closer); ok {
 		go func() {
@@ -128,9 +137,10 @@ func (s *Server) Run(ctx context.Context) error {
 			continue
 		}
 
-		// Run each request concurrently. The handler is responsible for
-		// shipping exactly one response (or none for notifications); writes
-		// are serialised so JSON frames cannot interleave.
+		// Run each request concurrently. The handler is responsible
+		// for shipping exactly one response (or none for
+		// notifications); writes are serialised through s.write's
+		// mutex so JSON frames can't interleave.
 		inflight.Add(1)
 		go func(req Request) {
 			defer inflight.Done()
@@ -163,9 +173,12 @@ func (s *Server) Run(ctx context.Context) error {
 }
 
 func (s *Server) handle(ctx context.Context, req Request) {
-	// A request without "id" is a notification per JSON-RPC 2.0. None of the
-	// methods exposed here has notification-relevant side effects, so the whole
-	// frame can be dropped without a response.
+	// A request without "id" is a notification per JSON-RPC 2.0 — no
+	// response is sent and the method body isn't executed either. None
+	// of the methods we expose has notification-relevant side effects
+	// (initialize/tools.list/tools.call/ping are all idempotent reads
+	// or queries), so dropping the whole frame is the correct behaviour.
+	// Revisit only if a future method needs to act on a notification.
 	if !req.HasID() {
 		return
 	}
