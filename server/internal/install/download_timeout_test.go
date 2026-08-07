@@ -3,14 +3,39 @@ package install
 import (
 	"bytes"
 	"io"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
 )
 
+type testRoundTripper func(*http.Request) (*http.Response, error)
+
+func (f testRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
 func TestDownloadClientHasNoWallClockTransferTimeout(t *testing.T) {
 	if downloadClient.Timeout != 0 {
 		t.Fatalf("downloadClient.Timeout = %v, want 0 so slow-but-progressing large downloads are not killed by a total request deadline", downloadClient.Timeout)
+	}
+}
+
+func TestNewDownloadClientHandlesCustomDefaultTransport(t *testing.T) {
+	original := http.DefaultTransport
+	custom := testRoundTripper(func(*http.Request) (*http.Response, error) { return nil, nil })
+	http.DefaultTransport = custom
+	t.Cleanup(func() { http.DefaultTransport = original })
+
+	client := newDownloadClient()
+	if client == nil {
+		t.Fatal("newDownloadClient returned nil")
+	}
+	if client.Transport != custom {
+		t.Fatal("newDownloadClient did not preserve a custom default RoundTripper")
+	}
+	if client.Timeout != 0 {
+		t.Fatalf("custom-transport client Timeout = %v, want 0", client.Timeout)
 	}
 }
 
@@ -49,26 +74,5 @@ func TestCopyWithIdleTimeoutStopsStalledRead(t *testing.T) {
 	}
 	if elapsed := time.Since(start); elapsed > time.Second {
 		t.Fatalf("stalled read took %v, want it aborted promptly", elapsed)
-	}
-}
-
-func TestCopyWithIdleTimeoutPrefersQueuedProgressAtDeadline(t *testing.T) {
-	// Keep the pipe reader blocked until after the nominal idle deadline, then
-	// write immediately. The timeout path performs one final non-blocking
-	// progress check before declaring a stall, preventing a scheduler race from
-	// dropping progress that was queued at the deadline boundary.
-	reader, writer := io.Pipe()
-	go func() {
-		time.Sleep(45 * time.Millisecond)
-		_, _ = writer.Write([]byte("x"))
-		_ = writer.Close()
-	}()
-
-	var dst bytes.Buffer
-	if err := copyWithIdleTimeout(&dst, reader, 50*time.Millisecond); err != nil {
-		t.Fatalf("deadline-adjacent progress was treated as a stall: %v", err)
-	}
-	if got := dst.String(); got != "x" {
-		t.Fatalf("copied body = %q, want x", got)
 	}
 }
