@@ -134,7 +134,7 @@ func NewRunner(writer EventWriter, cfg Config) *Runner {
 // pass the filter accumulate into a batch and flush every runnerBatchSize
 // lines. A "started" event is emitted on entry; "completed" on exit.
 func (r *Runner) Run(ctx context.Context, args []string) (*RunResult, error) {
-	cmd, err := buildCommand(args)
+	cmd, err := buildCommandContext(ctx, args)
 	if err != nil {
 		return nil, err
 	}
@@ -278,7 +278,7 @@ func NewLongRunner(writer EventWriter, cfg Config, debounce time.Duration) *Long
 // Run executes args, forwards SIGINT/SIGTERM to the child, and flushes
 // buffered output every debounce interval.
 func (r *LongRunner) Run(ctx context.Context, args []string) (*RunResult, error) {
-	cmd, err := buildCommand(args)
+	cmd, err := buildCommandContext(ctx, args)
 	if err != nil {
 		return nil, err
 	}
@@ -426,7 +426,14 @@ func (r *LongRunner) emit(ctx context.Context, evt Event) {
 
 // buildCommand creates an exec.Cmd from args, extracting leading KEY=VALUE
 // pairs as env vars (matches devtap's `--  KEY=VAL cmd ...` ergonomics).
+// It uses a background context for callers/tests that only need command
+// construction; Runner and LongRunner use buildCommandContext so cancellation
+// reaches the child process.
 func buildCommand(args []string) (*exec.Cmd, error) {
+	return buildCommandContext(context.Background(), args)
+}
+
+func buildCommandContext(ctx context.Context, args []string) (*exec.Cmd, error) {
 	if len(args) == 0 {
 		return nil, errNoCommand
 	}
@@ -443,7 +450,7 @@ func buildCommand(args []string) (*exec.Cmd, error) {
 	if i >= len(args) {
 		return nil, errNoCommand
 	}
-	cmd := exec.Command(args[i], args[i+1:]...) //nolint:gosec
+	cmd := exec.CommandContext(ctx, args[i], args[i+1:]...) //nolint:gosec
 	if len(envVars) > 0 {
 		cmd.Env = append(os.Environ(), envVars...)
 	}
