@@ -389,6 +389,16 @@ func copyWithIdleTimeout(dst io.Writer, src io.ReadCloser, idle time.Duration) e
 			}
 			timer.Reset(idle)
 		case <-timer.C:
+			// If progress became ready at the same time as the timer, prefer the
+			// observed bytes and extend the deadline instead of reporting a false
+			// stall based on select's random choice among ready cases.
+			select {
+			case <-progress:
+				timer.Reset(idle)
+				continue
+			default:
+			}
+
 			_ = src.Close()
 			// Closing an HTTP response body unblocks its pending Read. Keep this
 			// wait bounded as defence in depth for non-HTTP ReadClosers in tests.
