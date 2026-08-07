@@ -93,7 +93,8 @@ func (s *Server) SetIO(in io.Reader, out io.Writer) {
 // can't block stdin or other replies. Returns when stdin reaches EOF,
 // the scanner fails, or ctx is canceled; in-flight tool goroutines are
 // then allowed to finish via the WaitGroup so we don't drop responses.
-// When input is closable, cancellation closes it to unblock an idle Scan.
+// Context cancellation is a normal shutdown and returns nil. When input is
+// closable, cancellation closes it to unblock an idle Scan.
 func (s *Server) Run(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
@@ -122,7 +123,7 @@ func (s *Server) Run(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			inflight.Wait()
-			return ctx.Err()
+			return nil
 		default:
 		}
 
@@ -161,10 +162,19 @@ func (s *Server) Run(ctx context.Context) error {
 		}(req)
 	}
 
+	// Snapshot both scanner and context state before waiting for in-flight tool
+	// calls. If the scanner failed independently, a later signal while waiting
+	// must not hide that diagnostic. If cancellation was already active when
+	// Scan ended, its close-induced scanner error is expected and shutdown is
+	// clean.
 	scannerErr := scanner.Err()
+	ctxErrAtScanEnd := ctx.Err()
 	inflight.Wait()
-	if err := ctx.Err(); err != nil {
-		return err
+	if scannerErr != nil && ctxErrAtScanEnd == nil {
+		return fmt.Errorf("mcp: scanner error: %w", scannerErr)
+	}
+	if ctxErrAtScanEnd != nil || ctx.Err() != nil {
+		return nil
 	}
 	if scannerErr != nil {
 		return fmt.Errorf("mcp: scanner error: %w", scannerErr)
