@@ -122,9 +122,9 @@ func (w *projectWatcher) start() error {
 	if err != nil {
 		return err
 	}
-	// Best-effort recursive watch by walking once at start. Subdirectories
-	// created later don't auto-attach — for Phase 1.2 this is acceptable;
-	// most projects have stable directory layouts.
+	// Best-effort recursive watch by walking once at start. The event loop
+	// attaches directories created later so coverage stays recursive for the
+	// lifetime of the project watcher as well.
 	limits := platformWatchLimits()
 	added, stopped, err := addRecursive(fsw, w.cfg.Root, limits, w.dirShouldIgnore)
 	if err != nil {
@@ -159,7 +159,7 @@ func (w *projectWatcher) runFsLoop(fsw *fsnotify.Watcher) {
 			if !ok {
 				return
 			}
-			w.handleFsEvent(ev)
+			w.handleFsEvent(fsw, ev)
 		case err, ok := <-fsw.Errors:
 			if !ok {
 				return
@@ -169,9 +169,12 @@ func (w *projectWatcher) runFsLoop(fsw *fsnotify.Watcher) {
 	}
 }
 
-func (w *projectWatcher) handleFsEvent(ev fsnotify.Event) {
+func (w *projectWatcher) handleFsEvent(fsw *fsnotify.Watcher, ev fsnotify.Event) {
 	if !shouldRecordFsEvent(ev) {
 		return
+	}
+	if ev.Op&fsnotify.Create != 0 {
+		w.attachCreatedDir(fsw, ev.Name)
 	}
 	if w.shouldIgnorePath(ev.Name) {
 		return
@@ -195,6 +198,64 @@ func (w *projectWatcher) handleFsEvent(ev fsnotify.Event) {
 	if err := w.cfg.Writer.Write(w.ctx, change); err != nil {
 		w.logger.Debug("external change write", "err", err, "path", ev.Name)
 	}
+}
+
+// attachCreatedDir keeps the recursive watch complete after startup. fsnotify
+// watches a directory's direct children only, so a new subdirectory must be
+// added explicitly before files created inside it can produce events. A
+// recursive add handles the rename-in case where an already-populated tree is
+// moved under the project root in one operation.
+func (w *projectWatcher) attachCreatedDir(fsw *fsnotify.Watcher, path string) {
+	info, err := os.Stat(path)
+	if err != nil || !info.IsDir() || w.dirShouldIgnore(path) {
+		return
+	}
+
+	for _, watched := range fsw.WatchList() {
+		if watched == path {
+			return
+		}
+	}
+
+	limits := remainingWatchLimits(fsw, platformWatchLimits())
+	if limits.dirs <= 0 || (limits.fileCapped() && limits.files <= 0) {
+		w.logger.Debug("git watcher: dynamic directory skipped; watch budget exhausted", "path", path)
+		return
+	}
+
+	added, stopped, err := addRecursive(fsw, path, limits, w.dirShouldIgnore)
+	if err != nil {
+		w.logger.Debug("git watcher: failed to attach dynamic directory", "path", path, "err", err)
+		return
+	}
+	if stopped {
+		w.logger.Debug("git watcher: dynamic recursive add stopped at watch limit", "path", path, "watched_dirs", added)
+	}
+}
+
+// remainingWatchLimits converts the project-wide limits into a budget for a
+// later recursive add. WatchList gives us the directories already registered;
+// on kqueue we also re-count their current direct files because those consume
+// file descriptors too.
+func remainingWatchLimits(fsw *fsnotify.Watcher, limits watchLimits) watchLimits {
+	watched := fsw.WatchList()
+	limits.dirs -= len(watched)
+	if limits.dirs < 0 {
+		limits.dirs = 0
+	}
+
+	if limits.fileCapped() {
+		usedFiles := 0
+		for _, dir := range watched {
+			usedFiles += countFiles(dir)
+			if usedFiles >= limits.files {
+				limits.files = 0
+				return limits
+			}
+		}
+		limits.files -= usedFiles
+	}
+	return limits
 }
 
 func (w *projectWatcher) acceptDebounced(path string) bool {
