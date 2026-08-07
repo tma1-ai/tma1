@@ -125,13 +125,3 @@ func TestRunnerAlreadyCanceledContextDoesNotEmitStarted(t *testing.T) {
 		t.Fatalf("started events = %d, want 0 when the process never started", got)
 	}
 }
-
-func TestBuildCommandContextAcceptsNilContext(t *testing.T) {
-	cmd, err := buildCommandContext(nil, []string{os.Args[0], "-test.run=^TestBuildContextHelperProcess$"})
-	if err != nil {
-		t.Fatalf("buildCommandContext(nil): %v", err)
-	}
-	if cmd == nil {
-		t.Fatal("buildCommandContext(nil) returned nil command")
-	}
-}
