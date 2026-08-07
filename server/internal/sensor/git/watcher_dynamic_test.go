@@ -2,11 +2,34 @@ package git
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 )
+
+func sawChangePath(writer *stubWriter, path string) bool {
+	writer.mu.Lock()
+	defer writer.mu.Unlock()
+	for _, c := range writer.events {
+		if c.FilePath == path {
+			return true
+		}
+	}
+	return false
+}
+
+func waitForChangePath(writer *stubWriter, path string, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if sawChangePath(writer, path) {
+			return true
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	return sawChangePath(writer, path)
+}
 
 func TestSensorWatchesDirectoryCreatedAfterStart(t *testing.T) {
 	root := t.TempDir()
@@ -21,38 +44,37 @@ func TestSensorWatchesDirectoryCreatedAfterStart(t *testing.T) {
 	sensor.Start(ctx)
 	sensor.Observe(root)
 
-	// Let the initial recursive walk finish before creating a directory that
-	// did not exist when the watcher started.
-	time.Sleep(100 * time.Millisecond)
+	// Observe starts the recursive walk asynchronously. Re-write a root-level
+	// marker until its event arrives so the test knows the initial watch is
+	// active instead of depending on scheduler timing.
+	marker := filepath.Join(root, ".watcher-ready")
+	readyDeadline := time.Now().Add(2 * time.Second)
+	for !sawChangePath(writer, marker) && time.Now().Before(readyDeadline) {
+		if err := os.WriteFile(marker, []byte(fmt.Sprint(time.Now().UnixNano())), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	if !sawChangePath(writer, marker) {
+		t.Fatal("initial project watch did not become active")
+	}
 
 	nested := filepath.Join(root, "later")
 	if err := os.Mkdir(nested, 0o755); err != nil {
 		t.Fatal(err)
 	}
-
-	// Give the watcher a chance to attach to the newly-created directory.
-	time.Sleep(100 * time.Millisecond)
+	// handleFsEvent attaches the new directory before persisting its change.
+	// Seeing the directory event therefore synchronizes with attachCreatedDir.
+	if !waitForChangePath(writer, nested, 2*time.Second) {
+		t.Fatalf("no fsnotify event for newly-created directory %q", nested)
+	}
 
 	target := filepath.Join(nested, "hello.txt")
 	if err := os.WriteFile(target, []byte("hi"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		writer.mu.Lock()
-		sawTarget := false
-		for _, c := range writer.events {
-			if c.FilePath == target {
-				sawTarget = true
-				break
-			}
-		}
-		writer.mu.Unlock()
-		if sawTarget {
-			return
-		}
-		time.Sleep(50 * time.Millisecond)
+	if waitForChangePath(writer, target, 2*time.Second) {
+		return
 	}
 
 	writer.mu.Lock()
