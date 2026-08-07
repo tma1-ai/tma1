@@ -2,7 +2,6 @@ package mcp
 
 import (
 	"context"
-	"errors"
 	"io"
 	"log/slog"
 	"testing"
@@ -24,8 +23,8 @@ func TestRunContextCancellationUnblocksIdleInput(t *testing.T) {
 
 	select {
 	case err := <-done:
-		if !errors.Is(err, context.Canceled) {
-			t.Fatalf("Run cancellation error = %v, want context.Canceled", err)
+		if err != nil {
+			t.Fatalf("Run cancellation error = %v, want clean shutdown", err)
 		}
 	case <-time.After(time.Second):
 		// Close the writer so the pre-fix scanner can reach EOF and the test
