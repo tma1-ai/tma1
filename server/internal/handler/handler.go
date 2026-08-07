@@ -82,7 +82,7 @@ func New(greptimeHTTPPort int, tma1Port string, webFS http.FileSystem, logger *s
 		)
 		projectSensor = project.NewSensor(project.NewGreptimeStore(greptimeHTTPPort), logger)
 	}
-	// 64 in-flight background writes — enough for a subagent storm,
+	// 64 in-flight background writes, enough for a subagent storm,
 	// small enough that a stuck GreptimeDB can't fork-bomb us. Use
 	// the server's structured logger so recovered panics in background
 	// writes show up in the same JSON stream as the rest of the
@@ -138,7 +138,7 @@ func (s *Server) StartBackgroundTasks(ctx context.Context) {
 // DrainWrites waits for in-flight background writes (hook event inserts,
 // anomaly emits) to land in GreptimeDB, up to the given timeout. Returns
 // true when the queue drained cleanly. Must be called AFTER the HTTP
-// server has stopped accepting new requests — otherwise fresh inserts
+// server has stopped accepting new requests; otherwise fresh inserts
 // keep the queue non-empty and Drain times out trivially.
 func (s *Server) DrainWrites(timeout time.Duration) bool {
 	if s.writeSem == nil {
@@ -167,17 +167,19 @@ func (s *Server) Router() http.Handler {
 	r.Get("/health", s.handleHealth)
 	r.Get("/status", s.handleStatus)
 
-	// SQL proxy — browser JS calls this to query GreptimeDB. The endpoint can
+	// SQL proxy. Browser JS calls this to query GreptimeDB. The endpoint can
 	// execute arbitrary SQL, so browser requests must pass the same local-origin
 	// guard as other state-changing dashboard APIs.
 	// Accepts: POST /api/query with body: {"sql": "SELECT ..."}
 	r.Post("/api/query", s.requireLocalOrigin(s.handleQuery))
 
-	// Prometheus API proxy — browser JS calls this for PromQL queries.
+	// Prometheus API proxy. Browser JS calls this for PromQL queries.
 	r.HandleFunc("/api/prom/*", s.handlePromProxy)
 
-	// Hook events from Claude Code / Codex.
-	r.Post("/api/hooks", s.handleHooks)
+	// Hook events from Claude Code / Codex. Agent hook scripts omit Origin,
+	// while browser-originated requests must be local to prevent foreign pages
+	// from injecting events or triggering project/file sensor side effects.
+	r.Post("/api/hooks", s.requireLocalOrigin(s.handleHooks))
 	r.Get("/api/hooks/stream", s.handleHookStream)
 
 	// Anomalies aggregation for the dashboard's Anomalies tab.
@@ -189,11 +191,11 @@ func (s *Server) Router() http.Handler {
 	// within N tool calls of each emit? Drives the 30% follow-rate gate.
 	r.Get("/api/anomalies/follow-rate", s.handleAnomaliesFollowRate)
 
-	// Prompt evaluation (LLM-as-judge) — origin-checked to prevent CSRF.
+	// Prompt evaluation (LLM-as-judge), origin-checked to prevent CSRF.
 	r.HandleFunc("/api/evaluate", s.requireLocalOrigin(s.handleEvaluate))
 	r.Post("/api/evaluate/summary", s.requireLocalOrigin(s.handleEvaluateSummary))
 
-	// Settings (read/write server-side configuration) — origin-checked.
+	// Settings (read/write server-side configuration), origin-checked.
 	r.Get("/api/settings", s.handleGetSettings)
 	r.Post("/api/settings", s.requireLocalOrigin(s.handleSaveSettings))
 
@@ -202,7 +204,7 @@ func (s *Server) Router() http.Handler {
 	r.Get("/api/insights", s.handleListInsights)
 	r.Get("/api/insights/{id}", s.handleGetInsight)
 
-	// OTLP proxy — agents send OTel data here; tma1-server injects
+	// OTLP proxy. Agents send OTel data here; tma1-server injects
 	// the x-greptime-pipeline-name header for trace requests.
 	r.HandleFunc("/v1/otlp/*", s.handleOTLPProxy)
 	// Also support direct OTLP signal paths used by some SDKs/tools.
@@ -297,7 +299,7 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 }
 
 // handlePromProxy proxies requests to GreptimeDB's Prometheus-compatible HTTP API.
-// /api/prom/query_range → http://localhost:{port}/v1/prometheus/api/v1/query_range
+// /api/prom/query_range -> http://localhost:{port}/v1/prometheus/api/v1/query_range
 func (s *Server) handlePromProxy(w http.ResponseWriter, r *http.Request) {
 	subPath := chi.URLParam(r, "*")
 	target := fmt.Sprintf("http://localhost:%d/v1/prometheus/api/v1/%s", s.greptimeHTTPPort, subPath)
