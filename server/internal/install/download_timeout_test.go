@@ -51,3 +51,24 @@ func TestCopyWithIdleTimeoutStopsStalledRead(t *testing.T) {
 		t.Fatalf("stalled read took %v, want it aborted promptly", elapsed)
 	}
 }
+
+func TestCopyWithIdleTimeoutPrefersQueuedProgressAtDeadline(t *testing.T) {
+	// Keep the pipe reader blocked until after the nominal idle deadline, then
+	// write immediately. The timeout path performs one final non-blocking
+	// progress check before declaring a stall, preventing a scheduler race from
+	// dropping progress that was queued at the deadline boundary.
+	reader, writer := io.Pipe()
+	go func() {
+		time.Sleep(45 * time.Millisecond)
+		_, _ = writer.Write([]byte("x"))
+		_ = writer.Close()
+	}()
+
+	var dst bytes.Buffer
+	if err := copyWithIdleTimeout(&dst, reader, 50*time.Millisecond); err != nil {
+		t.Fatalf("deadline-adjacent progress was treated as a stall: %v", err)
+	}
+	if got := dst.String(); got != "x" {
+		t.Fatalf("copied body = %q, want x", got)
+	}
+}
