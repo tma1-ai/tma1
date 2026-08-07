@@ -167,9 +167,11 @@ func (s *Server) Router() http.Handler {
 	r.Get("/health", s.handleHealth)
 	r.Get("/status", s.handleStatus)
 
-	// SQL proxy — browser JS calls this to query GreptimeDB.
+	// SQL proxy — browser JS calls this to query GreptimeDB. The endpoint can
+	// execute arbitrary SQL, so browser requests must pass the same local-origin
+	// guard as other state-changing dashboard APIs.
 	// Accepts: POST /api/query with body: {"sql": "SELECT ..."}
-	r.Post("/api/query", s.handleQuery)
+	r.Post("/api/query", s.requireLocalOrigin(s.handleQuery))
 
 	// Prometheus API proxy — browser JS calls this for PromQL queries.
 	r.HandleFunc("/api/prom/*", s.handlePromProxy)
@@ -379,10 +381,12 @@ func (s *Server) proxyOTLP(w http.ResponseWriter, r *http.Request, subPath strin
 	_, _ = io.Copy(w, resp.Body)
 }
 
-// requireLocalOrigin rejects browser requests from foreign origins (CSRF protection).
-// Non-browser clients (curl, agents) typically omit Origin and are allowed through.
-// Allows localhost variants plus the origin matching the request's own Host header
-// (covers LAN IP / reverse proxy access where the dashboard is served from the same host).
+// requireLocalOrigin rejects browser requests from foreign origins (CSRF and
+// DNS-rebinding protection). Non-browser clients (curl, agents) typically omit
+// Origin and are allowed through. Browser origins are intentionally restricted
+// to loopback names because TMA1 is an unauthenticated local-only service.
+// Never derive the allowlist from r.Host: Host is request-controlled and a
+// rebinding hostname can legitimately match both Host and Origin.
 func (s *Server) requireLocalOrigin(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
@@ -394,11 +398,6 @@ func (s *Server) requireLocalOrigin(next http.HandlerFunc) http.HandlerFunc {
 				"https://127.0.0.1:" + s.tma1Port: true,
 				"http://[::1]:" + s.tma1Port:      true,
 				"https://[::1]:" + s.tma1Port:     true,
-			}
-			// Also allow the origin matching the request's Host (LAN IP / reverse proxy).
-			if host := r.Host; host != "" {
-				allowed["http://"+host] = true
-				allowed["https://"+host] = true
 			}
 			if !allowed[origin] {
 				writeJSON(w, http.StatusForbidden, map[string]string{"error": "request blocked: origin not allowed"})
