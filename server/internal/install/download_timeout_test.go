@@ -9,10 +9,10 @@ import (
 	"time"
 )
 
-type testRoundTripper func(*http.Request) (*http.Response, error)
+type testRoundTripper struct{}
 
-func (f testRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
-	return f(req)
+func (*testRoundTripper) RoundTrip(*http.Request) (*http.Response, error) {
+	return nil, nil
 }
 
 func TestDownloadClientHasNoWallClockTransferTimeout(t *testing.T) {
@@ -23,7 +23,7 @@ func TestDownloadClientHasNoWallClockTransferTimeout(t *testing.T) {
 
 func TestNewDownloadClientHandlesCustomDefaultTransport(t *testing.T) {
 	original := http.DefaultTransport
-	custom := testRoundTripper(func(*http.Request) (*http.Response, error) { return nil, nil })
+	custom := &testRoundTripper{}
 	http.DefaultTransport = custom
 	t.Cleanup(func() { http.DefaultTransport = original })
 
