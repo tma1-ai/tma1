@@ -22,6 +22,37 @@ func TestQueryEndpointRejectsForeignBrowserOrigin(t *testing.T) {
 	}
 }
 
+func TestHooksEndpointRejectsForeignBrowserOrigin(t *testing.T) {
+	srv := newTestServer()
+	r := srv.Router()
+
+	body := `{"session_id":"foreign","hook_event_name":"SessionStart","cwd":"/tmp"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/hooks", strings.NewReader(body))
+	req.Header.Set("Content-Type", "text/plain")
+	req.Header.Set("Origin", "https://evil.example")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("foreign-origin POST /api/hooks: got status %d, want %d", w.Code, http.StatusForbidden)
+	}
+}
+
+func TestHooksEndpointAllowsNonBrowserClientWithoutOrigin(t *testing.T) {
+	srv := newTestServer()
+	r := srv.Router()
+
+	body := `{"session_id":"agent","hook_event_name":"SessionStart"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/hooks", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("origin-less agent POST /api/hooks: got status %d, want %d", w.Code, http.StatusOK)
+	}
+}
+
 func TestLocalOriginGuardDoesNotTrustArbitraryHostHeader(t *testing.T) {
 	srv := newTestServer()
 	protected := srv.requireLocalOrigin(func(w http.ResponseWriter, _ *http.Request) {
