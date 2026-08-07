@@ -48,9 +48,16 @@ func greptimeBinaryName() string {
 }
 
 func newDownloadClient() *http.Client {
-	transport := http.DefaultTransport.(*http.Transport).Clone()
-	transport.ResponseHeaderTimeout = downloadResponseHeaderTimeout
-	return &http.Client{Transport: transport}
+	// Clone the standard transport when its concrete type is available so we
+	// retain Go's proxy, dial, TLS, keepalive, and HTTP/2 defaults. Embedders and
+	// tests are allowed to replace http.DefaultTransport with another
+	// RoundTripper, so never assume it is always *http.Transport.
+	if base, ok := http.DefaultTransport.(*http.Transport); ok {
+		transport := base.Clone()
+		transport.ResponseHeaderTimeout = downloadResponseHeaderTimeout
+		return &http.Client{Transport: transport}
+	}
+	return &http.Client{Transport: http.DefaultTransport}
 }
 
 var (
@@ -85,7 +92,7 @@ func EnsureGreptimeDB(dataDir, version string, logger *slog.Logger) (binPath str
 	resolvedVersion, err := resolveVersion(version)
 	if err != nil {
 		if binExists {
-			// Network is unreachable but a binary is already present — use it
+			// Network is unreachable but a binary is already present. Use it
 			// rather than blocking startup. The upgrade will happen on next
 			// start when connectivity is restored.
 			logger.Warn("cannot resolve greptimedb version, using existing binary",
@@ -135,17 +142,16 @@ func EnsureGreptimeDB(dataDir, version string, logger *slog.Logger) (binPath str
 
 // checkVersionMismatch reports whether the installed binary needs an upgrade.
 // The binary itself is the source of truth: its --version output is probed
-// directly. There is no cached .version ledger — a cache buys a negligible
-// startup saving but drifts whenever the binary is upgraded out-of-band (the
-// install.sh / official installer path never wrote it), which silently forces
-// perpetual re-downloads on every start. installed is the probed version
-// (empty when the binary can't be probed) and is returned for logging.
+// directly. There is no cached .version ledger because a cache buys a
+// negligible startup saving but drifts whenever the binary is upgraded
+// out-of-band. installed is the probed version (empty when the binary can't be
+// probed) and is returned for logging.
 func checkVersionMismatch(requestedVersion, binPath string, logger *slog.Logger) (needsUpgrade bool, resolvedVer, installed string) {
 	installed = probeBinaryVersion(binPath, logger)
 
 	if requestedVersion == "latest" {
-		// Probe failed (binary missing/corrupt, or a non-semver nightly build)
-		// — upgrade to a resolvable release to be safe.
+		// Probe failed (binary missing/corrupt, or a non-semver nightly build).
+		// Upgrade to a resolvable release to be safe.
 		if installed == "" {
 			logger.Info("installed greptimedb version unknown, upgrading to latest")
 			return true, "latest", installed
@@ -247,15 +253,15 @@ func preReleaseLessThan(a, b string) bool {
 		aNum := aErr == nil
 		bNum := bErr == nil
 		switch {
-		case aNum && bNum: // both numeric
+		case aNum && bNum:
 			if ai != bi {
 				return ai < bi
 			}
-		case aNum && !bNum: // numeric < non-numeric
+		case aNum && !bNum:
 			return true
 		case !aNum && bNum:
 			return false
-		default: // both non-numeric
+		default:
 			if as[i] != bs[i] {
 				return as[i] < bs[i]
 			}
@@ -361,6 +367,11 @@ func (w progressWriter) Write(p []byte) (int, error) {
 // copyWithIdleTimeout copies until EOF while resetting the deadline whenever
 // bytes are successfully written. This distinguishes a slow-but-progressing
 // transfer from a genuinely stalled body read.
+//
+// The helper is used with net/http response bodies and a local temp file. Its
+// timeout contract requires src.Close to unblock a pending Read; net/http
+// response bodies provide that behavior. Waiting for the copy goroutine after
+// Close ensures the timeout path does not leave a goroutine holding resources.
 func copyWithIdleTimeout(dst io.Writer, src io.ReadCloser, idle time.Duration) error {
 	if idle <= 0 {
 		_, err := io.Copy(dst, src)
@@ -400,12 +411,7 @@ func copyWithIdleTimeout(dst io.Writer, src io.ReadCloser, idle time.Duration) e
 			}
 
 			_ = src.Close()
-			// Closing an HTTP response body unblocks its pending Read. Keep this
-			// wait bounded as defence in depth for non-HTTP ReadClosers in tests.
-			select {
-			case <-done:
-			case <-time.After(5 * time.Second):
-			}
+			<-done
 			return fmt.Errorf("download stalled: no data received for %s", idle)
 		}
 	}
