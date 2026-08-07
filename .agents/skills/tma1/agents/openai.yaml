@@ -1,0 +1,6 @@
+interface:
+  display_name: "Tma1"
+  short_description: "Repo-specific patterns and workflows for tma1"
+  default_prompt: "Use the tma1 repo skill to follow existing architecture, testing, and workflow conventions."
+policy:
+  allow_implicit_invocation: true
