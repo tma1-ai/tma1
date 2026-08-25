@@ -74,7 +74,7 @@ tma1-server  port 14318
 GreptimeDB  (managed by tma1-server)
     │  Flow engine → tma1_*_1m aggregation tables
     │  Versioned schema migrations via tma1_schema_version ledger
-    │  HTTP SQL API  port 14000
+    │  HTTP SQL API + built-in dashboard  port 14000
     ▼
 Browser dashboard (served by tma1-server)
     ├── Claude Code view: Overview, Tools, Cost, Anomalies, Traces, Sessions→ (from OTel metrics + logs + traces)
@@ -96,6 +96,8 @@ Browser dashboard (served by tma1-server)
 ```
 
 OTel data goes through tma1-server's OTLP proxy (`/v1/otlp/*`), which forwards to GreptimeDB (port 14000) and auto-injects the `x-greptime-pipeline-name: greptime_trace_v1` header for trace requests. Agents should send OTLP to `http://localhost:14318/v1/otlp`.
+
+GreptimeDB also serves its own dashboard at `http://localhost:14000/dashboard/#/dashboard/query` — a SQL/PromQL editor with table browser and chart output, for ad-hoc queries over the raw tables that the TMA1 dashboard doesn't cover.
 
 Hook events from Claude Code arrive via `POST /api/hooks` (configured as command hooks in `~/.claude/settings.json`, using the auto-installed hook script at `~/.tma1/hooks/tma1-hook.sh` on Unix/macOS or `%USERPROFILE%\.tma1\hooks\tma1-hook.ps1` on Windows). Claude Code's HTTP hook type requires HTTPS, so command hooks with curl are used instead. Codex session logs are auto-discovered from `~/.codex/sessions/` without any hook configuration. Copilot CLI session logs are auto-discovered from `~/.copilot/session-state/` without any hook configuration.
 

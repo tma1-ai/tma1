@@ -80,6 +80,16 @@ On first start, TMA1 writes a GreptimeDB config into `~/.tma1/config/`,
 downloads the GreptimeDB binary if needed, starts it as a child process, and
 serves the dashboard from the same `tma1-server` process.
 
+For ad-hoc SQL over the raw tables, GreptimeDB ships its own dashboard on
+port `14000`:
+
+```bash
+open http://localhost:14000/dashboard/#/dashboard/query
+```
+
+It has a SQL/PromQL editor, table browser, and chart output — useful when you
+want to go past what the TMA1 dashboard shows.
+
 ## Wire An Agent
 
 The easiest path is to let the agent read the setup skill:
@@ -175,8 +185,9 @@ transcripts, runs the perception layer, stores everything in GreptimeDB, and
 serves the dashboard.
 
 Traces, metrics, and logs are kept as queryable data. Session data and
-anomaly emits live in `tma1_*` tables. You can query through the dashboard,
-the HTTP SQL API, or MySQL protocol on port `14002`.
+anomaly emits live in `tma1_*` tables. You can query through the TMA1
+dashboard, GreptimeDB's own dashboard on port `14000`, the HTTP SQL API, or
+MySQL protocol on port `14002`.
 
 ## Build Sensor
 

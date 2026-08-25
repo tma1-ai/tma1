@@ -138,7 +138,7 @@ export const en: T = {
     steps: [
       { num: '[1]', title: 'Install', desc: 'One command. Downloads everything into <code>~/.tma1/</code>. No Docker, no system packages.' },
       { num: '[2]', title: 'Configure your agent', desc: 'Point the OTel endpoint to <code>http://localhost:14318/v1/otlp</code>. Works with Claude Code, Codex, OpenClaw, or any OTel SDK. GitHub Copilot CLI needs no config — TMA1 auto-discovers its session logs.' },
-      { num: '[3]', title: 'Watch the loop close', desc: 'Browse to <code>localhost:14318</code> for the dashboard. The interesting part happens in your agent: it starts seeing <code>&lt;tma1-context&gt;</code> blocks and acting on them. Optionally wrap dev / test commands with <code>tma1 build -- &lt;command&gt;</code> so build failures feed the loop too (flags: <code>--watch</code>, <code>--tag</code>, <code>--filter-regex</code>). The dashboard is for the human postmortem; the loop is for the agent.' },
+      { num: '[3]', title: 'Watch the loop close', desc: 'Browse to <code>localhost:14318</code> for the dashboard. The interesting part happens in your agent: it starts seeing <code>&lt;tma1-context&gt;</code> blocks and acting on them. Optionally wrap dev / test commands with <code>tma1 build -- &lt;command&gt;</code> so build failures feed the loop too (flags: <code>--watch</code>, <code>--tag</code>, <code>--filter-regex</code>). The dashboard is for the human postmortem; the loop is for the agent. For raw SQL, GreptimeDB&rsquo;s own dashboard is at <code>localhost:14000/dashboard</code>.' },
     ],
   },
   security: {
@@ -255,7 +255,7 @@ export const zh: T = {
     steps: [
       { num: '[1]', title: '安装', desc: '一条命令，所有文件装进 <code>~/.tma1/</code>。不需要 Docker，不需要装别的。' },
       { num: '[2]', title: '配置你的 agent', desc: '将 OTel endpoint 指向 <code>http://localhost:14318/v1/otlp</code>。支持 Claude Code、Codex、OpenClaw 或任何 OTel SDK。GitHub Copilot CLI 零配置——TMA1 会自动发现它的 session 日志。' },
-      { num: '[3]', title: '看到闭环发生', desc: '浏览器打开 <code>localhost:14318</code> 看 dashboard。有趣的部分发生在 agent 里：它开始看到 <code>&lt;tma1-context&gt;</code> 块并针对性地行动。可选：用 <code>tma1 build -- &lt;command&gt;</code> 包装 dev / test 命令，让 build 失败也进入闭环（支持 <code>--watch</code> / <code>--tag</code> / <code>--filter-regex</code>）。Dashboard 是人事后复盘用的，闭环是给 agent 的。' },
+      { num: '[3]', title: '看到闭环发生', desc: '浏览器打开 <code>localhost:14318</code> 看 dashboard。有趣的部分发生在 agent 里：它开始看到 <code>&lt;tma1-context&gt;</code> 块并针对性地行动。可选：用 <code>tma1 build -- &lt;command&gt;</code> 包装 dev / test 命令，让 build 失败也进入闭环（支持 <code>--watch</code> / <code>--tag</code> / <code>--filter-regex</code>）。Dashboard 是人事后复盘用的，闭环是给 agent 的。想直接写 SQL 的话，GreptimeDB 自带的 dashboard 在 <code>localhost:14000/dashboard</code>。' },
     ],
   },
   security: {
@@ -372,7 +372,7 @@ export const es: T = {
     steps: [
       { num: '[1]', title: 'Instalar', desc: 'Un comando. Todo se descarga en <code>~/.tma1/</code>. Sin Docker, sin paquetes del sistema.' },
       { num: '[2]', title: 'Configurar tu agente', desc: 'Apuntá el endpoint OTel a <code>http://localhost:14318/v1/otlp</code>. Funciona con Claude Code, Codex, OpenClaw o cualquier SDK OTel. GitHub Copilot CLI no necesita configuración — TMA1 detecta sus logs de sesión automáticamente.' },
-      { num: '[3]', title: 'Mirá el loop cerrarse', desc: 'Abrí <code>localhost:14318</code> para el dashboard. La parte interesante pasa en tu agente: empieza a ver bloques <code>&lt;tma1-context&gt;</code> y a actuar sobre ellos. Opcional: envolvé tus comandos dev / test con <code>tma1 build -- &lt;command&gt;</code> para que los fallos de build también entren al loop (flags: <code>--watch</code>, <code>--tag</code>, <code>--filter-regex</code>). El dashboard es para el postmortem humano; el loop es para el agente.' },
+      { num: '[3]', title: 'Mirá el loop cerrarse', desc: 'Abrí <code>localhost:14318</code> para el dashboard. La parte interesante pasa en tu agente: empieza a ver bloques <code>&lt;tma1-context&gt;</code> y a actuar sobre ellos. Opcional: envolvé tus comandos dev / test con <code>tma1 build -- &lt;command&gt;</code> para que los fallos de build también entren al loop (flags: <code>--watch</code>, <code>--tag</code>, <code>--filter-regex</code>). El dashboard es para el postmortem humano; el loop es para el agente. Para SQL directo, el dashboard propio de GreptimeDB está en <code>localhost:14000/dashboard</code>.' },
     ],
   },
   security: {
