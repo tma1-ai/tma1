@@ -1,5 +1,14 @@
 # TMA1
 
+<!-- include_prereleases is required: every TMA1 release so far is a
+     pre-release, and without it the badge renders "no releases found".
+     Leave sort at the default (date) — semver sort compares the
+     pre-release identifier lexically, which orders alpha9 above alpha14. -->
+[![Release](https://img.shields.io/github/v/release/tma1-ai/tma1?include_prereleases&label=release&color=orange)](https://github.com/tma1-ai/tma1/releases)
+[![CI](https://github.com/tma1-ai/tma1/actions/workflows/ci.yml/badge.svg)](https://github.com/tma1-ai/tma1/actions/workflows/ci.yml)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
+![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey)
+
 > A monolith for your agent's loop. Silent until it talks back.
 
 TMA1 is local-first observability for LLM agents, powered by GreptimeDB.
