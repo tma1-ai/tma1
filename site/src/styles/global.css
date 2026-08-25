@@ -92,6 +92,13 @@ code {
   font-size: 0.9em;
   color: var(--blue);
   font-family: "SF Mono", "Fira Code", monospace;
+  /* A URL or table name has no break opportunity, so its min-content width
+     becomes the floor of whatever flex or grid column holds it and the row
+     overflows the viewport on narrow screens. `anywhere` (unlike
+     `break-word`) also shrinks the min-content contribution, which is what
+     lets the column shrink. Does not affect the pre-formatted code blocks —
+     `white-space: pre` forbids wrapping outright. */
+  overflow-wrap: anywhere;
 }
 
 pre {

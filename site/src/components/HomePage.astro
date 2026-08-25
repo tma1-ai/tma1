@@ -713,7 +713,10 @@ const showcase: ShowcaseEntry[] = [
 
   /* Responsive */
   @media (max-width: 768px) {
-    .hero h1 { font-size: 40px; max-width: 100%; }
+    /* Fluid below 400px: at a fixed 40px the longest Spanish headline word
+       is wider than the content box and pushes the page sideways. 10vw
+       reaches the 40px cap at 400px, so nothing changes above that. */
+    .hero h1 { font-size: clamp(28px, 10vw, 40px); max-width: 100%; }
     .highlights { grid-template-columns: 1fr; }
     .showcase-row {
       grid-template-columns: 1fr;
