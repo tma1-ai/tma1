@@ -90,10 +90,31 @@ func (s *Server) SetIO(in io.Reader, out io.Writer) {
 
 // Run reads JSON-RPC frames from s.in and writes responses to s.out.
 // Each tools/call is dispatched in its own goroutine so a slow tool
-// can't block stdin or other replies. Returns when stdin reaches EOF
-// or the scanner fails; in-flight tool goroutines are then allowed
-// to finish via the WaitGroup so we don't drop their responses.
+// can't block stdin or other replies. Returns when stdin reaches EOF,
+// the scanner fails, or ctx is canceled; in-flight tool goroutines are
+// then allowed to finish via the WaitGroup so we don't drop responses.
+// Context cancellation is a normal shutdown and returns nil. When input is
+// closable, cancellation closes it to unblock an idle Scan.
 func (s *Server) Run(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	// bufio.Scanner has no context-aware Scan method. Production input is
+	// os.Stdin, so closing it on cancellation wakes a blocked Read. Stop the
+	// helper on normal EOF so Run doesn't retain a goroutine waiting on ctx.
+	inputWatcherDone := make(chan struct{})
+	if closer, ok := s.in.(io.Closer); ok {
+		go func() {
+			select {
+			case <-ctx.Done():
+				_ = closer.Close()
+			case <-inputWatcherDone:
+			}
+		}()
+		defer close(inputWatcherDone)
+	}
+
 	scanner := bufio.NewScanner(s.in)
 	scanner.Buffer(make([]byte, 0, scannerInitBuf), scannerMaxBuf)
 
@@ -102,7 +123,7 @@ func (s *Server) Run(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			inflight.Wait()
-			return ctx.Err()
+			return nil
 		default:
 		}
 
@@ -141,8 +162,20 @@ func (s *Server) Run(ctx context.Context) error {
 		}(req)
 	}
 
+	// Snapshot both scanner and context state before waiting for in-flight tool
+	// calls. If the scanner failed independently, a later signal while waiting
+	// must not hide that diagnostic. If cancellation was already active when
+	// Scan ended, its close-induced scanner error is expected and shutdown is
+	// clean.
 	scannerErr := scanner.Err()
+	ctxErrAtScanEnd := ctx.Err()
 	inflight.Wait()
+	if scannerErr != nil && ctxErrAtScanEnd == nil {
+		return fmt.Errorf("mcp: scanner error: %w", scannerErr)
+	}
+	if ctxErrAtScanEnd != nil || ctx.Err() != nil {
+		return nil
+	}
 	if scannerErr != nil {
 		return fmt.Errorf("mcp: scanner error: %w", scannerErr)
 	}
