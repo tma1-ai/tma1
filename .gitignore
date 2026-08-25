@@ -50,3 +50,6 @@ site/.astro/
 site/public/SKILL.md
 site/public/REFERENCE.md
 .tma1-context.md
+
+# Playwright MCP scratch output
+.playwright-mcp/
