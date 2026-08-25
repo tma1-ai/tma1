@@ -24,11 +24,10 @@ import (
 const (
 	githubReleaseBase = "https://github.com/GreptimeTeam/greptimedb/releases"
 
-	// minRequiredVersion is the minimum GreptimeDB version that tma1 requires.
-	// When the installed version is older than this, an upgrade is triggered
-	// even if the user configured "latest" (which normally skips network checks).
-	// Bump this when a new GreptimeDB release contains important fixes or
-	// breaking changes that tma1 depends on.
+	// Floor for the "latest" path only; an exact pin is matched exactly instead.
+	// MUST stay a released version: breaching the floor resolves "latest", which
+	// never yields a pre-release, so a pre-release floor is unsatisfiable and
+	// re-downloads forever. Ship pre-releases via config.defaultGreptimeDBVersion.
 	minRequiredVersion = "v1.1.3"
 
 	// Downloading the GreptimeDB archive can legitimately take longer than a
@@ -439,7 +438,7 @@ func verifyChecksum(tarball *os.File, version string, logger *slog.Logger) error
 	if err != nil {
 		return nil // can't build URL, skip
 	}
-	checksumURL := downloadURL + ".sha256sum"
+	checksumURL := checksumURLFor(downloadURL)
 
 	resp, err := versionClient.Get(checksumURL) //nolint:gosec
 	if err != nil {
@@ -452,13 +451,20 @@ func verifyChecksum(tarball *os.File, version string, logger *slog.Logger) error
 		return nil
 	}
 
+	// The file is per-archive, so it holds a bare hash with no filename column.
+	// Still accept the two-column `sha256sum` layout in case that changes.
 	scanner := bufio.NewScanner(resp.Body)
 	var expectedHash string
 	filename := filepath.Base(downloadURL)
 	for scanner.Scan() {
 		fields := strings.Fields(scanner.Text())
-		if len(fields) >= 2 && strings.HasSuffix(fields[1], filename) {
+		switch {
+		case len(fields) == 1 && isSHA256(fields[0]):
 			expectedHash = fields[0]
+		case len(fields) >= 2 && strings.HasSuffix(fields[1], filename):
+			expectedHash = fields[0]
+		}
+		if expectedHash != "" {
 			break
 		}
 	}
@@ -481,6 +487,22 @@ func verifyChecksum(tarball *os.File, version string, logger *slog.Logger) error
 	}
 	logger.Info("checksum verified", "sha256", actualHash[:16]+"...")
 	return nil
+}
+
+// Releases publish greptime-<os>-<arch>-<version>.sha256sum, i.e. the archive
+// name with .tar.gz replaced, not suffixed. Appending 404s on every release,
+// which verifyChecksum treats as "unavailable" and skips — silently disabling
+// verification with no failure signal.
+func checksumURLFor(downloadURL string) string {
+	return strings.TrimSuffix(downloadURL, ".tar.gz") + ".sha256sum"
+}
+
+func isSHA256(s string) bool {
+	if len(s) != sha256.Size*2 {
+		return false
+	}
+	_, err := hex.DecodeString(s)
+	return err == nil
 }
 
 // extractBinary finds the `greptime` binary inside a .tar.gz and writes it to destPath.

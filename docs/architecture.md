@@ -222,7 +222,7 @@ column lists + sample queries that get published with the skill.
 | `TMA1_HOST` | `127.0.0.1` | Address tma1-server binds to |
 | `TMA1_PORT` | `14318` | HTTP port for tma1-server |
 | `TMA1_DATA_DIR` | `~/.tma1` | Directory for GreptimeDB data + binaries |
-| `TMA1_GREPTIMEDB_VERSION` | `latest` | GreptimeDB version to download |
+| `TMA1_GREPTIMEDB_VERSION` | `v1.2.0-beta.2` | GreptimeDB version to download. Pinned to an exact tag; set to `latest` to track stable releases instead |
 | `TMA1_GREPTIMEDB_HTTP_PORT` | `14000` | GreptimeDB HTTP API + OTLP port |
 | `TMA1_GREPTIMEDB_GRPC_PORT` | `14001` | GreptimeDB gRPC port |
 | `TMA1_GREPTIMEDB_MYSQL_PORT` | `14002` | GreptimeDB MySQL protocol port |
