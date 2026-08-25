@@ -30,7 +30,11 @@ REPO="tma1-ai/tma1"
 INSTALL_DIR="${TMA1_INSTALL_DIR:-$HOME/.tma1/bin}"
 TMA1_PORT="${TMA1_PORT:-14318}"
 TMA1_FORCE="${TMA1_FORCE:-0}"
-TMA1_GREPTIMEDB_VERSION="${TMA1_GREPTIMEDB_VERSION:-latest}"
+# Exact GreptimeDB tag tma1 ships against. Keep in sync with
+# defaultGreptimeDBVersion in server/internal/config/config.go. Pinned rather
+# than "latest" because the shipped release is a pre-release, which "latest"
+# never resolves to. Set TMA1_GREPTIMEDB_VERSION=latest to track stable instead.
+TMA1_GREPTIMEDB_VERSION="${TMA1_GREPTIMEDB_VERSION:-v1.2.0-beta.2}"
 # Adapter(s) to wire into agents. Empty = skip. Accepts a comma-separated list
 # or the alias `all` (= claude-code,codex). Each adapter registers hooks, MCP,
 # and the /tma1-peer skill globally. Project-local files are skipped here —
@@ -126,8 +130,10 @@ download() {
 }
 
 # --- Download GreptimeDB binary via official install script ---
-# Minimum GreptimeDB version required by TMA1. Keep in sync with
-# minRequiredVersion in server/internal/install/install.go.
+# Minimum GreptimeDB version required by TMA1, applied only when
+# TMA1_GREPTIMEDB_VERSION=latest. Keep in sync with minRequiredVersion in
+# server/internal/install/install.go, which carries the same released-only
+# constraint.
 MIN_GREPTIMEDB_VERSION="1.1.3"
 
 # version_lt returns 0 (true) if $1 < $2.
@@ -165,17 +171,30 @@ EOF
 download_greptimedb() {
   local greptime_bin="${INSTALL_DIR}/greptime"
   if [ -f "$greptime_bin" ] && [ "$TMA1_FORCE" != "1" ]; then
-    # Check if the installed version meets the minimum requirement.
     local installed_ver
     installed_ver=$("$greptime_bin" --version 2>/dev/null | grep '^[[:space:]]*version:' | awk '{print $2}' || true)
-    if [ -n "$installed_ver" ] && ! version_lt "$installed_ver" "$MIN_GREPTIMEDB_VERSION"; then
-      info "GreptimeDB ${installed_ver} already installed (>= ${MIN_GREPTIMEDB_VERSION}), skipping download."
-      return
-    fi
-    if [ -n "$installed_ver" ]; then
+    if [ -z "$installed_ver" ]; then
+      info "Cannot determine GreptimeDB version, upgrading..."
+    elif [ "$TMA1_GREPTIMEDB_VERSION" = "latest" ]; then
+      # Tracking stable: a floor check is all we can do, since we don't know
+      # which tag "latest" will resolve to until the official script runs.
+      if ! version_lt "$installed_ver" "$MIN_GREPTIMEDB_VERSION"; then
+        info "GreptimeDB ${installed_ver} already installed (>= ${MIN_GREPTIMEDB_VERSION}), skipping download."
+        return
+      fi
       info "GreptimeDB ${installed_ver} is below minimum ${MIN_GREPTIMEDB_VERSION}, upgrading..."
     else
-      info "Cannot determine GreptimeDB version, upgrading..."
+      # Pinned to an exact tag: match exactly, mirroring checkVersionMismatch in
+      # server/internal/install/install.go. A floor check would wrongly skip the
+      # download whenever the pin is a pre-release of a higher version than the
+      # installed binary (e.g. installed 1.1.3, pinned v1.2.0-beta.2 with the
+      # floor still at 1.1.3). Both sides are normalised to a 'v' prefix because
+      # `greptime --version` reports a bare semver.
+      if [ "v${installed_ver#v}" = "v${TMA1_GREPTIMEDB_VERSION#v}" ]; then
+        info "GreptimeDB ${installed_ver} already installed (pinned), skipping download."
+        return
+      fi
+      info "GreptimeDB ${installed_ver} does not match pinned ${TMA1_GREPTIMEDB_VERSION}, installing..."
     fi
   fi
 

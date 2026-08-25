@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -29,7 +30,7 @@ func TestLoadDefaults(t *testing.T) {
 		{"Host", cfg.Host, "127.0.0.1"},
 		{"Port", cfg.Port, "14318"},
 		{"DataDir", cfg.DataDir, filepath.Join(home, ".tma1")},
-		{"GreptimeDBVersion", cfg.GreptimeDBVersion, "latest"},
+		{"GreptimeDBVersion", cfg.GreptimeDBVersion, defaultGreptimeDBVersion},
 		{"LogLevel", cfg.LogLevel, "info"},
 	}
 	for _, tt := range tests {
@@ -120,5 +121,21 @@ func TestEnvIntInvalidFallback(t *testing.T) {
 
 	if cfg.GreptimeDBHTTPPort != 14000 {
 		t.Errorf("expected fallback 14000 for invalid int, got %d", cfg.GreptimeDBHTTPPort)
+	}
+}
+
+// install.sh lays down the binary before tma1-server ever runs; on drift the
+// server replaces it on first start — the churn pinning exists to prevent.
+func TestInstallShPinMatchesDefault(t *testing.T) {
+	const script = "../../../site/public/install.sh"
+	data, err := os.ReadFile(script)
+	if err != nil {
+		t.Skipf("install.sh not readable from this checkout: %v", err)
+	}
+
+	want := `TMA1_GREPTIMEDB_VERSION="${TMA1_GREPTIMEDB_VERSION:-` + defaultGreptimeDBVersion + `}"`
+	if !strings.Contains(string(data), want) {
+		t.Errorf("install.sh does not pin %s; expected to find:\n\t%s",
+			defaultGreptimeDBVersion, want)
 	}
 }

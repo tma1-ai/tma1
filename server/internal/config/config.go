@@ -7,6 +7,11 @@ import (
 	"strconv"
 )
 
+// Pinned rather than "latest" because GitHub's /releases/latest redirect skips
+// pre-releases: "latest" would resolve to an older stable tag and re-download it
+// on every start. Mirrored in site/public/install.sh.
+const defaultGreptimeDBVersion = "v1.2.0-beta.2"
+
 // Config holds all runtime configuration for tma1-server.
 type Config struct {
 	// Host is the address tma1-server binds to (default 127.0.0.1).
@@ -18,7 +23,7 @@ type Config struct {
 	// DataDir is where GreptimeDB binary and data are stored (~/.tma1).
 	DataDir string
 
-	// GreptimeDB version to download ("latest" or "v0.x.y").
+	// GreptimeDB version to download ("latest" or an exact tag).
 	GreptimeDBVersion string
 
 	// GreptimeDB HTTP API port (used for SQL queries, health checks, and OTLP ingestion).
@@ -62,7 +67,7 @@ func Load() (*Config, error) {
 		Host:                env("TMA1_HOST", "127.0.0.1"),
 		Port:                env("TMA1_PORT", "14318"),
 		DataDir:             env("TMA1_DATA_DIR", filepath.Join(home, ".tma1")),
-		GreptimeDBVersion:   env("TMA1_GREPTIMEDB_VERSION", "latest"),
+		GreptimeDBVersion:   env("TMA1_GREPTIMEDB_VERSION", defaultGreptimeDBVersion),
 		GreptimeDBHTTPPort:  envInt("TMA1_GREPTIMEDB_HTTP_PORT", 14000),
 		GreptimeDBGRPCPort:  envInt("TMA1_GREPTIMEDB_GRPC_PORT", 14001),
 		GreptimeDBMySQLPort: envInt("TMA1_GREPTIMEDB_MYSQL_PORT", 14002),
