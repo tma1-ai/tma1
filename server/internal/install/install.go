@@ -30,6 +30,13 @@ const (
 	// Bump this when a new GreptimeDB release contains important fixes or
 	// breaking changes that tma1 depends on.
 	minRequiredVersion = "v1.1.3"
+
+	// Downloading the GreptimeDB archive can legitimately take longer than a
+	// fixed request deadline on slow links. Bound connection/header stalls
+	// separately, then use an idle timeout that resets whenever body bytes are
+	// successfully written.
+	downloadResponseHeaderTimeout = 30 * time.Second
+	downloadIdleTimeout           = 2 * time.Minute
 )
 
 // greptimeBinaryName returns the platform-appropriate binary name.
@@ -40,9 +47,22 @@ func greptimeBinaryName() string {
 	return "greptime"
 }
 
+func newDownloadClient() *http.Client {
+	// Clone the standard transport when its concrete type is available so we
+	// retain Go's proxy, dial, TLS, keepalive, and HTTP/2 defaults. Embedders and
+	// tests are allowed to replace http.DefaultTransport with another
+	// RoundTripper, so never assume it is always *http.Transport.
+	if base, ok := http.DefaultTransport.(*http.Transport); ok {
+		transport := base.Clone()
+		transport.ResponseHeaderTimeout = downloadResponseHeaderTimeout
+		return &http.Client{Transport: transport}
+	}
+	return &http.Client{Transport: http.DefaultTransport}
+}
+
 var (
 	versionClient  = &http.Client{Timeout: 10 * time.Second}
-	downloadClient = &http.Client{Timeout: 5 * time.Minute}
+	downloadClient = newDownloadClient()
 )
 
 // EnsureGreptimeDB checks whether the GreptimeDB binary exists in dataDir/bin/.
@@ -72,7 +92,7 @@ func EnsureGreptimeDB(dataDir, version string, logger *slog.Logger) (binPath str
 	resolvedVersion, err := resolveVersion(version)
 	if err != nil {
 		if binExists {
-			// Network is unreachable but a binary is already present — use it
+			// Network is unreachable but a binary is already present. Use it
 			// rather than blocking startup. The upgrade will happen on next
 			// start when connectivity is restored.
 			logger.Warn("cannot resolve greptimedb version, using existing binary",
@@ -122,17 +142,16 @@ func EnsureGreptimeDB(dataDir, version string, logger *slog.Logger) (binPath str
 
 // checkVersionMismatch reports whether the installed binary needs an upgrade.
 // The binary itself is the source of truth: its --version output is probed
-// directly. There is no cached .version ledger — a cache buys a negligible
-// startup saving but drifts whenever the binary is upgraded out-of-band (the
-// install.sh / official installer path never wrote it), which silently forces
-// perpetual re-downloads on every start. installed is the probed version
-// (empty when the binary can't be probed) and is returned for logging.
+// directly. There is no cached .version ledger because a cache buys a
+// negligible startup saving but drifts whenever the binary is upgraded
+// out-of-band. installed is the probed version (empty when the binary can't be
+// probed) and is returned for logging.
 func checkVersionMismatch(requestedVersion, binPath string, logger *slog.Logger) (needsUpgrade bool, resolvedVer, installed string) {
 	installed = probeBinaryVersion(binPath, logger)
 
 	if requestedVersion == "latest" {
-		// Probe failed (binary missing/corrupt, or a non-semver nightly build)
-		// — upgrade to a resolvable release to be safe.
+		// Probe failed (binary missing/corrupt, or a non-semver nightly build).
+		// Upgrade to a resolvable release to be safe.
 		if installed == "" {
 			logger.Info("installed greptimedb version unknown, upgrading to latest")
 			return true, "latest", installed
@@ -234,15 +253,15 @@ func preReleaseLessThan(a, b string) bool {
 		aNum := aErr == nil
 		bNum := bErr == nil
 		switch {
-		case aNum && bNum: // both numeric
+		case aNum && bNum:
 			if ai != bi {
 				return ai < bi
 			}
-		case aNum && !bNum: // numeric < non-numeric
+		case aNum && !bNum:
 			return true
 		case !aNum && bNum:
 			return false
-		default: // both non-numeric
+		default:
 			if as[i] != bs[i] {
 				return as[i] < bs[i]
 			}
@@ -329,6 +348,75 @@ func buildDownloadURL(version, goos, goarch string) (string, error) {
 	return fmt.Sprintf("%s/download/%s/%s", githubReleaseBase, version, filename), nil
 }
 
+type progressWriter struct {
+	dst      io.Writer
+	progress chan<- struct{}
+}
+
+func (w progressWriter) Write(p []byte) (int, error) {
+	n, err := w.dst.Write(p)
+	if n > 0 {
+		select {
+		case w.progress <- struct{}{}:
+		default:
+		}
+	}
+	return n, err
+}
+
+// copyWithIdleTimeout copies until EOF while resetting the deadline whenever
+// bytes are successfully written. This distinguishes a slow-but-progressing
+// transfer from a genuinely stalled body read.
+//
+// The helper is used with net/http response bodies and a local temp file. Its
+// timeout contract requires src.Close to unblock a pending Read; net/http
+// response bodies provide that behavior. Waiting for the copy goroutine after
+// Close ensures the timeout path does not leave a goroutine holding resources.
+func copyWithIdleTimeout(dst io.Writer, src io.ReadCloser, idle time.Duration) error {
+	if idle <= 0 {
+		_, err := io.Copy(dst, src)
+		return err
+	}
+
+	progress := make(chan struct{}, 1)
+	done := make(chan error, 1)
+	go func() {
+		_, err := io.Copy(progressWriter{dst: dst, progress: progress}, src)
+		done <- err
+	}()
+
+	timer := time.NewTimer(idle)
+	defer timer.Stop()
+	for {
+		select {
+		case err := <-done:
+			return err
+		case <-progress:
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			timer.Reset(idle)
+		case <-timer.C:
+			// If progress became ready at the same time as the timer, prefer the
+			// observed bytes and extend the deadline instead of reporting a false
+			// stall based on select's random choice among ready cases.
+			select {
+			case <-progress:
+				timer.Reset(idle)
+				continue
+			default:
+			}
+
+			_ = src.Close()
+			<-done
+			return fmt.Errorf("download stalled: no data received for %s", idle)
+		}
+	}
+}
+
 func downloadFile(dst io.Writer, url string) error {
 	resp, err := downloadClient.Get(url) //nolint:gosec // URL is constructed internally
 	if err != nil {
@@ -340,8 +428,7 @@ func downloadFile(dst io.Writer, url string) error {
 		return fmt.Errorf("HTTP %d fetching %s", resp.StatusCode, url)
 	}
 
-	_, err = io.Copy(dst, resp.Body)
-	return err
+	return copyWithIdleTimeout(dst, resp.Body, downloadIdleTimeout)
 }
 
 // verifyChecksum downloads the sha256sum file for the given version and verifies
