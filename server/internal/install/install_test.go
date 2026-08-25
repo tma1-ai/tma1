@@ -415,3 +415,32 @@ func TestVerifyChecksumLogic(t *testing.T) {
 		}
 	})
 }
+
+// A pre-release floor is unsatisfiable: breaching it resolves "latest", which
+// never yields a pre-release, so every start re-downloads the same stable tag.
+func TestMinRequiredVersionIsNotAPreRelease(t *testing.T) {
+	_, _, _, pre, ok := parseSemver(minRequiredVersion)
+	if !ok {
+		t.Fatalf("minRequiredVersion %q is not parseable semver", minRequiredVersion)
+	}
+	if pre != "" {
+		t.Fatalf("minRequiredVersion %q is a pre-release (%q); resolveVersion(%q) can never satisfy it, "+
+			"so every start would re-download. Pin config.defaultGreptimeDBVersion instead.",
+			minRequiredVersion, pre, "latest")
+	}
+}
+
+// Guards the silent-failure shape: a wrong checksum URL 404s, and verifyChecksum
+// treats any non-200 as "unavailable" and skips, so the mistake never surfaces.
+func TestChecksumURLDropsArchiveSuffix(t *testing.T) {
+	url, err := buildDownloadURL("v1.2.0-beta.2", "linux", "amd64")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := checksumURLFor(url)
+	want := "https://github.com/GreptimeTeam/greptimedb/releases/download/" +
+		"v1.2.0-beta.2/greptime-linux-amd64-v1.2.0-beta.2.sha256sum"
+	if got != want {
+		t.Errorf("checksumURLFor(%s)\n got %s\nwant %s", url, got, want)
+	}
+}
