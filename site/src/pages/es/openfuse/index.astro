@@ -1,0 +1,18 @@
+---
+import Layout from '../../../layouts/Layout.astro';
+import ProductPage from '../../../components/ProductPage.astro';
+import { es } from '../../../i18n/openfuse';
+import '../../../styles/global.css';
+---
+
+<Layout
+  title={es.title}
+  description={es.description}
+  lang="es"
+  product="openfuse"
+  ogImage={es.og.image}
+  ogImageAlt={es.og.alt}
+  favicon="/products/openfuse/favicon.svg"
+>
+  <ProductPage product="openfuse" t={es} />
+</Layout>

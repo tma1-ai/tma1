@@ -1,41 +1,55 @@
 ---
+import { productById, type Locale, type ProductId } from '../i18n/products';
+
 interface Props {
   title: string;
-  description?: string;
-  lang?: string;
+  description: string;
+  lang: Locale;
+  product: ProductId;
+  /** Site-root-relative path to the Open Graph image for this page. */
+  ogImage: string;
+  ogImageAlt: string;
+  favicon?: string;
 }
-const { title, description = 'Local observability for agents that feeds useful context back into the next turn.', lang = 'en' } = Astro.props;
 
-const siteOrigin = Astro.site?.toString().replace(/\/$/, '') ?? 'https://tma1.ai';
-const canonicalUrl = new URL(Astro.url.pathname, Astro.site ?? 'https://tma1.ai/').toString();
-const ogImage = `${siteOrigin}/screenshots/hero-light.webp`;
+const {
+  title, description, lang, product, ogImage, ogImageAlt,
+  favicon = '/favicon.svg',
+} = Astro.props;
+
+const site = Astro.site ?? new URL('https://tma1.ai/');
+const siteOrigin = site.toString().replace(/\/$/, '');
+const canonicalUrl = new URL(Astro.url.pathname, site).toString();
+const ogImageUrl = `${siteOrigin}${ogImage}`;
 const ogLocale = lang === 'zh' ? 'zh_CN' : lang === 'es' ? 'es_ES' : 'en_US';
+const productName = productById(product).name;
+const localeSegment = productById(product).segment;
 ---
 <!DOCTYPE html>
-<html lang={lang}>
+<html lang={lang} data-product={product}>
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="description" content={description} />
   <link rel="canonical" href={canonicalUrl} />
-  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <link rel="icon" type="image/svg+xml" href={favicon} />
   <title>{title}</title>
 
   <!-- Open Graph -->
   <meta property="og:type" content="website" />
-  <meta property="og:site_name" content="TMA1" />
+  <meta property="og:site_name" content={productName} />
   <meta property="og:title" content={title} />
   <meta property="og:description" content={description} />
   <meta property="og:url" content={canonicalUrl} />
-  <meta property="og:image" content={ogImage} />
-  <meta property="og:image:alt" content="TMA1 Dashboard" />
+  <meta property="og:image" content={ogImageUrl} />
+  <meta property="og:image:alt" content={ogImageAlt} />
   <meta property="og:locale" content={ogLocale} />
 
   <!-- Twitter -->
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:title" content={title} />
   <meta name="twitter:description" content={description} />
-  <meta name="twitter:image" content={ogImage} />
+  <meta name="twitter:image" content={ogImageUrl} />
   <script data-goatcounter="https://tma1.goatcounter.com/count" async src="//gc.zgo.at/count.js"></script>
   <script is:inline>
   (function() {
@@ -45,16 +59,22 @@ const ogLocale = lang === 'zh' ? 'zh_CN' : lang === 'es' ? 'es_ES' : 'en_US';
     document.documentElement.setAttribute('data-theme', t);
   })();
   </script>
-  <script is:inline>
+  {lang === 'en' && (
+    <script is:inline set:html={`
   (function() {
     if (localStorage.getItem('tma1-locale')) return;
+    // Only redirect from this project's English URL, and keep the project
+    // segment when doing so — /openfuse/ must land on /zh/openfuse/, not /zh/.
+    var seg = ${JSON.stringify(localeSegment)};
+    var base = '/' + (seg ? seg + '/' : '');
+    var path = location.pathname.replace(/index\\.html$/, '');
+    if (path !== base) return;
     var lang = (navigator.language || '').toLowerCase();
-    var path = location.pathname;
-    if (path !== '/' && path !== '/index.html') return;
-    if (lang.startsWith('zh')) location.replace('/zh/');
-    else if (lang.startsWith('es')) location.replace('/es/');
+    if (lang.indexOf('zh') === 0) location.replace('/zh' + base);
+    else if (lang.indexOf('es') === 0) location.replace('/es' + base);
   })();
-  </script>
+    `} />
+  )}
 </head>
 <body>
   <slot />

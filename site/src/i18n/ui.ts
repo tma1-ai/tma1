@@ -1,5 +1,7 @@
+import type { Locale } from './products';
+
 export interface T {
-  lang: string;
+  lang: Locale;
   title: string;
   description: string;
   nav: { features: string; how: string; security: string };
@@ -45,7 +47,7 @@ export interface T {
     items: Array<{ q: string; a: string }>;
   };
   footer: { tagline: string };
-  ui: { copy: string; copied: string; theme_light: string; theme_dark: string; theme_system: string };
+  ui: { copy: string; copied: string };
 }
 
 export const en: T = {
@@ -162,7 +164,7 @@ export const en: T = {
     ],
   },
   footer: { tagline: 'Named after TMA-1 from <em>2001: A Space Odyssey</em>. Silently recording everything until you dig it out.' },
-  ui: { copy: 'Copy', copied: 'Copied!', theme_light: 'Light', theme_dark: 'Dark', theme_system: 'System' },
+  ui: { copy: 'Copy', copied: 'Copied!' },
 };
 
 export const zh: T = {
@@ -279,7 +281,7 @@ export const zh: T = {
     ],
   },
   footer: { tagline: '取名自《2001 太空漫游》中的 TMA-1——静默记录一切，等你来挖掘。' },
-  ui: { copy: '复制', copied: '已复制！', theme_light: '浅色', theme_dark: '深色', theme_system: '跟随系统' },
+  ui: { copy: '复制', copied: '已复制！' },
 };
 
 export const es: T = {
@@ -396,8 +398,7 @@ export const es: T = {
     ],
   },
   footer: { tagline: 'Nombrado como TMA-1 de <em>2001: Una odisea del espacio</em>. Registrando todo en silencio hasta que lo descubras.' },
-  ui: { copy: 'Copiar', copied: '¡Copiado!', theme_light: 'Claro', theme_dark: 'Oscuro', theme_system: 'Sistema' },
+  ui: { copy: 'Copiar', copied: '¡Copiado!' },
 };
 
 export const locales = { en, zh, es } as const;
-export type Locale = keyof typeof locales;

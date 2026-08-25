@@ -1,4 +1,7 @@
 ---
+import Lightbox from './Lightbox.astro';
+import SiteFooter from './SiteFooter.astro';
+import SiteHeader from './SiteHeader.astro';
 import type { T } from '../i18n/ui';
 
 interface Props {
@@ -18,6 +21,18 @@ type ShowcaseEntry =
   | { kind: 'peer' }
   | { kind: 'image'; dark: string; light: string; w: number; h: number; video?: string };
 
+const navLinks = [
+  { href: '#features', label: t.nav.features },
+  { href: '#how-it-works', label: t.nav.how },
+  { href: '#security', label: t.nav.security },
+];
+
+const footerLinks = [
+  { href: 'https://github.com/tma1-ai/tma1', label: 'GitHub' },
+  { href: 'https://github.com/tma1-ai/tma1/blob/main/LICENSE', label: 'Apache-2.0' },
+  { href: '#security', label: t.nav.security },
+];
+
 const showcase: ShowcaseEntry[] = [
   { kind: 'loop' },                                                                                                                                              // 01 closes-loop
   { kind: 'peer' },                                                                                                                                              // 02 cross-agent peer
@@ -30,44 +45,9 @@ const showcase: ShowcaseEntry[] = [
 // 08 search → renders as feature-standalone below the showcase rows.
 ---
 
-<div class="container">
-  <nav>
-    <a class="logo" href="/" aria-label="TMA1 home">
-      <img src="/logo-mark.svg" alt="TMA1 logo mark" />
-      <span>TMA1</span><span class="cursor">_</span>
-    </a>
-    <div class="links">
-      <a href="#features">{t.nav.features}</a>
-      <a href="#how-it-works">{t.nav.how}</a>
-      <a href="#security">{t.nav.security}</a>
-      <a href="https://github.com/tma1-ai/tma1">GitHub</a>
-    </div>
-    <div class="nav-controls">
-      <details class="dropdown theme-dropdown">
-        <summary class="control-btn" aria-label="Theme">
-          <svg class="icon-sun" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="3"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.05 3.05l1.41 1.41M11.54 11.54l1.41 1.41M3.05 12.95l1.41-1.41M11.54 4.46l1.41-1.41"/></svg>
-          <svg class="icon-moon" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M13.5 8.5a5.5 5.5 0 01-7-7 6 6 0 107 7z"/></svg>
-        </summary>
-        <div class="dropdown-panel">
-          <button data-theme-value="light"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="3"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.05 3.05l1.41 1.41M11.54 11.54l1.41 1.41M3.05 12.95l1.41-1.41M11.54 4.46l1.41-1.41"/></svg> {t.ui.theme_light}</button>
-          <button data-theme-value="dark"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M13.5 8.5a5.5 5.5 0 01-7-7 6 6 0 107 7z"/></svg> {t.ui.theme_dark}</button>
-          <button data-theme-value="system"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="3" width="12" height="8" rx="1"/><path d="M5.5 14h5M8 11v3"/></svg> {t.ui.theme_system}</button>
-        </div>
-      </details>
-      <details class="dropdown lang-dropdown">
-        <summary class="control-btn">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6.5"/><path d="M2 8h12M8 1.5c-2 2.5-2 10.5 0 13M8 1.5c2 2.5 2 10.5 0 13"/></svg>
-          <span class="lang-label">{lang === 'zh' ? '\u4e2d\u6587' : lang === 'es' ? 'ES' : 'EN'}</span>
-        </summary>
-        <div class="dropdown-panel">
-          <a href="/" class={lang === 'en' ? 'active' : ''} data-locale="en">English</a>
-          <a href="/zh/" class={lang === 'zh' ? 'active' : ''} data-locale="zh">{'\u4e2d\u6587'}</a>
-          <a href="/es/" class={lang === 'es' ? 'active' : ''} data-locale="es">Espa{'\u00f1'}ol</a>
-        </div>
-      </details>
-    </div>
-  </nav>
+<SiteHeader lang={lang} product="tma1" links={navLinks} />
 
+<div class="container">
   <section class="hero">
     <p class="eyebrow">TMA1</p>
     <h1>
@@ -316,99 +296,13 @@ const showcase: ShowcaseEntry[] = [
     </div>
   </section>
 
-  <div class="lightbox" id="lightbox"><img src="" alt="" /></div>
-
-  <footer>
-    <p class="brand">TMA1<span class="cursor">_</span></p>
-    <div class="footer-links">
-      <a href="https://github.com/tma1-ai/tma1">GitHub</a>
-      <span>/</span>
-      <a href="https://github.com/tma1-ai/tma1/blob/main/LICENSE">Apache-2.0</a>
-      <span>/</span>
-      <a href="#security">{t.nav.security}</a>
-    </div>
-    <p set:html={t.footer.tagline} />
-  </footer>
+  <Lightbox />
 </div>
+
+<SiteFooter lang={lang} product="tma1" links={footerLinks} tagline={t.footer.tagline} />
 
 <style>
   .container { max-width: 960px; margin: 0 auto; padding: 0 24px; }
-
-  /* Nav */
-  nav {
-    padding: 16px 0;
-    display: flex; align-items: center; gap: 16px;
-    border-bottom: 1px solid var(--border);
-  }
-  nav .logo {
-    display: inline-flex;
-    align-items: center;
-    gap: 10px;
-    font-family: "SF Mono", "Fira Code", monospace;
-    font-size: 18px; font-weight: 700; letter-spacing: 2px;
-    color: var(--text);
-    text-decoration: none;
-  }
-  nav .logo img {
-    width: 24px;
-    height: 24px;
-    border-radius: 6px;
-    flex-shrink: 0;
-  }
-  nav .cursor, footer .cursor {
-    animation: blink 1.2s step-end infinite;
-    color: var(--accent);
-  }
-  nav .links { margin-left: auto; display: flex; gap: 20px; font-size: 14px; }
-  nav .links a { color: var(--text-muted); }
-  nav .links a:hover { color: var(--text); text-decoration: none; }
-  .nav-controls {
-    display: flex; align-items: center; gap: 2px;
-    margin-left: 12px; padding-left: 12px;
-    border-left: 1px solid var(--border);
-  }
-  .dropdown { position: relative; }
-  .dropdown summary { list-style: none; cursor: pointer; }
-  .dropdown summary::-webkit-details-marker { display: none; }
-  .control-btn {
-    display: flex; align-items: center; gap: 6px;
-    padding: 6px 8px; border-radius: 6px;
-    color: var(--text-muted); font-size: 13px;
-    transition: color 0.15s, background 0.15s;
-  }
-  .control-btn:hover { color: var(--text); background: var(--bg-card); }
-  .control-btn svg { flex-shrink: 0; }
-  .lang-label { font-size: 12px; }
-  .icon-sun { display: none; }
-  .icon-moon { display: block; }
-  :global([data-theme="light"]) .icon-sun { display: block; }
-  :global([data-theme="light"]) .icon-moon { display: none; }
-  .dropdown-panel {
-    position: absolute; right: 0; top: calc(100% + 4px);
-    background: var(--bg-card); border: 1px solid var(--border);
-    border-radius: 8px; padding: 4px; min-width: 130px;
-    box-shadow: 0 8px 24px var(--shadow);
-    z-index: 100;
-  }
-  .dropdown-panel a,
-  .dropdown-panel button {
-    display: flex; align-items: center; gap: 8px;
-    width: 100%; padding: 8px 12px; border: none;
-    background: none; color: var(--text-muted);
-    font-size: 13px; font-family: inherit;
-    border-radius: 6px; cursor: pointer;
-    text-decoration: none;
-    transition: background 0.1s, color 0.1s;
-  }
-  .dropdown-panel a:hover,
-  .dropdown-panel button:hover {
-    background: var(--accent-glow); color: var(--text);
-    text-decoration: none;
-  }
-  .dropdown-panel a.active,
-  .dropdown-panel button.active {
-    color: var(--accent); font-weight: 600;
-  }
 
   /* Hero */
   .hero { padding: 80px 0 48px; }
@@ -817,43 +711,12 @@ const showcase: ShowcaseEntry[] = [
   .faq-question { font-size: 16px; font-weight: 700; margin-bottom: 8px; letter-spacing: -0.02em; }
   .faq-answer { font-size: 15px; color: var(--text-muted); line-height: 1.65; }
 
-  /* Lightbox */
-  .lightbox {
-    position: fixed; inset: 0; z-index: 1000;
-    background: rgba(0, 0, 0, 0.88);
-    display: flex; align-items: center; justify-content: center;
-    padding: 24px;
-    opacity: 0; pointer-events: none;
-    transition: opacity 0.2s;
-    cursor: zoom-out;
-  }
-  .lightbox.active { opacity: 1; pointer-events: auto; }
-  .lightbox img {
-    max-width: 100%; max-height: 100%;
-    border-radius: 8px;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
-  }
-  .showcase-frame img { cursor: zoom-in; }
-
-  /* Footer */
-  footer {
-    padding: 40px 0; border-top: 1px solid var(--border);
-    text-align: center; font-size: 13px; color: var(--text-muted);
-  }
-  footer .brand {
-    font-family: "SF Mono", "Fira Code", monospace;
-    font-size: 16px; font-weight: 700; letter-spacing: 2px;
-    color: var(--text); margin-bottom: 12px;
-  }
-  footer .footer-links {
-    display: flex; justify-content: center; gap: 8px; margin-bottom: 12px;
-  }
-  footer a { color: var(--text-muted); }
-  footer a:hover { color: var(--text); }
-
   /* Responsive */
   @media (max-width: 768px) {
-    .hero h1 { font-size: 40px; max-width: 100%; }
+    /* Fluid below 400px: at a fixed 40px the longest Spanish headline word
+       is wider than the content box and pushes the page sideways. 10vw
+       reaches the 40px cap at 400px, so nothing changes above that. */
+    .hero h1 { font-size: clamp(28px, 10vw, 40px); max-width: 100%; }
     .highlights { grid-template-columns: 1fr; }
     .showcase-row {
       grid-template-columns: 1fr;
@@ -871,95 +734,11 @@ const showcase: ShowcaseEntry[] = [
     .manual-install { max-width: 100%; }
     .terminal-body { overflow-x: auto; }
     .terminal-body .line { min-width: 0; }
-    nav { flex-wrap: wrap; }
-    nav .links { gap: 12px; font-size: 13px; }
-    .nav-controls { margin-left: 0; padding-left: 0; border-left: none; }
   }
 </style>
 
 <script is:inline>
 (function() {
-  // Theme toggle
-  function setTheme(choice) {
-    var t;
-    if (choice === 'system') {
-      localStorage.removeItem('tma1-theme');
-      t = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
-    } else {
-      localStorage.setItem('tma1-theme', choice);
-      t = choice;
-    }
-    document.documentElement.setAttribute('data-theme', t);
-    document.querySelectorAll('.theme-img').forEach(function(img) {
-      var src = t === 'light' ? img.dataset.lightSrc : img.dataset.darkSrc;
-      if (src) img.src = src;
-    });
-    markActiveTheme(choice);
-  }
-
-  function markActiveTheme(choice) {
-    document.querySelectorAll('[data-theme-value]').forEach(function(btn) {
-      btn.classList.toggle('active', btn.getAttribute('data-theme-value') === choice);
-    });
-  }
-
-  // Apply initial theme images
-  var initTheme = localStorage.getItem('tma1-theme') || 'system';
-  var resolved = initTheme === 'system'
-    ? (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark')
-    : initTheme;
-  document.querySelectorAll('.theme-img').forEach(function(img) {
-    var src = resolved === 'light' ? img.dataset.lightSrc : img.dataset.darkSrc;
-    if (src) img.src = src;
-  });
-
-  // Mark initial active theme
-  markActiveTheme(initTheme);
-
-  // Theme button clicks
-  document.querySelectorAll('[data-theme-value]').forEach(function(btn) {
-    btn.addEventListener('click', function() {
-      setTheme(this.getAttribute('data-theme-value'));
-      this.closest('details').removeAttribute('open');
-    });
-  });
-
-  // System theme change listener
-  window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', function() {
-    if (!localStorage.getItem('tma1-theme')) setTheme('system');
-  });
-
-  // Language selection - store preference
-  document.querySelectorAll('[data-locale]').forEach(function(a) {
-    a.addEventListener('click', function() {
-      localStorage.setItem('tma1-locale', this.getAttribute('data-locale'));
-    });
-  });
-
-  // Close dropdowns when clicking outside
-  document.addEventListener('click', function(e) {
-    document.querySelectorAll('details.dropdown').forEach(function(d) {
-      if (!d.contains(e.target)) d.removeAttribute('open');
-    });
-  });
-
-  // Lightbox
-  var lightbox = document.getElementById('lightbox');
-  var lightboxImg = lightbox.querySelector('img');
-  function openLightbox(src, alt) {
-    lightboxImg.src = src;
-    lightboxImg.alt = alt;
-    lightbox.classList.add('active');
-    document.body.style.overflow = 'hidden';
-  }
-  function closeLightbox() {
-    lightbox.classList.remove('active');
-    document.body.style.overflow = '';
-  }
-  document.querySelectorAll('.showcase-frame img').forEach(function(img) {
-    img.addEventListener('click', function() { openLightbox(this.src, this.alt); });
-  });
-
   // Reveal hero loop-moment lines sequentially when scrolled into view.
   var loopMoment = document.querySelector('.loop-moment');
   if (loopMoment) {
@@ -979,10 +758,6 @@ const showcase: ShowcaseEntry[] = [
       loopObserver.observe(loopMoment);
     }
   }
-  lightbox.addEventListener('click', closeLightbox);
-  document.addEventListener('keydown', function(e) {
-    if (e.key === 'Escape') closeLightbox();
-  });
 
   // Screenshot → Video → Screenshot loop, triggered when scrolled into view.
   document.querySelectorAll('.showcase-media-stack').forEach(function(stack) {

@@ -1,0 +1,18 @@
+---
+import Layout from '../../../layouts/Layout.astro';
+import ProductPage from '../../../components/ProductPage.astro';
+import { es } from '../../../i18n/dsh';
+import '../../../styles/global.css';
+---
+
+<Layout
+  title={es.title}
+  description={es.description}
+  lang="es"
+  product="dsh-otel"
+  ogImage={es.og.image}
+  ogImageAlt={es.og.alt}
+  favicon="/products/dsh-otel/favicon.svg"
+>
+  <ProductPage product="dsh-otel" t={es} />
+</Layout>

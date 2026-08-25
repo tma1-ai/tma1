@@ -1,0 +1,444 @@
+---
+import CodeBlock from './CodeBlock.astro';
+import Lightbox from './Lightbox.astro';
+import SiteFooter from './SiteFooter.astro';
+import SiteHeader from './SiteHeader.astro';
+import { chrome } from '../i18n/chrome';
+import type { ProductCopy } from '../i18n/product-copy';
+import type { ProductId } from '../i18n/products';
+
+interface Props {
+  product: ProductId;
+  t: ProductCopy;
+}
+
+const { product, t } = Astro.props;
+const lang = t.lang;
+const c = chrome[lang];
+---
+
+<SiteHeader lang={lang} product={product} links={t.nav} />
+
+<div class="container">
+  <section class="hero">
+    <p class="eyebrow">{t.hero.eyebrow}</p>
+    {/* No whitespace between the two halves — JSX would keep it, and a stray
+        space after a CJK comma is visible. Locales carry their own spacing. */}
+    <h1>{t.hero.h1_1}<span class="muted">{t.hero.h1_2}</span></h1>
+    <p class="subtitle" set:html={t.hero.subtitle} />
+
+    <div class="badges">
+      {t.hero.badges.map(b => <a class="badge" href={b.href}>{b.label}</a>)}
+    </div>
+
+    <div class="onboarding-card">
+      <p class="onboarding-label">{t.install.label}</p>
+      <div class="onboarding-body">
+        <p class="onboarding-text">{t.install.cmd}</p>
+        <button class="copy-btn"
+          onclick={`navigator.clipboard.writeText(${JSON.stringify(t.install.cmd)}).then(()=>{this.textContent=${JSON.stringify(c.copied)};setTimeout(()=>this.textContent=${JSON.stringify(c.copy)},1500)})`}>
+          {c.copy}
+        </button>
+      </div>
+      <p class="onboarding-note" set:html={t.install.note} />
+    </div>
+
+    <details class="manual-install">
+      <summary>{t.install.more_summary}</summary>
+      <div class="manual-blocks">
+        {t.install.more.map(block => <CodeBlock block={block} />)}
+      </div>
+    </details>
+
+    {t.hook && (
+      <div class="hook-block">
+        <CodeBlock block={t.hook.block} />
+        <p class="hook-caption" set:html={t.hook.caption} />
+      </div>
+    )}
+
+    <div class="highlights">
+      {t.highlights.map(h => (
+        <div class="highlight-card">
+          <h3>{h.title}</h3>
+          <p set:html={h.desc} />
+        </div>
+      ))}
+    </div>
+  </section>
+
+  <section id={t.features.id} class="features">
+    <p class="section-kicker">{t.features.kicker}</p>
+    <h2 class="section-title">{t.features.title}</h2>
+    <p class="section-desc">{t.features.desc}</p>
+    <div class="showcase">
+      {t.features.rows.map((row, i) => (
+        <div class={`showcase-row${i % 2 === 1 ? ' flip' : ''}`}>
+          <div class="showcase-text">
+            <div class="feature-icon">{row.num}</div>
+            <h3>{row.title}</h3>
+            <p set:html={row.desc} />
+          </div>
+          <div class="showcase-image">
+            {row.media.kind === 'image' ? (
+              <div class="showcase-frame">
+                <div class="browser-chrome">
+                  <span class="dot red"></span>
+                  <span class="dot yellow"></span>
+                  <span class="dot green"></span>
+                  <span class="browser-url">{row.media.chrome}</span>
+                </div>
+                <div class="showcase-frame__body">
+                  <img src={row.media.src} alt={row.media.alt} loading="lazy"
+                    width={row.media.w} height={row.media.h} />
+                </div>
+              </div>
+            ) : row.media.kind === 'code' ? (
+              <CodeBlock block={row.media.block} />
+            ) : (
+              <div class="data-table">
+                <table>
+                  <thead><tr>{row.media.head.map(h => <th>{h}</th>)}</tr></thead>
+                  <tbody>
+                    {row.media.rows.map(r => <tr>{r.map(cell => <td set:html={cell} />)}</tr>)}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      ))}
+    </div>
+  </section>
+
+  {t.sections.map(s => (
+    <section id={s.id} class="page-section">
+      <p class="section-kicker">{s.kicker}</p>
+      <h2 class:list={['section-title', { 'no-desc': !s.desc }]} set:html={s.title} />
+      {s.desc && <p class="section-desc" set:html={s.desc} />}
+
+      {s.kind === 'panel' && (
+        <>
+          <article class="panel">
+            <h3 class="panel-title">{s.panel_title}</h3>
+            <p class="panel-body" set:html={s.panel_body} />
+            {s.code && <CodeBlock block={s.code} class="panel-code" />}
+          </article>
+          {s.cards && (
+            <div class="card-grid">
+              {s.cards.map(card => (
+                <article class="mini-card">
+                  <h4>{card.title}</h4>
+                  <p set:html={card.desc} />
+                </article>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+
+      {s.kind === 'cards' && (
+        <div class="card-grid">
+          {s.cards.map(card => (
+            <article class="mini-card">
+              <h4>{card.title}</h4>
+              <p set:html={card.desc} />
+            </article>
+          ))}
+        </div>
+      )}
+
+      {s.kind === 'table' && (
+        <>
+          <div class="data-table data-table--wide">
+            <table>
+              <thead><tr>{s.head.map(h => <th>{h}</th>)}</tr></thead>
+              <tbody>
+                {s.rows.map(r => <tr>{r.map(cell => <td set:html={cell} />)}</tr>)}
+              </tbody>
+            </table>
+          </div>
+          {s.note && <p class="table-note" set:html={s.note} />}
+        </>
+      )}
+
+      {s.kind === 'faq' && (
+        <div class="faq-list">
+          {s.items.map(item => (
+            <article class="faq-card">
+              <h3 class="faq-question">{item.q}</h3>
+              <p class="faq-answer" set:html={item.a} />
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
+  ))}
+
+  <Lightbox />
+</div>
+
+<SiteFooter lang={lang} product={product} links={t.footer.links} tagline={t.footer.tagline} />
+
+<style>
+  .container { max-width: 960px; margin: 0 auto; padding: 0 24px; }
+
+  /* Hero */
+  .hero { padding: 72px 0 48px; }
+  .eyebrow {
+    font-family: "SF Mono", "Fira Code", monospace;
+    font-size: 13px; letter-spacing: 0.22em;
+    text-transform: uppercase; color: var(--accent);
+    margin-bottom: 16px;
+  }
+  h1 {
+    font-size: 52px; font-weight: 700; letter-spacing: -1.4px;
+    line-height: 1.12; margin-bottom: 20px; max-width: 18ch;
+  }
+  h1 .muted { color: var(--text-muted); }
+  .subtitle {
+    font-size: 18px; color: var(--text-muted);
+    max-width: 660px; line-height: 1.7; margin-bottom: 24px;
+  }
+  .subtitle :global(em) { font-style: normal; color: var(--accent); font-weight: 600; }
+  .subtitle :global(strong) { color: var(--text); font-weight: 600; }
+
+  .badges { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 32px; }
+  .badge {
+    font-family: "SF Mono", "Fira Code", monospace;
+    font-size: 11px; letter-spacing: 0.04em;
+    padding: 4px 10px; border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--bg-card);
+    color: var(--text-muted); text-decoration: none;
+    transition: border-color 0.15s, color 0.15s;
+  }
+  .badge:hover { border-color: var(--accent-border); color: var(--accent); text-decoration: none; }
+
+  /* Install card */
+  .onboarding-card {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 12px; padding: 20px 24px;
+    max-width: 720px; margin-bottom: 16px;
+  }
+  .onboarding-label {
+    font-family: "SF Mono", "Fira Code", monospace;
+    font-size: 11px; letter-spacing: 0.2em;
+    color: var(--text-muted); margin-bottom: 12px;
+  }
+  .onboarding-body { display: flex; align-items: flex-start; gap: 16px; }
+  .onboarding-text {
+    font-family: "SF Mono", "Fira Code", monospace;
+    font-size: 14px; line-height: 1.6; color: var(--text); flex: 1;
+    word-break: break-word;
+  }
+  .onboarding-note {
+    font-size: 13px; color: var(--text-muted);
+    line-height: 1.6; margin-top: 12px;
+  }
+  .onboarding-note :global(code) { font-size: 0.85em; }
+  .copy-btn {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 6px; color: var(--text-muted);
+    padding: 6px 12px; cursor: pointer; font-size: 12px;
+    font-family: inherit; transition: border-color 0.15s, color 0.15s;
+    flex-shrink: 0; white-space: nowrap;
+  }
+  .copy-btn:hover { border-color: var(--text-muted); color: var(--text); }
+
+  .manual-install { max-width: 720px; margin-bottom: 32px; }
+  .manual-install summary {
+    font-size: 13px; color: var(--text-muted);
+    cursor: pointer; padding: 4px 0;
+  }
+  .manual-install summary:hover { color: var(--text); }
+  .manual-blocks { display: flex; flex-direction: column; gap: 12px; margin-top: 12px; }
+
+  /* Hook block — the one query or snippet that sells the project */
+  .hook-block { margin-bottom: 36px; }
+  .hook-caption {
+    font-size: 14px; color: var(--text-muted);
+    line-height: 1.6; margin-top: 12px; max-width: 720px;
+  }
+  .hook-caption :global(code) { font-size: 0.88em; }
+
+  .highlights { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  .highlight-card {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 10px; padding: 20px;
+    transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s;
+  }
+  .highlight-card:hover {
+    border-color: var(--accent-border);
+    box-shadow: 0 0 12px var(--accent-shadow);
+    transform: translateY(-1px);
+  }
+  .highlight-card h3 { font-size: 15px; margin-bottom: 6px; letter-spacing: -0.02em; }
+  .highlight-card p { font-size: 14px; color: var(--text-muted); line-height: 1.55; }
+
+  /* Shared section chrome */
+  .section-kicker {
+    font-family: "SF Mono", "Fira Code", monospace;
+    font-size: 12px; letter-spacing: 0.22em;
+    text-transform: uppercase; color: var(--accent); margin-bottom: 12px;
+  }
+  .section-kicker::before { content: "> "; }
+  .section-title {
+    font-size: 36px; font-weight: 700; letter-spacing: -0.8px;
+    line-height: 1.15; margin-bottom: 12px;
+  }
+  .section-desc {
+    font-size: 16px; color: var(--text-muted);
+    line-height: 1.6; max-width: 660px; margin-bottom: 32px;
+  }
+  .section-desc :global(code) { font-size: 0.85em; }
+  .section-title :global(code) {
+    font-size: 0.8em; border: none; padding: 2px 8px;
+    background: var(--code-bg); color: var(--accent);
+    vertical-align: 0.06em;
+  }
+  /* The chip's own padding would otherwise indent the whole heading. */
+  .section-title :global(code:first-child) { margin-left: -8px; }
+  /* No desc under the title: it still needs the same breathing room. */
+  .section-title.no-desc { margin-bottom: 32px; }
+  .features, .page-section { padding: 60px 0; border-top: 1px solid var(--border); }
+  .feature-icon {
+    font-family: "SF Mono", "Fira Code", monospace;
+    font-size: 13px; color: var(--accent); margin-bottom: 12px;
+  }
+
+  /* Showcase rows */
+  .showcase-row {
+    display: grid; grid-template-columns: 1fr 1fr;
+    gap: 48px; align-items: start;
+    padding: 40px 0; border-bottom: 1px solid var(--border);
+  }
+  .showcase .showcase-row:first-child { padding-top: 8px; }
+  .showcase-row:last-of-type { border-bottom: none; padding-bottom: 8px; }
+  .showcase-row.flip .showcase-text { order: 2; }
+  .showcase-row.flip .showcase-image { order: 1; }
+  /* A `1fr` track is `minmax(auto, 1fr)`, and the min-content width of a
+     white-space:pre code block is the full unwrapped line. Without this the
+     track refuses to shrink, the row overflows the viewport, and the code
+     block's own overflow-x never engages. */
+  .showcase-text, .showcase-image { min-width: 0; }
+  .showcase-text { padding-top: 24px; }
+  .showcase-text h3 {
+    font-size: 22px; font-weight: 700;
+    letter-spacing: -0.03em; margin-bottom: 12px;
+  }
+  .showcase-text p { font-size: 15px; color: var(--text-muted); line-height: 1.65; }
+  .showcase-text :global(code) { font-size: 0.85em; }
+
+  .browser-chrome {
+    display: flex; align-items: center; gap: 6px;
+    padding: 8px 12px; background: var(--terminal-header);
+    border-bottom: 1px solid var(--border);
+  }
+  .browser-url {
+    font-family: "SF Mono", "Fira Code", monospace;
+    font-size: 10px; color: var(--comment); margin-left: 8px;
+    background: var(--bg); padding: 2px 10px;
+    border-radius: 4px; border: 1px solid var(--border);
+  }
+  .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; }
+  .dot.red { background: #ff5f57; }
+  .dot.yellow { background: #febc2e; }
+  .dot.green { background: #28c840; }
+
+  .showcase-frame {
+    border-radius: 10px; overflow: hidden;
+    border: 1px solid var(--border);
+    box-shadow: 0 4px 24px var(--shadow);
+    transition: box-shadow 0.3s, border-color 0.3s;
+  }
+  .showcase-frame:hover {
+    border-color: var(--accent-border);
+    box-shadow: 0 4px 24px var(--shadow), 0 0 0 1px var(--accent-border);
+  }
+  .showcase-frame__body { line-height: 0; }
+  .showcase-frame__body img { width: 100%; height: auto; display: block; }
+
+  /* Panels and cards */
+  .panel {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 10px; padding: 24px; margin-bottom: 20px;
+  }
+  .panel-title { font-size: 18px; font-weight: 700; margin-bottom: 10px; letter-spacing: -0.02em; }
+  .panel-body { font-size: 15px; color: var(--text-muted); line-height: 1.65; }
+  .panel :global(.panel-code) { margin-top: 18px; }
+
+  .card-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+  .mini-card {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 10px; padding: 20px;
+    transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s;
+  }
+  .mini-card:hover {
+    border-color: var(--accent-border);
+    box-shadow: 0 0 12px var(--accent-shadow);
+    transform: translateY(-1px);
+  }
+  .mini-card h4 { font-size: 15px; font-weight: 700; margin-bottom: 8px; letter-spacing: -0.02em; }
+  .mini-card p { font-size: 14px; color: var(--text-muted); line-height: 1.55; }
+
+  /* Tables */
+  .data-table {
+    border: 1px solid var(--border); border-radius: 10px;
+    overflow: hidden; background: var(--bg-card);
+  }
+  .data-table table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  .data-table th {
+    text-align: left; padding: 10px 14px;
+    background: var(--terminal-header);
+    font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase;
+    color: var(--text-muted); font-weight: 600;
+    border-bottom: 1px solid var(--border);
+  }
+  .data-table td {
+    padding: 10px 14px; color: var(--text-muted);
+    line-height: 1.5; vertical-align: top;
+    border-bottom: 1px solid var(--border);
+  }
+  .data-table tr:last-child td { border-bottom: none; }
+  .data-table td:first-child { color: var(--text); }
+  /* Bordered code chips turn a dense table into noise — keep the monospace
+     face and drop the box. */
+  .data-table :global(code) {
+    font-size: 0.85em; border: none; padding: 1px 4px;
+    background: var(--code-bg); color: var(--text);
+  }
+  .data-table :global(em) { font-style: normal; color: var(--comment); }
+  .table-note { font-size: 14px; color: var(--text-muted); line-height: 1.65; margin-top: 16px; }
+  .table-note :global(code) { font-size: 0.85em; }
+
+  /* FAQ */
+  .faq-list { display: flex; flex-direction: column; gap: 16px; }
+  .faq-card {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 10px; padding: 24px;
+    transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s;
+  }
+  .faq-card:hover {
+    border-color: var(--accent-border);
+    box-shadow: 0 0 12px var(--accent-shadow);
+    transform: translateY(-1px);
+  }
+  .faq-question { font-size: 16px; font-weight: 700; margin-bottom: 8px; letter-spacing: -0.02em; }
+  .faq-answer { font-size: 15px; color: var(--text-muted); line-height: 1.65; }
+
+  @media (max-width: 768px) {
+    h1 { font-size: 34px; max-width: 100%; }
+    .highlights { grid-template-columns: 1fr; }
+    .card-grid { grid-template-columns: 1fr; }
+    .showcase-row { grid-template-columns: 1fr; gap: 24px; padding: 32px 0; }
+    .showcase-row.flip .showcase-text { order: 1; }
+    .showcase-row.flip .showcase-image { order: 2; }
+    .showcase-text { padding-top: 0; }
+    .showcase-text h3 { font-size: 18px; }
+    .onboarding-card, .manual-install { max-width: 100%; }
+    .onboarding-body { flex-direction: column; gap: 12px; }
+    .data-table { overflow-x: auto; }
+    .data-table table { min-width: 460px; }
+  }
+</style>

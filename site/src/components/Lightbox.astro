@@ -1,0 +1,49 @@
+---
+---
+
+<div class="lightbox" id="lightbox"><img src="" alt="" /></div>
+
+<style>
+  .lightbox {
+    position: fixed; inset: 0; z-index: 1000;
+    background: rgba(0, 0, 0, 0.88);
+    display: flex; align-items: center; justify-content: center;
+    padding: 24px;
+    opacity: 0; pointer-events: none;
+    transition: opacity 0.2s;
+    cursor: zoom-out;
+  }
+  .lightbox.active { opacity: 1; pointer-events: auto; }
+  .lightbox img {
+    max-width: 100%; max-height: 100%;
+    border-radius: 8px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  }
+  :global(.showcase-frame img) { cursor: zoom-in; }
+</style>
+
+<script is:inline>
+(function() {
+  var lightbox = document.getElementById('lightbox');
+  var lightboxImg = lightbox.querySelector('img');
+
+  function close() {
+    lightbox.classList.remove('active');
+    document.body.style.overflow = '';
+  }
+
+  document.querySelectorAll('.showcase-frame img').forEach(function(img) {
+    img.addEventListener('click', function() {
+      lightboxImg.src = this.src;
+      lightboxImg.alt = this.alt;
+      lightbox.classList.add('active');
+      document.body.style.overflow = 'hidden';
+    });
+  });
+
+  lightbox.addEventListener('click', close);
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') close();
+  });
+})();
+</script>

@@ -1,0 +1,66 @@
+---
+import type { CodeBlock } from '../i18n/product-copy';
+
+interface Props {
+  block: CodeBlock;
+  class?: string;
+}
+
+const { block, class: className = '' } = Astro.props;
+---
+
+<div class:list={['terminal', className]}>
+  <div class="terminal-header">
+    <span class="dot red"></span>
+    <span class="dot yellow"></span>
+    <span class="dot green"></span>
+    <span class="terminal-title">{block.title}</span>
+  </div>
+  <div class="terminal-body">
+    {block.lines.map(line => (
+      line.kind === 'blank' ? (
+        <div class="line"><span>&nbsp;</span></div>
+      ) : (
+        <div class:list={['line', { comment: line.kind === 'comment' }]}>
+          <span class="line-text">{line.text}</span>
+          {line.note && <span class="line-note">{line.note}</span>}
+        </div>
+      )
+    ))}
+  </div>
+</div>
+
+<style>
+  .terminal {
+    background: var(--terminal-bg); border: 1px solid var(--border);
+    border-radius: 10px; overflow: hidden;
+  }
+  .terminal-header {
+    display: flex; align-items: center; gap: 6px;
+    padding: 10px 14px; background: var(--terminal-header);
+    border-bottom: 1px solid var(--border);
+  }
+  .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; }
+  .dot.red { background: #ff5f57; }
+  .dot.yellow { background: #febc2e; }
+  .dot.green { background: #28c840; }
+  .terminal-title {
+    font-family: "SF Mono", "Fira Code", monospace;
+    font-size: 11px; color: var(--comment); margin-left: 6px;
+  }
+  .terminal-body {
+    padding: 16px 20px;
+    font-family: "SF Mono", "Fira Code", monospace;
+    font-size: 13px; line-height: 1.7;
+    overflow-x: auto;
+  }
+  .line { display: flex; align-items: baseline; gap: 16px; white-space: pre; }
+  .line-text { color: var(--text); }
+  .line-note { color: var(--comment); margin-left: auto; padding-left: 24px; }
+  .line.comment .line-text { color: var(--comment); font-style: italic; }
+
+  @media (max-width: 768px) {
+    .terminal-body { font-size: 12px; padding: 14px 16px; }
+    .line-note { display: none; }
+  }
+</style>
