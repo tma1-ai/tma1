@@ -10,10 +10,19 @@
   --border: #30363d;
   --text: #e6edf3;
   --text-muted: #8b949e;
-  --accent: #3fb950;
-  --accent-glow: rgba(63, 185, 80, 0.15);
-  --accent-border: rgba(63, 185, 80, 0.4);
-  --accent-shadow: rgba(63, 185, 80, 0.06);
+
+  /* One accent per project. Every page sets data-product on <html>, which
+     remaps --accent below; the rest of the design system is shared. */
+  --p-tma1: #3fb950;         --p-tma1-rgb: 63, 185, 80;
+  --p-openfuse: #818cf8;     --p-openfuse-rgb: 129, 140, 248;
+  --p-dsh-otel: #f0a742;     --p-dsh-otel-rgb: 240, 167, 66;
+
+  --accent: var(--p-tma1);
+  --accent-rgb: var(--p-tma1-rgb);
+  --accent-glow: rgba(var(--accent-rgb), 0.15);
+  --accent-border: rgba(var(--accent-rgb), 0.4);
+  --accent-shadow: rgba(var(--accent-rgb), 0.06);
+
   --blue: #79c0ff;
   --green: #3fb950;
   --purple: #d2a8ff;
@@ -30,10 +39,14 @@
   --border: #d0d7de;
   --text: #1f2328;
   --text-muted: #656d76;
-  --accent: #1a7f37;
-  --accent-glow: rgba(26, 127, 55, 0.12);
-  --accent-border: rgba(26, 127, 55, 0.4);
-  --accent-shadow: rgba(26, 127, 55, 0.08);
+
+  --p-tma1: #1a7f37;         --p-tma1-rgb: 26, 127, 55;
+  --p-openfuse: #4f46e5;     --p-openfuse-rgb: 79, 70, 229;
+  --p-dsh-otel: #b45309;     --p-dsh-otel-rgb: 180, 83, 9;
+
+  --accent-glow: rgba(var(--accent-rgb), 0.12);
+  --accent-shadow: rgba(var(--accent-rgb), 0.08);
+
   --blue: #0969da;
   --green: #1a7f37;
   --purple: #8250df;
@@ -42,6 +55,17 @@
   --code-bg: #eff1f3;
   --comment: #6e7681;
   --shadow: rgba(0, 0, 0, 0.12);
+}
+
+/* Declared after both theme blocks: [data-product] and :root have equal
+   specificity, so source order decides which --accent wins. */
+[data-product="openfuse"] {
+  --accent: var(--p-openfuse);
+  --accent-rgb: var(--p-openfuse-rgb);
+}
+[data-product="dsh-otel"] {
+  --accent: var(--p-dsh-otel);
+  --accent-rgb: var(--p-dsh-otel-rgb);
 }
 
 body {

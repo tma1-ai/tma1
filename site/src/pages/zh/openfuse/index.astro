@@ -1,0 +1,18 @@
+---
+import Layout from '../../../layouts/Layout.astro';
+import ProductPage from '../../../components/ProductPage.astro';
+import { zh } from '../../../i18n/openfuse';
+import '../../../styles/global.css';
+---
+
+<Layout
+  title={zh.title}
+  description={zh.description}
+  lang="zh"
+  product="openfuse"
+  ogImage={zh.og.image}
+  ogImageAlt={zh.og.alt}
+  favicon="/products/openfuse/favicon.svg"
+>
+  <ProductPage product="openfuse" t={zh} />
+</Layout>

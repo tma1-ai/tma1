@@ -1,0 +1,38 @@
+---
+import type { ProductId } from '../i18n/products';
+
+interface Props {
+  id: ProductId;
+  size?: number;
+  class?: string;
+}
+
+const { id, size = 16, class: className = '' } = Astro.props;
+---
+
+{/* Monochrome glyphs drawn in currentColor so each one picks up the active
+    product accent in both themes. The full-colour brand marks live in the
+    product screenshots, not in the site chrome. */}
+{id === 'tma1' && (
+  <svg class={className} width={size} height={size} viewBox="0 0 16 16" fill="none"
+    stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true">
+    <rect x="5.5" y="2.4" width="5" height="9.6" rx="1" />
+    <path d="M2.4 13.9h11.2" opacity="0.5" />
+  </svg>
+)}
+{id === 'openfuse' && (
+  <svg class={className} width={size} height={size} viewBox="0 0 16 16" fill="none"
+    stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+    <circle cx="6.1" cy="6.3" r="3.6" />
+    <circle cx="9.9" cy="9.7" r="3.6" />
+  </svg>
+)}
+{id === 'dsh-otel' && (
+  <svg class={className} width={size} height={size} viewBox="0 0 16 16" fill="none"
+    stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"
+    aria-hidden="true">
+    <path d="M1.6 3.9h3.3L7.5 8h3" />
+    <path d="M1.6 12.1h3.3L7.5 8" />
+    <rect x="10.8" y="5.5" width="3.6" height="5" rx="1.1" fill="currentColor" stroke="none" />
+  </svg>
+)}

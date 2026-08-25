@@ -1,0 +1,276 @@
+---
+import ProductMark from './ProductMark.astro';
+import { chrome } from '../i18n/chrome';
+import { productById, productHref, products, type Locale, type ProductId } from '../i18n/products';
+
+interface Props {
+  lang: Locale;
+  product: ProductId;
+  /** In-page section anchors for the current product. */
+  links: Array<{ href: string; label: string }>;
+}
+
+const { lang, product, links } = Astro.props;
+const c = chrome[lang];
+const current = productById(product);
+const langLabel = lang === 'zh' ? '中文' : lang === 'es' ? 'ES' : 'EN';
+---
+
+<div class="product-bar">
+  <div class="product-bar-inner">
+    <a class="org" href="https://github.com/tma1-ai" aria-label="tma1-ai on GitHub">tma1-ai<span class="org-slash">/</span></a>
+    <nav class="product-tabs" aria-label={c.products_label}>
+      {products.map(p => (
+        <a
+          class:list={['product-tab', { active: p.id === product }]}
+          href={productHref(p.id, lang)}
+          data-product-tab={p.id}
+          title={p.blurb[lang]}
+          aria-current={p.id === product ? 'page' : undefined}
+        >
+          <ProductMark id={p.id} size={15} />
+          <span>{p.name}</span>
+          {p.id === 'tma1' && <span class="tab-cursor">_</span>}
+        </a>
+      ))}
+    </nav>
+  </div>
+</div>
+
+<nav class="site-nav">
+  <a class="logo" href={productHref(product, lang)} aria-label={`${current.name} home`}>
+    <ProductMark id={product} size={20} class="logo-mark" />
+    <span>{current.name}</span>
+    {product === 'tma1' && <span class="cursor">_</span>}
+  </a>
+  <div class="links">
+    {links.map(l => <a href={l.href}>{l.label}</a>)}
+    <a href={current.repo}>GitHub</a>
+  </div>
+  <div class="nav-controls">
+    <details class="dropdown theme-dropdown">
+      <summary class="control-btn" aria-label={c.theme_label}>
+        <svg class="icon-sun" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="3"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.05 3.05l1.41 1.41M11.54 11.54l1.41 1.41M3.05 12.95l1.41-1.41M11.54 4.46l1.41-1.41"/></svg>
+        <svg class="icon-moon" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M13.5 8.5a5.5 5.5 0 01-7-7 6 6 0 107 7z"/></svg>
+      </summary>
+      <div class="dropdown-panel">
+        <button data-theme-value="light"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="3"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.05 3.05l1.41 1.41M11.54 11.54l1.41 1.41M3.05 12.95l1.41-1.41M11.54 4.46l1.41-1.41"/></svg> {c.theme_light}</button>
+        <button data-theme-value="dark"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M13.5 8.5a5.5 5.5 0 01-7-7 6 6 0 107 7z"/></svg> {c.theme_dark}</button>
+        <button data-theme-value="system"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="3" width="12" height="8" rx="1"/><path d="M5.5 14h5M8 11v3"/></svg> {c.theme_system}</button>
+      </div>
+    </details>
+    <details class="dropdown lang-dropdown">
+      <summary class="control-btn">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6.5"/><path d="M2 8h12M8 1.5c-2 2.5-2 10.5 0 13M8 1.5c2 2.5 2 10.5 0 13"/></svg>
+        <span class="lang-label">{langLabel}</span>
+      </summary>
+      <div class="dropdown-panel">
+        <a href={productHref(product, 'en')} class={lang === 'en' ? 'active' : ''} data-locale="en">English</a>
+        <a href={productHref(product, 'zh')} class={lang === 'zh' ? 'active' : ''} data-locale="zh">{'中文'}</a>
+        <a href={productHref(product, 'es')} class={lang === 'es' ? 'active' : ''} data-locale="es">Espa{'ñ'}ol</a>
+      </div>
+    </details>
+  </div>
+</nav>
+
+<style>
+  /* Product switcher — terminal tab strip. The active tab drops its bottom
+     border so it reads as opening into the page below it. */
+  .product-bar {
+    position: sticky; top: 0; z-index: 90;
+    background: var(--terminal-header);
+    border-bottom: 1px solid var(--border);
+    backdrop-filter: saturate(180%) blur(8px);
+  }
+  .product-bar-inner {
+    max-width: 960px; margin: 0 auto; padding: 0 24px;
+    display: flex; align-items: flex-end; gap: 20px;
+    min-height: 42px;
+  }
+  .org {
+    font-family: "SF Mono", "Fira Code", monospace;
+    font-size: 12px; letter-spacing: 0.08em;
+    color: var(--text-muted); text-decoration: none;
+    padding-bottom: 11px; flex-shrink: 0;
+    transition: color 0.15s;
+  }
+  .org:hover { color: var(--text); text-decoration: none; }
+  .org-slash { color: var(--comment); margin-left: 2px; }
+
+  .product-tabs { display: flex; align-items: flex-end; gap: 4px; }
+  .product-tab {
+    display: inline-flex; align-items: center; gap: 7px;
+    padding: 8px 16px 7px;
+    font-family: "SF Mono", "Fira Code", monospace;
+    font-size: 13px; letter-spacing: 0.01em;
+    color: var(--text-muted); text-decoration: none;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-bottom: none;
+    border-radius: 8px 8px 0 0;
+    /* Cover the strip's own bottom border so the active tab merges with the page. */
+    margin-bottom: -1px;
+    white-space: nowrap;
+    transition: color 0.15s, background 0.15s, border-color 0.15s;
+  }
+  .product-tab :global(svg) { flex-shrink: 0; opacity: 0.75; transition: opacity 0.15s; }
+  .product-tab:hover {
+    color: var(--text); background: var(--bg); text-decoration: none;
+  }
+  .product-tab:hover :global(svg) { opacity: 1; }
+  .product-tab.active {
+    color: var(--accent);
+    background: var(--bg);
+    border-color: var(--border);
+    padding-bottom: 8px;
+    box-shadow: inset 0 2px 0 var(--accent);
+  }
+  .product-tab.active :global(svg) { opacity: 1; }
+  .tab-cursor { animation: blink 1.2s step-end infinite; margin-left: -4px; }
+
+  /* Page nav */
+  .site-nav {
+    max-width: 960px; margin: 0 auto; padding: 16px 24px;
+    display: flex; align-items: center; gap: 16px;
+    border-bottom: 1px solid var(--border);
+  }
+  .logo {
+    display: inline-flex; align-items: center; gap: 10px;
+    font-family: "SF Mono", "Fira Code", monospace;
+    font-size: 18px; font-weight: 700; letter-spacing: 2px;
+    color: var(--text); text-decoration: none;
+  }
+  .logo:hover { text-decoration: none; }
+  .logo :global(.logo-mark) { color: var(--accent); flex-shrink: 0; }
+  .cursor { animation: blink 1.2s step-end infinite; color: var(--accent); }
+  .links { margin-left: auto; display: flex; gap: 20px; font-size: 14px; }
+  .links a { color: var(--text-muted); }
+  .links a:hover { color: var(--text); text-decoration: none; }
+  .nav-controls {
+    display: flex; align-items: center; gap: 2px;
+    margin-left: 12px; padding-left: 12px;
+    border-left: 1px solid var(--border);
+  }
+  .dropdown { position: relative; }
+  .dropdown summary { list-style: none; cursor: pointer; }
+  .dropdown summary::-webkit-details-marker { display: none; }
+  .control-btn {
+    display: flex; align-items: center; gap: 6px;
+    padding: 6px 8px; border-radius: 6px;
+    color: var(--text-muted); font-size: 13px;
+    transition: color 0.15s, background 0.15s;
+  }
+  .control-btn:hover { color: var(--text); background: var(--bg-card); }
+  .control-btn svg { flex-shrink: 0; }
+  .lang-label { font-size: 12px; }
+  .icon-sun { display: none; }
+  .icon-moon { display: block; }
+  :global([data-theme="light"]) .icon-sun { display: block; }
+  :global([data-theme="light"]) .icon-moon { display: none; }
+  .dropdown-panel {
+    position: absolute; right: 0; top: calc(100% + 4px);
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 8px; padding: 4px; min-width: 130px;
+    box-shadow: 0 8px 24px var(--shadow);
+    z-index: 100;
+  }
+  .dropdown-panel a,
+  .dropdown-panel button {
+    display: flex; align-items: center; gap: 8px;
+    width: 100%; padding: 8px 12px; border: none;
+    background: none; color: var(--text-muted);
+    font-size: 13px; font-family: inherit;
+    border-radius: 6px; cursor: pointer;
+    text-decoration: none;
+    transition: background 0.1s, color 0.1s;
+  }
+  .dropdown-panel a:hover,
+  .dropdown-panel button:hover {
+    background: var(--accent-glow); color: var(--text);
+    text-decoration: none;
+  }
+  .dropdown-panel a.active,
+  .dropdown-panel button.active { color: var(--accent); font-weight: 600; }
+
+  @media (max-width: 768px) {
+    .product-bar-inner {
+      gap: 12px; padding: 0 16px;
+      overflow-x: auto; scrollbar-width: none;
+    }
+    .product-bar-inner::-webkit-scrollbar { display: none; }
+    .product-tab { padding: 8px 12px 7px; font-size: 12px; }
+    .site-nav { flex-wrap: wrap; padding: 16px; }
+    .links { gap: 12px; font-size: 13px; }
+    .nav-controls { margin-left: 0; padding-left: 0; border-left: none; }
+  }
+</style>
+
+<script is:inline>
+(function() {
+  function resolveSystem() {
+    return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+  }
+
+  function applyImages(theme) {
+    document.querySelectorAll('.theme-img').forEach(function(img) {
+      var src = theme === 'light' ? img.dataset.lightSrc : img.dataset.darkSrc;
+      if (src) img.src = src;
+    });
+  }
+
+  function markActiveTheme(choice) {
+    document.querySelectorAll('[data-theme-value]').forEach(function(btn) {
+      btn.classList.toggle('active', btn.getAttribute('data-theme-value') === choice);
+    });
+  }
+
+  function setTheme(choice) {
+    var theme;
+    if (choice === 'system') {
+      localStorage.removeItem('tma1-theme');
+      theme = resolveSystem();
+    } else {
+      localStorage.setItem('tma1-theme', choice);
+      theme = choice;
+    }
+    document.documentElement.setAttribute('data-theme', theme);
+    applyImages(theme);
+    markActiveTheme(choice);
+  }
+
+  var initChoice = localStorage.getItem('tma1-theme') || 'system';
+  applyImages(initChoice === 'system' ? resolveSystem() : initChoice);
+  markActiveTheme(initChoice);
+
+  document.querySelectorAll('[data-theme-value]').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      setTheme(this.getAttribute('data-theme-value'));
+      this.closest('details').removeAttribute('open');
+    });
+  });
+
+  window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', function() {
+    if (!localStorage.getItem('tma1-theme')) setTheme('system');
+  });
+
+  document.querySelectorAll('[data-locale]').forEach(function(a) {
+    a.addEventListener('click', function() {
+      localStorage.setItem('tma1-locale', this.getAttribute('data-locale'));
+    });
+  });
+
+  document.addEventListener('click', function(e) {
+    document.querySelectorAll('details.dropdown').forEach(function(d) {
+      if (!d.contains(e.target)) d.removeAttribute('open');
+    });
+  });
+
+  // The tab strip scrolls horizontally on narrow screens; the active tab can
+  // start off-screen. scrollIntoView on the strip only, never the page.
+  var activeTab = document.querySelector('.product-tab.active');
+  var strip = document.querySelector('.product-bar-inner');
+  if (activeTab && strip && strip.scrollWidth > strip.clientWidth) {
+    strip.scrollLeft = activeTab.offsetLeft - strip.clientWidth + activeTab.offsetWidth + 16;
+  }
+})();
+</script>

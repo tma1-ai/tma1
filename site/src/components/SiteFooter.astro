@@ -1,0 +1,106 @@
+---
+import ProductMark from './ProductMark.astro';
+import { chrome } from '../i18n/chrome';
+import { productById, productHref, products, type Locale, type ProductId } from '../i18n/products';
+
+interface Props {
+  lang: Locale;
+  product: ProductId;
+  links: Array<{ href: string; label: string }>;
+  tagline: string;
+}
+
+const { lang, product, links, tagline } = Astro.props;
+const c = chrome[lang];
+const current = productById(product);
+const others = products.filter(p => p.id !== product);
+---
+
+<footer>
+  <p class="brand">{current.name}{product === 'tma1' && <span class="cursor">_</span>}</p>
+  <div class="footer-links">
+    {links.map((l, i) => (
+      <>
+        {i > 0 && <span>/</span>}
+        <a href={l.href}>{l.label}</a>
+      </>
+    ))}
+  </div>
+  <p class="tagline" set:html={tagline} />
+
+  <div class="org-row">
+    <p class="org-label">{c.more_projects}</p>
+    <div class="org-cards">
+      {others.map(p => (
+        <a class="org-card" href={productHref(p.id, lang)} data-product-card={p.id}>
+          <span class="org-card-head">
+            <ProductMark id={p.id} size={15} />
+            <span class="org-card-name">{p.name}</span>
+          </span>
+          <span class="org-card-blurb">{p.blurb[lang]}</span>
+        </a>
+      ))}
+    </div>
+  </div>
+</footer>
+
+<style>
+  footer {
+    max-width: 960px; margin: 0 auto; padding: 40px 24px;
+    border-top: 1px solid var(--border);
+    text-align: center; font-size: 13px; color: var(--text-muted);
+  }
+  .brand {
+    font-family: "SF Mono", "Fira Code", monospace;
+    font-size: 16px; font-weight: 700; letter-spacing: 2px;
+    color: var(--text); margin-bottom: 12px;
+  }
+  .cursor { animation: blink 1.2s step-end infinite; color: var(--accent); }
+  .footer-links {
+    display: flex; justify-content: center; gap: 8px;
+    margin-bottom: 12px; flex-wrap: wrap;
+  }
+  footer a { color: var(--text-muted); }
+  footer a:hover { color: var(--text); }
+  .tagline :global(em) { font-style: italic; }
+
+  .org-row { margin-top: 36px; padding-top: 28px; border-top: 1px solid var(--border); }
+  .org-label {
+    font-family: "SF Mono", "Fira Code", monospace;
+    font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase;
+    color: var(--comment); margin-bottom: 14px;
+  }
+  .org-cards {
+    display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px; max-width: 620px; margin: 0 auto;
+  }
+  .org-card {
+    display: flex; flex-direction: column; gap: 6px;
+    padding: 14px 16px; text-align: left;
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 10px; text-decoration: none;
+    transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s;
+  }
+  /* Each card previews its own project, so it carries that project's accent
+     rather than the accent of the page you are currently on. */
+  .org-card[data-product-card="tma1"] { --card-rgb: var(--p-tma1-rgb); --card: var(--p-tma1); }
+  .org-card[data-product-card="openfuse"] { --card-rgb: var(--p-openfuse-rgb); --card: var(--p-openfuse); }
+  .org-card[data-product-card="dsh-otel"] { --card-rgb: var(--p-dsh-otel-rgb); --card: var(--p-dsh-otel); }
+  .org-card:hover {
+    border-color: rgba(var(--card-rgb), 0.45);
+    box-shadow: 0 0 12px rgba(var(--card-rgb), 0.08);
+    transform: translateY(-1px);
+    text-decoration: none;
+  }
+  .org-card-head { display: flex; align-items: center; gap: 8px; color: var(--card); }
+  .org-card-name {
+    font-family: "SF Mono", "Fira Code", monospace;
+    font-size: 13px; font-weight: 700; letter-spacing: 0.02em;
+    color: var(--text);
+  }
+  .org-card-blurb { font-size: 12.5px; line-height: 1.5; color: var(--text-muted); }
+
+  @media (max-width: 768px) {
+    .org-cards { grid-template-columns: 1fr; }
+  }
+</style>
