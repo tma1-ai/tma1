@@ -33,8 +33,12 @@ func LoadSettings(dataDir string) Settings {
 	return s
 }
 
-// SaveSettings writes settings to dataDir/settings.json atomically.
-// On Windows os.Rename fails if the destination exists, so we remove it first.
+// SaveSettings writes settings through a same-directory temp file and replaces
+// settings.json with os.Rename. On Unix this is an atomic file replacement; on
+// non-Unix platforms Go does not promise atomicity, but Rename still replaces
+// an existing non-directory destination. Never pre-delete the target: doing so
+// creates a data-loss window and can destructively remove an unexpected empty
+// directory at the settings path.
 func SaveSettings(dataDir string, s Settings) error {
 	path := filepath.Join(dataDir, "settings.json")
 	data, err := json.MarshalIndent(s, "", "  ")
@@ -45,8 +49,11 @@ func SaveSettings(dataDir string, s Settings) error {
 	if err := os.WriteFile(tmp, data, 0o600); err != nil {
 		return err
 	}
-	_ = os.Remove(path) // ignore error (file may not exist on first save)
-	return os.Rename(tmp, path)
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return nil
 }
 
 // EnvOverrides returns the list of setting keys that are locked by environment variables.
