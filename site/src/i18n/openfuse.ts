@@ -5,6 +5,7 @@ const REPO = 'https://github.com/tma1-ai/openfuse';
 const GREPTIMEDB = 'https://github.com/GreptimeTeam/greptimedb';
 const DOCKER = 'https://hub.docker.com/r/tma1ai/openfuse-standalone';
 const SHOT = '/products/openfuse';
+const QUICKSTART = 'OPENFUSE_STANDALONE_IMAGE=tma1ai/openfuse-standalone:1.0.0-beta.1 docker compose -f docker-compose.standalone.yml up -d --pull always';
 
 const shot = (name: string, alt: string, chrome: string) => ({
   kind: 'image' as const,
@@ -42,7 +43,7 @@ export const en: ProductCopy = {
 
   install: {
     label: '5-MINUTE QUICKSTART',
-    cmd: 'docker compose -f docker-compose.standalone.yml up -d --pull always',
+    cmd: QUICKSTART,
     note: 'Clone the repo, <code>cp .env.quickstart.example .env</code>, then run this. Open <code>localhost:3000</code>: the quickstart env auto-creates a demo project, so you can sign in as <code>demo@example.com</code> / <code>langfuse-dev</code>, or point a Langfuse SDK at the bundled keys immediately. Those are insecure dev defaults — start from <code>.env.prod.example</code> for anything real, and set <code>GREPTIME_PASSWORD</code> to turn on enforced auth on the analytics store.',
     more_summary: 'Pin a published image, or split web and worker',
     more: [
@@ -222,7 +223,7 @@ export const zh: ProductCopy = {
 
   install: {
     label: '五分钟上手',
-    cmd: 'docker compose -f docker-compose.standalone.yml up -d --pull always',
+    cmd: QUICKSTART,
     note: '克隆仓库，<code>cp .env.quickstart.example .env</code>，然后执行这一条。打开 <code>localhost:3000</code>：quickstart 配置会自动建好一个 demo 项目，可以用 <code>demo@example.com</code> / <code>langfuse-dev</code> 登录，或者直接把 Langfuse SDK 指向内置的 key。这些都是不安全的开发默认值——正式部署请从 <code>.env.prod.example</code> 出发，并设置 <code>GREPTIME_PASSWORD</code> 打开分析存储的强制鉴权。',
     more_summary: '固定发布镜像，或拆分 web 与 worker',
     more: [
@@ -402,7 +403,7 @@ export const es: ProductCopy = {
 
   install: {
     label: 'ARRANQUE EN 5 MINUTOS',
-    cmd: 'docker compose -f docker-compose.standalone.yml up -d --pull always',
+    cmd: QUICKSTART,
     note: 'Cloná el repo, <code>cp .env.quickstart.example .env</code> y ejecutá esto. Abrí <code>localhost:3000</code>: el entorno de quickstart crea un proyecto demo automáticamente, así que podés entrar con <code>demo@example.com</code> / <code>langfuse-dev</code>, o apuntar un SDK de Langfuse a las claves incluidas. Son valores de desarrollo inseguros — para algo real partí de <code>.env.prod.example</code> y definí <code>GREPTIME_PASSWORD</code> para activar la autenticación del almacén analítico.',
     more_summary: 'Fijar una imagen publicada, o separar web y worker',
     more: [

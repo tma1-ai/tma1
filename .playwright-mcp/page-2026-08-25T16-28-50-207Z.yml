@@ -1,0 +1,322 @@
+- generic [active] [ref=f20e1]:
+  - generic [ref=f20e3]:
+    - link "tma1-ai on GitHub" [ref=f20e4] [cursor=pointer]:
+      - /url: https://github.com/tma1-ai
+      - text: tma1-ai/
+    - navigation "项目" [ref=f20e5]:
+      - link "TMA1 _" [ref=f20e6] [cursor=pointer]:
+        - /url: /zh/
+        - generic [ref=f20e9]: TMA1
+        - generic [ref=f20e10]: _
+      - link "Openfuse" [ref=f20e11] [cursor=pointer]:
+        - /url: /zh/openfuse/
+      - link "DSH OTel" [ref=f20e16] [cursor=pointer]:
+        - /url: /zh/dsh-otel/
+  - navigation [ref=f20e22]:
+    - link "TMA1 home" [ref=f20e23] [cursor=pointer]:
+      - /url: /zh/
+      - generic [ref=f20e26]: TMA1
+      - generic [ref=f20e27]: _
+    - generic [ref=f20e28]:
+      - link "功能" [ref=f20e29] [cursor=pointer]:
+        - /url: "#features"
+      - link "工作原理" [ref=f20e30] [cursor=pointer]:
+        - /url: "#how-it-works"
+      - link "安全" [ref=f20e31] [cursor=pointer]:
+        - /url: "#security"
+      - link "GitHub" [ref=f20e32] [cursor=pointer]:
+        - /url: https://github.com/tma1-ai/tma1
+    - generic [ref=f20e33]:
+      - group [ref=f20e34]:
+        - generic "主题" [ref=f20e35] [cursor=pointer]
+      - group [ref=f20e39]:
+        - generic "中文" [ref=f20e40] [cursor=pointer]
+  - generic [ref=f20e45]:
+    - generic [ref=f20e46]:
+      - paragraph [ref=f20e47]: TMA1
+      - heading "你的 agent loop 里埋着一块 monolith。安静——直到它开口。" [level=1] [ref=f20e48]
+      - paragraph [ref=f20e49]:
+        - text: TMA1 在
+        - emphasis [ref=f20e50]: 本地
+        - text: 记下 agent 每一次 LLM 调用，再通过 hooks、MCP、anomaly 检测把看到的东西送回 agent 的下一轮 reasoning。
+      - paragraph [ref=f20e51]: _
+      - generic [ref=f20e52]:
+        - generic [ref=f20e53]: claude code · auth.go
+        - generic [ref=f20e58]:
+          - generic [ref=f20e59]:
+            - generic [ref=f20e60]: $
+            - generic [ref=f20e61]: "# edit attempt #4"
+          - generic [ref=f20e64]:
+            - generic [ref=f20e65]: "[tma1]"
+            - generic [ref=f20e66]: Re-read auth.go before the next edit — your in-memory copy is older than what’s on disk.
+          - generic [ref=f20e69]:
+            - generic [ref=f20e70]: $
+            - generic [ref=f20e71]: Reading auth.go
+          - generic [ref=f20e72]:
+            - generic [ref=f20e73]: $
+            - generic [ref=f20e74]: "# edit succeeded ✓"
+      - generic [ref=f20e75]:
+        - paragraph [ref=f20e76]: AGENT 接入
+        - generic [ref=f20e77]:
+          - paragraph [ref=f20e78]:
+            - text: Read
+            - link "https://tma1.ai/SKILL.md" [ref=f20e79] [cursor=pointer]:
+              - /url: https://tma1.ai/SKILL.md
+            - text: and follow the instructions to install or upgrade TMA1 for your AI agent
+          - button "复制" [ref=f20e80] [cursor=pointer]
+      - group [ref=f20e81]:
+        - generic "手动安装" [ref=f20e82] [cursor=pointer]
+      - generic [ref=f20e83]:
+        - generic [ref=f20e84]:
+          - heading "你的 agent 会从自己的失败里学" [level=3] [ref=f20e85]
+          - paragraph [ref=f20e86]: Edit 连着失败 3 次、build 一直炸的时候，TMA1 会把具体修复路径塞进 agent 的下一个 prompt——不是下周的 postmortem。
+        - generic [ref=f20e87]:
+          - heading "agent 能读到别的 agent 留下的东西" [level=3] [ref=f20e88]
+          - paragraph [ref=f20e89]:
+            - text: Claude Code 可以通过
+            - code [ref=f20e90]: /tma1-peer
+            - text: 把 Codex 在同一个文件上留下的 review 原样拿过来。不用在两个 terminal 之间拷来拷去。
+        - generic [ref=f20e91]:
+          - heading "数据不出本机" [level=3] [ref=f20e92]
+          - paragraph [ref=f20e93]:
+            - text: 一个 Go 二进制。不要 Docker，不要云。数据只在
+            - code [ref=f20e94]: ~/.tma1/
+            - text: 。
+    - generic [ref=f20e95]:
+      - paragraph [ref=f20e96]: "> 功能"
+      - heading "看到东西后能做点什么的可观测" [level=2] [ref=f20e97]
+      - paragraph [ref=f20e98]: 闭环感知和跨 agent 协作是主轴，dashboard 是补充证据。一个 Go 二进制，本地时序库，不需要 Grafana，不需要 YAML。
+      - generic [ref=f20e99]:
+        - generic [ref=f20e100]:
+          - generic [ref=f20e101]:
+            - generic [ref=f20e102]: "01"
+            - heading "让 agent 形成闭环" [level=3] [ref=f20e103]
+            - paragraph [ref=f20e104]:
+              - text: TMA1 盯着重复失败、过期视图、坏 build。规则命中的时候，它会把一条具体的修复路径写进 agent 的下一个 prompt——不是塞进 dashboard 让人明天再去看。
+              - strong [ref=f20e105]: 五个 hook
+              - text: 负责送达。
+              - strong [ref=f20e106]: 六条规则
+              - text: ，每条都有可执行的建议。
+              - strong [ref=f20e107]: HIGH
+              - text: 优先级会 block
+              - code [ref=f20e108]: Stop
+              - text: ，以免坏的 build 静默上线。
+            - generic [ref=f20e109]:
+              - generic [ref=f20e110]: localhost:14318
+              - img "TMA1 dashboard — Performance tab preview" [ref=f20e116]
+          - generic "Anomaly scenarios" [ref=f20e118]:
+            - paragraph [ref=f20e119]: TMA1 判断 agent 应该采取行动的时候，会把一条具体建议写进下一个 prompt。下面这些是检测器里的真实字符串——agent 实际读到的内容：
+            - generic [ref=f20e120]:
+              - article [ref=f20e121]:
+                - generic [ref=f20e122]:
+                  - generic [ref=f20e123]: repeated_failed_build
+                  - generic [ref=f20e124]: HIGH
+                - paragraph [ref=f20e125]: "用 `tma1 build -- npm test` 包装。Agent 跑了三次，每次都是同一个错误。"
+                - generic [ref=f20e126]: "Stop retrying `npm test` and address this error first: TypeError: Cannot read prop ‘user’ of undefined"
+                - paragraph [ref=f20e127]: injected into next user_prompt_submit
+              - article [ref=f20e128]:
+                - generic [ref=f20e129]:
+                  - generic [ref=f20e130]: stale_file_view
+                  - generic [ref=f20e131]: HIGH
+                - paragraph [ref=f20e132]: 人刚手动改了一个文件，agent 准备覆盖这个文件。
+                - generic [ref=f20e133]: Re-read auth.go before the next edit — your in-memory copy is older than what’s on disk.
+                - paragraph [ref=f20e134]: injected into next user_prompt_submit
+        - generic [ref=f20e135]:
+          - generic [ref=f20e136]:
+            - generic [ref=f20e137]: "02"
+            - heading "跨 agent 的 peer session" [level=3] [ref=f20e138]
+            - paragraph [ref=f20e139]:
+              - text: Claude Code
+              - emphasis [ref=f20e140]: 原样
+              - text: 读到 Codex 在同一个文件上留下的内容，反过来也一样。
+              - code [ref=f20e141]: /tma1-peer
+              - text: skill 可以拉到 peer 上次 session 里最多 30 条消息 + 工具足迹。调用方自己的 session 会被过滤掉——避免 echo chamber。
+          - generic [ref=f20e143]:
+            - paragraph [ref=f20e144]:
+              - text: Claude Code 通过
+              - code [ref=f20e145]: /tma1-peer
+              - text: skill 原样读到 Codex 留下的东西。反过来也一样。
+            - generic [ref=f20e146]:
+              - generic [ref=f20e147]: claude code · in your project
+              - generic [ref=f20e152]:
+                - generic [ref=f20e153]:
+                  - generic [ref=f20e154]: $
+                  - generic [ref=f20e155]: /tma1-peer codex
+                - generic [ref=f20e158]: Codex reviewed auth.go 12 minutes ago and left
+                - generic [ref=f20e160]: "three concrete issues:"
+                - generic [ref=f20e164]: 1. JWT expiration not validated on refresh
+                - generic [ref=f20e166]: 2. Session token logged to stderr on auth failure
+                - generic [ref=f20e168]: 3. Missing rate-limit on /login
+                - generic [ref=f20e172]: Want me to address all three or pick one?
+        - generic [ref=f20e174]:
+          - generic [ref=f20e175]:
+            - generic [ref=f20e176]: "03"
+            - heading "异常检测" [level=3] [ref=f20e177]
+            - paragraph [ref=f20e178]: Agent 卡在重试循环里可以烧掉几百美元。每个 agent 视图有 Anomalies 标签页，点击任何一条异常直接跳到那个 session，看看到底哪儿出了问题。
+          - generic [ref=f20e180]:
+            - generic [ref=f20e181]: localhost:14318
+            - img "TMA1 Dashboard — 异常检测" [ref=f20e187]
+        - generic [ref=f20e188]:
+          - generic [ref=f20e189]:
+            - generic [ref=f20e190]: "04"
+            - heading "Sessions" [level=3] [ref=f20e191]
+            - paragraph [ref=f20e192]: 你的 agent 跑了 25 分钟。发生了什么？打开 session overlay：左边是文件活动、上下文分布、API 调用明细，右边是完整时间线。或者打开 live canvas，实时看 agent 工作。
+          - generic [ref=f20e194]:
+            - generic [ref=f20e195]: localhost:14318
+            - img "TMA1 Dashboard — Sessions" [ref=f20e202]
+        - generic [ref=f20e203]:
+          - generic [ref=f20e204]:
+            - generic [ref=f20e205]: "05"
+            - heading "工具分析" [level=3] [ref=f20e206]
+            - paragraph [ref=f20e207]: Agent 变慢了，是模型的问题还是工具调用的问题？每个工具的 p50、p95 延迟，调用次数、成功率、趋势线。
+          - generic [ref=f20e209]:
+            - generic [ref=f20e210]: localhost:14318
+            - img "TMA1 Dashboard — 工具分析" [ref=f20e216]
+        - generic [ref=f20e217]:
+          - generic [ref=f20e218]:
+            - generic [ref=f20e219]: "06"
+            - heading "费用明细" [level=3] [ref=f20e220]
+            - paragraph [ref=f20e221]: 哪个模型最贵？哪个对话把预算烧光了？按模型追踪 token 和费用，能看 burn rate 趋势和缓存命中率。
+          - generic [ref=f20e223]:
+            - generic [ref=f20e224]: localhost:14318
+            - img "TMA1 Dashboard — 费用明细" [ref=f20e230]
+        - generic [ref=f20e231]:
+          - generic [ref=f20e232]:
+            - generic [ref=f20e233]: "07"
+            - heading "安全监控" [level=3] [ref=f20e234]
+            - paragraph [ref=f20e235]: 你的 agent 能跑 shell 命令、请求外部 URL、被注入 prompt。TMA1 全部标记。OpenClaw 的 webhook 错误和卡死的 session 也会追踪。
+          - generic [ref=f20e237]:
+            - generic [ref=f20e238]: localhost:14318
+            - img "TMA1 Dashboard — 安全监控" [ref=f20e244]
+      - generic [ref=f20e245]:
+        - generic [ref=f20e246]: "08"
+        - heading "全文搜索" [level=3] [ref=f20e247]
+        - paragraph [ref=f20e248]: 在 Sessions 搜索框输入关键词，所有 session 的对话和工具调用都能搜到。点击结果直接跳到那个事件。
+    - generic [ref=f20e249]:
+      - paragraph [ref=f20e250]: "> 工作原理"
+      - heading "安装配置" [level=2] [ref=f20e251]
+      - paragraph [ref=f20e252]: 把接入指令粘贴给你的 agent，它会自动搞定。或者手动来：
+      - generic [ref=f20e253]:
+        - generic [ref=f20e254]:
+          - generic [ref=f20e255]: "[1]"
+          - generic [ref=f20e256]:
+            - heading "安装" [level=3] [ref=f20e257]
+            - paragraph [ref=f20e258]:
+              - text: 一条命令，所有文件装进
+              - code [ref=f20e259]: ~/.tma1/
+              - text: 。不需要 Docker，不需要装别的。
+        - generic [ref=f20e260]:
+          - generic [ref=f20e261]: "[2]"
+          - generic [ref=f20e262]:
+            - heading "配置你的 agent" [level=3] [ref=f20e263]
+            - paragraph [ref=f20e264]:
+              - text: 将 OTel endpoint 指向
+              - code [ref=f20e265]: http://localhost:14318/v1/otlp
+              - text: 。支持 Claude Code、Codex、OpenClaw 或任何 OTel SDK。GitHub Copilot CLI 零配置——TMA1 会自动发现它的 session 日志。
+        - generic [ref=f20e266]:
+          - generic [ref=f20e267]: "[3]"
+          - generic [ref=f20e268]:
+            - heading "看到闭环发生" [level=3] [ref=f20e269]
+            - paragraph [ref=f20e270]:
+              - text: 浏览器打开
+              - code [ref=f20e271]: localhost:14318
+              - text: 看 dashboard。有趣的部分发生在 agent 里：它开始看到
+              - code [ref=f20e272]: <tma1-context>
+              - text: 块并针对性地行动。可选：用
+              - code [ref=f20e273]: tma1 build -- <command>
+              - text: 包装 dev / test 命令，让 build 失败也进入闭环（支持
+              - code [ref=f20e274]: "--watch"
+              - text: /
+              - code [ref=f20e275]: "--tag"
+              - text: /
+              - code [ref=f20e276]: "--filter-regex"
+              - text: ）。Dashboard 是人事后复盘用的，闭环是给 agent 的。想直接写 SQL 的话，GreptimeDB 自带的 dashboard 在
+              - code [ref=f20e277]: localhost:14000/dashboard
+              - text: 。
+    - generic [ref=f20e278]:
+      - paragraph [ref=f20e279]: "> 安全"
+      - heading "安全与隐私" [level=2] [ref=f20e280]
+      - paragraph [ref=f20e281]: 你的 agent 能读代码库、API 密钥、基础设施配置。把这些发到云端可观测服务？那还谈什么安全。一切留在本地。
+      - article [ref=f20e282]:
+        - heading "数据怎么存的" [level=3] [ref=f20e283]
+        - paragraph [ref=f20e284]:
+          - text: TMA1 会把 trace 和对话日志保存在本地
+          - code [ref=f20e285]: ~/.tma1/data/
+          - text: 。数据不会上传到任何远程服务，你可以随时查看或删除。
+      - generic [ref=f20e286]:
+        - article [ref=f20e287]:
+          - heading "零网络请求" [level=4] [ref=f20e288]
+          - paragraph [ref=f20e289]: 首次启动会自动下载内置数据库引擎，之后 TMA1 不再联系任何外部服务。没有数据上报，没有崩溃报告，没有更新检查。
+        - article [ref=f20e290]:
+          - heading "完全开源" [level=4] [ref=f20e291]
+          - paragraph [ref=f20e292]: TMA1 采用 Apache-2.0。代码可审计，构建可检查，支持离线运行。
+        - article [ref=f20e293]:
+          - heading "单一二进制" [level=4] [ref=f20e294]
+          - paragraph [ref=f20e295]:
+            - code [ref=f20e296]: tma1-server
+            - text: 以单进程本地运行，并管理内置存储引擎。不要 Docker，不要系统包，没有运行时依赖。
+        - article [ref=f20e297]:
+          - heading "你的数据，你的磁盘" [level=4] [ref=f20e298]
+          - paragraph [ref=f20e299]:
+            - text: 删掉
+            - code [ref=f20e300]: ~/.tma1/
+            - text: 就全没了。没有残留的云端状态，没有要注销的远程账号。
+    - generic [ref=f20e301]:
+      - paragraph [ref=f20e302]: "> FAQ"
+      - heading "常见问题" [level=2] [ref=f20e303]
+      - generic [ref=f20e304]:
+        - article [ref=f20e305]:
+          - heading "支持哪些 agent？" [level=3] [ref=f20e306]
+          - paragraph [ref=f20e307]:
+            - text: 任何发送 OpenTelemetry 数据的 agent，以及通过 JSONL 自动发现的几个 agent。Claude Code 发送 metrics 和 logs；Codex 发送 logs 和 metrics，会话 JSONL 自动解析用于对话回放。GitHub Copilot CLI 零配置：TMA1 自动发现并解析
+            - code [ref=f20e308]: ~/.copilot/session-state/
+            - text: 下的 session JSONL。OpenClaw 发送 traces 和 metrics，会话 JSONL 也会自动解析。任何遵循 GenAI 语义规范的 OTel SDK 应用开箱即用。Dashboard 根据数据自动切换到对应视图。
+        - article [ref=f20e309]:
+          - heading "能直接用 SQL 查吗？" [level=3] [ref=f20e310]
+          - paragraph [ref=f20e311]:
+            - text: 能。运行
+            - code [ref=f20e312]: mysql -h 127.0.0.1 -P 14002
+            - text: 连接本地 SQL 端口，或打开
+            - code [ref=f20e313]:
+              - link "localhost:14000/dashboard/" [ref=f20e314] [cursor=pointer]:
+                - /url: http://localhost:14000/dashboard/
+            - text: 使用内置查询界面。Traces 在
+            - code [ref=f20e315]: opentelemetry_traces
+            - text: ，logs 在
+            - code [ref=f20e316]: opentelemetry_logs
+            - text: ，session 数据在
+            - code [ref=f20e317]: tma1_hook_events
+            - text: 和
+            - code [ref=f20e318]: tma1_messages
+            - text: ，OTel metrics 自动建表。
+        - article [ref=f20e319]:
+          - heading "大概占多少磁盘？" [level=3] [ref=f20e320]
+          - paragraph [ref=f20e321]: 取决于 agent 流量和对话长度。常见场景下，每月大约几百 MB。
+  - contentinfo [ref=f20e322]:
+    - paragraph [ref=f20e323]: TMA1_
+    - generic [ref=f20e324]:
+      - link "GitHub" [ref=f20e325] [cursor=pointer]:
+        - /url: https://github.com/tma1-ai/tma1
+      - generic [ref=f20e326]: /
+      - link "Apache-2.0" [ref=f20e327] [cursor=pointer]:
+        - /url: https://github.com/tma1-ai/tma1/blob/main/LICENSE
+      - generic [ref=f20e328]: /
+      - link "安全" [ref=f20e329] [cursor=pointer]:
+        - /url: "#security"
+    - paragraph [ref=f20e330]: 取名自《2001 太空漫游》中的 TMA-1——静默记录一切，等你来挖掘。
+    - generic [ref=f20e331]:
+      - paragraph [ref=f20e332]: tma1-ai 的其他项目
+      - generic [ref=f20e333]:
+        - link "Openfuse 跑在真正的可观测数据库上的 LLM 工程平台" [ref=f20e334] [cursor=pointer]:
+          - /url: /zh/openfuse/
+          - generic [ref=f20e335]: Openfuse
+          - generic [ref=f20e340]: 跑在真正的可观测数据库上的 LLM 工程平台
+        - link "DSH OTel 把 DeepSeek Harness 的遥测变成标准 OpenTelemetry" [ref=f20e341] [cursor=pointer]:
+          - /url: /zh/dsh-otel/
+          - generic [ref=f20e342]: DSH OTel
+          - generic [ref=f20e348]: 把 DeepSeek Harness 的遥测变成标准 OpenTelemetry
+  - generic [ref=f20e351]:
+    - button [ref=f20e352]
+    - button [ref=f20e358]
+    - button [ref=f20e362]
+    - button [ref=f20e367]

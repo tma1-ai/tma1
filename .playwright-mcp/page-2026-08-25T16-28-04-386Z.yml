@@ -1,0 +1,504 @@
+- generic [active] [ref=f19e1]:
+  - generic [ref=f19e3]:
+    - link "tma1-ai on GitHub" [ref=f19e4] [cursor=pointer]:
+      - /url: https://github.com/tma1-ai
+      - text: tma1-ai/
+    - navigation "Proyectos" [ref=f19e5]:
+      - link "TMA1 _" [ref=f19e6] [cursor=pointer]:
+        - /url: /es/
+        - generic [ref=f19e9]: TMA1
+        - generic [ref=f19e10]: _
+      - link "Openfuse" [ref=f19e11] [cursor=pointer]:
+        - /url: /es/openfuse/
+      - link "DSH OTel" [ref=f19e16] [cursor=pointer]:
+        - /url: /es/dsh-otel/
+  - navigation [ref=f19e22]:
+    - link "DSH OTel home" [ref=f19e23] [cursor=pointer]:
+      - /url: /es/dsh-otel/
+      - generic [ref=f19e28]: DSH OTel
+    - generic [ref=f19e29]:
+      - link "Señales" [ref=f19e30] [cursor=pointer]:
+        - /url: "#features"
+      - link "Configuración" [ref=f19e31] [cursor=pointer]:
+        - /url: "#config"
+      - link "Qué sale" [ref=f19e32] [cursor=pointer]:
+        - /url: "#privacy"
+      - link "Limitaciones" [ref=f19e33] [cursor=pointer]:
+        - /url: "#limits"
+      - link "GitHub" [ref=f19e34] [cursor=pointer]:
+        - /url: https://github.com/tma1-ai/dsh-otel
+    - generic [ref=f19e35]:
+      - group [ref=f19e36]:
+        - generic "Tema" [ref=f19e37] [cursor=pointer]
+      - group [ref=f19e41]:
+        - generic "ES" [ref=f19e42] [cursor=pointer]
+  - generic [ref=f19e47]:
+    - generic [ref=f19e48]:
+      - paragraph [ref=f19e49]: DSH OTel
+      - heading "Telemetría de DeepSeek Harness, como OpenTelemetry puro." [level=1] [ref=f19e50]
+      - paragraph [ref=f19e51]:
+        - text: Sin collector. Sin sidecar. Sin forkear DSH. Se instala como un plugin común de
+        - link "DeepSeek Harness" [ref=f19e52] [cursor=pointer]:
+          - /url: https://github.com/deepseek-ai/deepseek-harness
+        - text: ", y cada turno, llamada al modelo y ejecución de herramienta pasa a ser una fila consultable en"
+        - link "GreptimeDB" [ref=f19e53] [cursor=pointer]:
+          - /url: https://github.com/GreptimeTeam/greptimedb
+        - text: .
+      - generic [ref=f19e54]:
+        - link "npm" [ref=f19e55] [cursor=pointer]:
+          - /url: https://www.npmjs.com/package/@tma1-ai/dsh-plugin-greptimedb
+        - link "CI" [ref=f19e56] [cursor=pointer]:
+          - /url: https://github.com/tma1-ai/dsh-otel/actions/workflows/ci.yml
+        - link "node ≥ 22.19" [ref=f19e57] [cursor=pointer]:
+          - /url: https://nodejs.org
+        - link "Apache-2.0" [ref=f19e58] [cursor=pointer]:
+          - /url: https://github.com/tma1-ai/dsh-otel/blob/main/LICENSE
+      - generic [ref=f19e59]:
+        - paragraph [ref=f19e60]: INSTALACIÓN
+        - generic [ref=f19e61]:
+          - paragraph [ref=f19e62]: dsh plugin --profile headless add @tma1-ai/dsh-plugin-greptimedb
+          - button "Copiar" [ref=f19e63] [cursor=pointer]
+        - paragraph [ref=f19e64]:
+          - text: El paquete trae un bundle patch, así que ese único comando lo conecta al profile.
+          - code [ref=f19e65]: dsh plugin
+          - text: delega en el
+          - code [ref=f19e66]: pnpm
+          - text: que esté en tu PATH, y un directorio de profile de dsh es su propio workspace root de pnpm — pnpm 9 se niega a instalar ahí e ignora la configuración de linker que escribe dsh, así que usá pnpm 10 o superior. Los valores por defecto ya apuntan a un GreptimeDB local.
+      - group [ref=f19e67]:
+        - generic "Apuntalo a tu propia base de datos, o levantá una local" [ref=f19e68] [cursor=pointer]
+      - generic [ref=f19e69]:
+        - generic [ref=f19e70]:
+          - generic [ref=f19e71]: greptimedb · sql
+          - generic [ref=f19e76]:
+            - generic [ref=f19e77]: "-- Las llamadas a herramientas más lentas, con el modelo que las pidió."
+            - generic [ref=f19e79]: SELECT tool.span_name,
+            - generic [ref=f19e81]: chat."span_attributes.gen_ai.request.model" AS model,
+            - generic [ref=f19e83]: tool.duration_nano / 1000000 AS ms
+            - generic [ref=f19e85]: FROM opentelemetry_traces AS tool
+            - generic [ref=f19e87]: JOIN opentelemetry_traces AS chat
+            - generic [ref=f19e89]: ON chat.trace_id = tool.trace_id
+            - generic [ref=f19e91]: AND chat."span_attributes.dsh.step" = tool."span_attributes.dsh.step"
+            - generic [ref=f19e93]: AND chat.span_name LIKE 'chat%'
+            - generic [ref=f19e95]: WHERE tool.span_name LIKE 'execute_tool%'
+            - generic [ref=f19e97]: ORDER BY tool.duration_nano DESC
+            - generic [ref=f19e99]: LIMIT 10;
+        - paragraph [ref=f19e101]:
+          - text: Los spans de chat y los de herramienta comparten trace y
+          - code [ref=f19e102]: dsh.step
+          - text: ", así que correlacionarlos es un join de SQL común. Cada timestamp viene del evento de sesión al que pertenece, no de leer el reloj mientras se procesa el evento."
+      - generic [ref=f19e103]:
+        - generic [ref=f19e104]:
+          - heading "Tres señales, un plugin" [level=3] [ref=f19e105]
+          - paragraph [ref=f19e106]:
+            - text: Traces, métricas y logs.
+            - code [ref=f19e107]: signals
+            - text: acepta cualquier subconjunto — una señal desactivada no construye exporter alguno.
+        - generic [ref=f19e108]:
+          - heading "Por defecto no sale nada" [level=3] [ref=f19e109]
+          - paragraph [ref=f19e110]:
+            - text: El valor por defecto
+            - code [ref=f19e111]: "content: none"
+            - text: exporta solo estructura y contabilidad. Sin prompts, sin mensajes, sin argumentos de herramientas, sin resultados.
+        - generic [ref=f19e112]:
+          - heading "Falla al cargar, no al exportar" [level=3] [ref=f19e113]
+          - paragraph [ref=f19e114]: Una configuración inválida falla cuando el plugin carga, nombrando el campo culpable — no en silencio durante la primera exportación.
+    - generic [ref=f19e115]:
+      - paragraph [ref=f19e116]: "> Señales"
+      - heading "Qué llega en cada señal" [level=2] [ref=f19e117]
+      - paragraph [ref=f19e118]: Traces para la forma, métricas para retención larga y percentiles a prueba de sampleo, logs para los eventos de sesión crudos.
+      - generic [ref=f19e119]:
+        - generic [ref=f19e120]:
+          - generic [ref=f19e121]:
+            - generic [ref=f19e122]: "[01]"
+            - heading "Turno, chat, herramienta" [level=3] [ref=f19e123]
+            - paragraph [ref=f19e124]:
+              - text: Los spans de turno son raíces. Los de chat y herramienta cuelgan de ellos como hermanos, correlacionados por
+              - code [ref=f19e125]: dsh.step
+              - text: .
+          - generic [ref=f19e127]:
+            - generic [ref=f19e128]: árbol de spans
+            - generic [ref=f19e133]:
+              - generic [ref=f19e134]: invoke_agent dsh turn/start → turn/end
+              - generic [ref=f19e136]: ├── chat deepseek-chat step/start → assistant/message
+              - generic [ref=f19e138]: ├── execute_tool bash tool/call → tool/result
+              - generic [ref=f19e140]: └── chat deepseek-chat
+        - generic [ref=f19e142]:
+          - generic [ref=f19e143]:
+            - generic [ref=f19e144]: "[02]"
+            - heading "Todo span de chat tiene un fin definido" [level=3] [ref=f19e145]
+            - paragraph [ref=f19e146]: Cuatro caminos cierran un span de chat, incluido el de caída. Ninguno deja un span colgado en un instante arbitrario.
+          - table [ref=f19e149]:
+            - rowgroup [ref=f19e150]:
+              - row [ref=f19e151]:
+                - columnheader "Situación" [ref=f19e152]
+                - columnheader "Fin y estado" [ref=f19e153]
+            - rowgroup [ref=f19e154]:
+              - row [ref=f19e155]:
+                - cell "El modelo respondió" [ref=f19e156]
+                - cell [ref=f19e157]:
+                  - code [ref=f19e158]: assistant/message
+                  - text: · OK
+              - row [ref=f19e159]:
+                - cell "Stream interrumpido" [ref=f19e160]
+                - cell [ref=f19e161]:
+                  - code [ref=f19e162]: assistant/message
+                  - text: · OK, más
+                  - code [ref=f19e163]: dsh.response.interrupted
+              - row [ref=f19e164]:
+                - cell "La petición falló" [ref=f19e165]
+                - cell [ref=f19e166]:
+                  - text: el
+                  - code [ref=f19e167]: step/end
+                  - text: de ese step · ERROR, con el tipo de error
+              - row [ref=f19e168]:
+                - cell "Sin evento de cierre (caída, apagado)" [ref=f19e169]
+                - cell [ref=f19e170]:
+                  - text: último evento visto · UNSET, más
+                  - code [ref=f19e171]: dsh.span.unclosed
+        - generic [ref=f19e172]:
+          - generic [ref=f19e173]:
+            - generic [ref=f19e174]: "[03]"
+            - heading "Contabilidad de tokens" [level=3] [ref=f19e175]
+            - paragraph [ref=f19e176]:
+              - text: "Los conteos de DSH son disjuntos:"
+              - code [ref=f19e177]: inputTokens
+              - text: es solo entrada sin caché, y las lecturas y escrituras de caché son campos aparte.
+              - code [ref=f19e178]: gen_ai.usage.input_tokens
+              - text: es el total facturado, así que el plugin los suma. La salida incluye los tokens de razonamiento.
+          - generic [ref=f19e180]:
+            - generic [ref=f19e181]: atributos de tokens
+            - generic [ref=f19e186]:
+              - generic [ref=f19e187]: gen_ai.usage.input_tokens = inputTokens
+              - generic [ref=f19e189]: + cacheReadTokens
+              - generic [ref=f19e191]: + cacheWriteTokens
+              - generic [ref=f19e193]: gen_ai.usage.output_tokens = outputTokens
+              - generic [ref=f19e197]: "# el desglose sigue siendo consultable"
+              - generic [ref=f19e199]: dsh.usage.uncached_input_tokens
+              - generic [ref=f19e201]: dsh.usage.cache_read_tokens
+              - generic [ref=f19e203]: dsh.usage.cache_write_tokens
+              - generic [ref=f19e205]: dsh.usage.reasoning_tokens
+        - generic [ref=f19e207]:
+          - generic [ref=f19e208]:
+            - generic [ref=f19e209]: "[04]"
+            - heading "Cinco dashboards de Grafana" [level=3] [ref=f19e210]
+            - paragraph [ref=f19e211]:
+              - text: Vienen en
+              - code [ref=f19e212]: grafana/
+              - text: junto a un stack de compose que levanta GreptimeDB y Grafana a la vez. Cada consulta de panel se verifica contra una base real con
+              - code [ref=f19e213]: node grafana/verify.mjs
+              - text: .
+          - generic [ref=f19e215]:
+            - generic [ref=f19e216]: localhost:3000 · overview
+            - 'img "Dashboard overview de DSH OTel: turnos, llamadas al modelo, tokens facturados, caché, latencia" [ref=f19e222]'
+        - generic [ref=f19e223]:
+          - generic [ref=f19e224]:
+            - generic [ref=f19e225]: "[05]"
+            - heading "Un turno, span por span" [level=3] [ref=f19e226]
+            - paragraph [ref=f19e227]: "Cada tabla enlaza hacia adelante: un trace id abre el waterfall de ese turno, un session id salta entre la vista de traces y la de logs."
+          - generic [ref=f19e229]:
+            - generic [ref=f19e230]: localhost:3000 · trace explorer
+            - img "Dashboard trace explorer de DSH OTel" [ref=f19e236]
+        - generic [ref=f19e237]:
+          - generic [ref=f19e238]:
+            - generic [ref=f19e239]: "[06]"
+            - heading "Una fila por evento de sesión" [level=3] [ref=f19e240]
+            - paragraph [ref=f19e241]:
+              - text: Cuatro atributos se vuelven columnas reales vía
+              - code [ref=f19e242]: X-Greptime-Log-Extract-Keys
+              - text: .
+              - code [ref=f19e243]: assistant/chunk
+              - text: nunca se exporta — el
+              - code [ref=f19e244]: assistant/message
+              - text: ya ensamblado trae el mismo contenido.
+          - generic [ref=f19e246]:
+            - generic [ref=f19e247]: greptimedb · sql
+            - generic [ref=f19e252]:
+              - generic [ref=f19e253]: SELECT session_id, event_type, turn, step, body
+              - generic [ref=f19e255]: FROM dsh_logs
+              - generic [ref=f19e257]: WHERE session_id = '...' AND event_type = 'tool/result'
+              - generic [ref=f19e259]: ORDER BY timestamp;
+    - generic [ref=f19e261]:
+      - paragraph [ref=f19e262]: "> Métricas"
+      - heading "Instrumentos" [level=2] [ref=f19e263]
+      - paragraph [ref=f19e264]: La misma actividad que los traces, vista con PromQL — para retención más larga y percentiles que sobreviven al sampleo.
+      - table [ref=f19e266]:
+        - rowgroup [ref=f19e267]:
+          - row [ref=f19e268]:
+            - columnheader "Instrumento" [ref=f19e269]
+            - columnheader "Tipo" [ref=f19e270]
+            - columnheader "Dimensiones" [ref=f19e271]
+        - rowgroup [ref=f19e272]:
+          - row [ref=f19e273]:
+            - cell [ref=f19e274]:
+              - code [ref=f19e275]: gen_ai.client.token.usage
+            - cell "Histogram" [ref=f19e276]
+            - cell [ref=f19e277]:
+              - code [ref=f19e278]: gen_ai.token.type
+              - text: (solo
+              - code [ref=f19e279]: input
+              - text: /
+              - code [ref=f19e280]: output
+              - text: ), model, provider
+          - row [ref=f19e281]:
+            - cell [ref=f19e282]:
+              - code [ref=f19e283]: gen_ai.client.operation.duration
+            - cell "Histogram" [ref=f19e284]
+            - cell [ref=f19e285]:
+              - code [ref=f19e286]: gen_ai.operation.name
+              - text: ", model"
+          - row [ref=f19e287]:
+            - cell [ref=f19e288]:
+              - code [ref=f19e289]: gen_ai.invoke_agent.duration
+            - cell "Histogram" [ref=f19e290]
+            - cell [ref=f19e291]:
+              - code [ref=f19e292]: gen_ai.operation.name
+          - row [ref=f19e293]:
+            - cell [ref=f19e294]:
+              - code [ref=f19e295]: gen_ai.execute_tool.duration
+            - cell "Histogram" [ref=f19e296]
+            - cell [ref=f19e297]:
+              - code [ref=f19e298]: gen_ai.operation.name
+              - text: ","
+              - code [ref=f19e299]: gen_ai.tool.name
+          - row [ref=f19e300]:
+            - cell [ref=f19e301]:
+              - code [ref=f19e302]: dsh.token.detail
+            - cell "Histogram" [ref=f19e303]
+            - cell [ref=f19e304]:
+              - code [ref=f19e305]: dsh.token.detail_kind
+              - text: (
+              - code [ref=f19e306]: cache_read
+              - text: /
+              - code [ref=f19e307]: cache_write
+              - text: /
+              - code [ref=f19e308]: reasoning
+              - text: )
+          - row [ref=f19e309]:
+            - cell [ref=f19e310]:
+              - code [ref=f19e311]: dsh.tool.invocations
+            - cell "Counter" [ref=f19e312]
+            - cell [ref=f19e313]:
+              - code [ref=f19e314]: gen_ai.tool.name
+              - text: ","
+              - code [ref=f19e315]: dsh.tool.outcome
+          - row [ref=f19e316]:
+            - cell [ref=f19e317]:
+              - code [ref=f19e318]: dsh.turns
+              - text: /
+              - code [ref=f19e319]: dsh.steps
+            - cell "Counter" [ref=f19e320]
+            - cell "—" [ref=f19e321]
+    - generic [ref=f19e322]:
+      - paragraph [ref=f19e323]: "> Configuración"
+      - heading "Las claves que realmente vas a tocar" [level=2] [ref=f19e324]
+      - paragraph [ref=f19e325]:
+        - text: Un patch de profile reemplaza todo el
+        - code [ref=f19e326]: config
+        - text: de esa fila en vez de fusionarse con él, así que reescribí cada campo que quieras conservar.
+      - table [ref=f19e328]:
+        - rowgroup [ref=f19e329]:
+          - row [ref=f19e330]:
+            - columnheader "Clave" [ref=f19e331]
+            - columnheader "Por defecto" [ref=f19e332]
+            - columnheader "Notas" [ref=f19e333]
+        - rowgroup [ref=f19e334]:
+          - row [ref=f19e335]:
+            - cell [ref=f19e336]:
+              - code [ref=f19e337]: endpoint
+            - cell [ref=f19e338]:
+              - emphasis [ref=f19e339]: requerido
+            - cell [ref=f19e340]:
+              - text: URL
+              - strong [ref=f19e341]: base
+              - text: de OTLP. El plugin agrega el sufijo
+              - code [ref=f19e342]: "/v1/{traces,metrics,logs}"
+              - text: de cada señal; una ruta por señal se rechaza al cargar.
+          - row [ref=f19e343]:
+            - cell [ref=f19e344]:
+              - code [ref=f19e345]: database
+            - cell [ref=f19e346]:
+              - code [ref=f19e347]: public
+            - cell [ref=f19e348]:
+              - text: Se envía como
+              - code [ref=f19e349]: X-Greptime-DB-Name
+              - text: .
+          - row [ref=f19e350]:
+            - cell [ref=f19e351]:
+              - code [ref=f19e352]: username
+              - text: /
+              - code [ref=f19e353]: password
+            - cell [ref=f19e354]:
+              - emphasis [ref=f19e355]: ninguno
+            - cell "Basic auth. Los dos o ninguno." [ref=f19e356]
+          - row [ref=f19e357]:
+            - cell [ref=f19e358]:
+              - code [ref=f19e359]: signals
+            - cell "las tres" [ref=f19e360]
+            - cell [ref=f19e361]:
+              - text: Cualquier subconjunto de
+              - code [ref=f19e362]: traces
+              - text: ","
+              - code [ref=f19e363]: metrics
+              - text: ","
+              - code [ref=f19e364]: logs
+              - text: .
+          - row [ref=f19e365]:
+            - cell [ref=f19e366]:
+              - code [ref=f19e367]: content
+            - cell [ref=f19e368]:
+              - code [ref=f19e369]: none
+            - cell "Cuánto payload puede salir del proceso." [ref=f19e370]
+          - row [ref=f19e371]:
+            - cell [ref=f19e372]:
+              - code [ref=f19e373]: ttl
+            - cell [ref=f19e374]:
+              - code [ref=f19e375]: 180d
+            - cell [ref=f19e376]:
+              - text: Retención de las tablas de logs y traces que crea el plugin, enviada como
+              - code [ref=f19e377]: x-greptime-hints
+              - text: . También acepta
+              - code [ref=f19e378]: forever
+              - text: . Una tabla ya existente conserva la suya hasta un
+              - code [ref=f19e379]: ALTER TABLE
+              - text: .
+      - paragraph [ref=f19e380]:
+        - text: Batching, timeouts, nombre de servicio y overrides de tabla tienen valores razonables; la tabla completa está en el
+        - link "README" [ref=f19e381] [cursor=pointer]:
+          - /url: https://github.com/tma1-ai/dsh-otel#configuration
+        - text: .
+    - generic [ref=f19e382]:
+      - paragraph [ref=f19e383]: "> Qué sale de la máquina"
+      - heading [level=2] [ref=f19e384]:
+        - text: Lo decide
+        - code [ref=f19e385]: content
+      - paragraph [ref=f19e386]: El valor por defecto retiene todos los payloads. Subilo a propósito, por profile.
+      - table [ref=f19e388]:
+        - rowgroup [ref=f19e389]:
+          - row [ref=f19e390]:
+            - columnheader "Modo" [ref=f19e391]
+            - columnheader "Se exporta" [ref=f19e392]
+        - rowgroup [ref=f19e393]:
+          - row [ref=f19e394]:
+            - cell [ref=f19e395]:
+              - code [ref=f19e396]: none
+              - emphasis [ref=f19e397]: (por defecto)
+            - cell [ref=f19e398]:
+              - text: "Estructura y contabilidad: tipos de evento, números de turno y step, conteos de tokens, nombres de herramientas, duraciones, resultados,"
+              - code [ref=f19e399]: name
+              - text: "y"
+              - code [ref=f19e400]: code
+              - text: del error.
+          - row [ref=f19e401]:
+            - cell [ref=f19e402]:
+              - code [ref=f19e403]: full
+            - cell "Suma el contenido de los mensajes de usuario y asistente, argumentos de herramientas y resultados." [ref=f19e404]
+          - row [ref=f19e405]:
+            - cell [ref=f19e406]:
+              - code [ref=f19e407]: full+prompt
+            - cell [ref=f19e408]:
+              - text: Suma
+              - code [ref=f19e409]: request/header
+              - text: ": el system prompt completo y el schema de cada herramienta."
+      - paragraph [ref=f19e410]:
+        - text: "Tres cosas no salen en ningún modo: el payload privado"
+        - code [ref=f19e411]: meta
+        - text: de una herramienta, el
+        - code [ref=f19e412]: error.message
+        - text: interno de un turno fallido, y el mensaje y stack de una petición fallida. La proyección es una allowlist positiva, así que un tipo de evento que el plugin no conoce — incluido uno que declare un futuro plugin de DSH — exporta su identidad y nada más.
+    - generic [ref=f19e413]:
+      - paragraph [ref=f19e414]: "> Con TMA1"
+      - heading "Apuntalo a TMA1" [level=2] [ref=f19e415]
+      - paragraph [ref=f19e416]: TMA1 hace de proxy OTLP hacia un GreptimeDB que él mismo administra. Cambiás una línea y DSH aparece en su vista OTel GenAI.
+      - article [ref=f19e417]:
+        - heading "Las flow tables ya coinciden" [level=3] [ref=f19e418]
+        - paragraph [ref=f19e419]:
+          - text: Las flow tables
+          - code [ref=f19e420]: tma1_token_usage_1m
+          - text: ","
+          - code [ref=f19e421]: cost_1m
+          - text: ","
+          - code [ref=f19e422]: latency_1m
+          - text: "y"
+          - code [ref=f19e423]: status_1m
+          - text: de TMA1 derivan de
+          - code [ref=f19e424]: span_attributes.gen_ai.*
+          - text: ", que este plugin completa por convención. No hay nada más que configurar."
+        - generic [ref=f19e425]:
+          - generic [ref=f19e426]: cordis.patch.yml
+          - generic [ref=f19e431]: "endpoint: http://localhost:14318/v1/otlp"
+    - generic [ref=f19e434]:
+      - paragraph [ref=f19e435]: "> Limitaciones conocidas"
+      - heading "Leé esto antes" [level=2] [ref=f19e436]
+      - generic [ref=f19e437]:
+        - article [ref=f19e438]:
+          - heading "DSH es pre-release" [level=4] [ref=f19e439]
+          - paragraph [ref=f19e440]:
+            - text: Renombra y reempaqueta libremente hasta su primer tag. El rango de peer es la versión exacta contra la que corre CI (
+            - code [ref=f19e441]: 0.1.1-rc.2
+            - text: ); una nueva release de DSH necesita un bump probado acá.
+        - article [ref=f19e442]:
+          - heading "Las convenciones GenAI son experimentales" [level=4] [ref=f19e443]
+          - paragraph [ref=f19e444]:
+            - text: Los nombres vienen de
+            - code [ref=f19e445]: "@opentelemetry/semantic-conventions/incubating"
+            - text: y se mueven con él. Los spans llevan tanto
+            - code [ref=f19e446]: gen_ai.provider.name
+            - text: como el obsoleto
+            - code [ref=f19e447]: gen_ai.system
+            - text: .
+        - article [ref=f19e448]:
+          - heading "<code>ttl</code> no llega a las tablas de métricas" [level=4] [ref=f19e449]
+          - paragraph [ref=f19e450]:
+            - text: Las métricas caen en el metric engine, donde la retención es una propiedad de la tabla física. El hint llega a la tabla lógica, que lo guarda y lo muestra pero nunca lo aplica (
+            - link "greptimedb#8951" [ref=f19e451] [cursor=pointer]:
+              - /url: https://github.com/GreptimeTeam/greptimedb/issues/8951
+            - text: ). Ponelo vos con
+            - code [ref=f19e452]: ALTER TABLE greptime_physical_table SET 'ttl' = '180d'
+            - text: .
+        - article [ref=f19e453]:
+          - heading "La exportación es por lotes y el apagado es acotado" [level=4] [ref=f19e454]
+          - paragraph [ref=f19e455]:
+            - text: No hay flush por turno — la exportación sigue la cadencia de los batch processors. Los registros en vuelo cuando expira
+            - code [ref=f19e456]: shutdownTimeoutMillis
+            - text: pueden perderse al salir.
+        - article [ref=f19e457]:
+          - heading "Las sesiones de subagente tienen su propio trace" [level=4] [ref=f19e458]
+          - paragraph [ref=f19e459]: No se cosen dentro del trace padre.
+  - contentinfo [ref=f19e460]:
+    - paragraph [ref=f19e461]: DSH OTel
+    - generic [ref=f19e462]:
+      - link "GitHub" [ref=f19e463] [cursor=pointer]:
+        - /url: https://github.com/tma1-ai/dsh-otel
+      - generic [ref=f19e464]: /
+      - link "npm" [ref=f19e465] [cursor=pointer]:
+        - /url: https://www.npmjs.com/package/@tma1-ai/dsh-plugin-greptimedb
+      - generic [ref=f19e466]: /
+      - link "Apache-2.0" [ref=f19e467] [cursor=pointer]:
+        - /url: https://github.com/tma1-ai/dsh-otel/blob/main/LICENSE
+      - generic [ref=f19e468]: /
+      - link "Dashboards" [ref=f19e469] [cursor=pointer]:
+        - /url: https://github.com/tma1-ai/dsh-otel/blob/main/grafana/README.md
+    - paragraph [ref=f19e470]:
+      - text: Apache-2.0. Un plugin para
+      - link "DeepSeek Harness" [ref=f19e471] [cursor=pointer]:
+        - /url: https://github.com/deepseek-ai/deepseek-harness
+      - text: que exporta a
+      - link "GreptimeDB" [ref=f19e472] [cursor=pointer]:
+        - /url: https://github.com/GreptimeTeam/greptimedb
+      - text: .
+    - generic [ref=f19e473]:
+      - paragraph [ref=f19e474]: Más de tma1-ai
+      - generic [ref=f19e475]:
+        - link "TMA1 Observabilidad local para agentes, que el agente vuelve a leer" [ref=f19e476] [cursor=pointer]:
+          - /url: /es/
+          - generic [ref=f19e477]: TMA1
+          - generic [ref=f19e481]: Observabilidad local para agentes, que el agente vuelve a leer
+        - link "Openfuse Ingeniería de LLM sobre una base de datos de observabilidad real" [ref=f19e482] [cursor=pointer]:
+          - /url: /es/openfuse/
+          - generic [ref=f19e483]: Openfuse
+          - generic [ref=f19e488]: Ingeniería de LLM sobre una base de datos de observabilidad real
+  - generic [ref=f19e491]:
+    - button [ref=f19e492]
+    - button [ref=f19e498]
+    - button [ref=f19e502]
+    - button [ref=f19e507]

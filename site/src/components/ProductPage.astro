@@ -317,6 +317,11 @@ const c = chrome[lang];
   .showcase-row:last-of-type { border-bottom: none; padding-bottom: 8px; }
   .showcase-row.flip .showcase-text { order: 2; }
   .showcase-row.flip .showcase-image { order: 1; }
+  /* A `1fr` track is `minmax(auto, 1fr)`, and the min-content width of a
+     white-space:pre code block is the full unwrapped line. Without this the
+     track refuses to shrink, the row overflows the viewport, and the code
+     block's own overflow-x never engages. */
+  .showcase-text, .showcase-image { min-width: 0; }
   .showcase-text { padding-top: 24px; }
   .showcase-text h3 {
     font-size: 22px; font-weight: 700;

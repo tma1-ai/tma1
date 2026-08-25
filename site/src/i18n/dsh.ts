@@ -225,7 +225,9 @@ export const en: ProductCopy = {
       head: ['Instrument', 'Type', 'Dimensions'],
       rows: [
         ['<code>gen_ai.client.token.usage</code>', 'Histogram', '<code>gen_ai.token.type</code> (<code>input</code>/<code>output</code> only), model, provider'],
-        ['<code>gen_ai.client.operation.duration</code>', 'Histogram', '<code>gen_ai.operation.name</code>, model'],
+        ['<code>gen_ai.client.operation.duration</code>', 'Histogram', '<code>gen_ai.operation.name</code>, model, provider'],
+        ['<code>gen_ai.invoke_agent.duration</code>', 'Histogram', '<code>gen_ai.operation.name</code>'],
+        ['<code>gen_ai.execute_tool.duration</code>', 'Histogram', '<code>gen_ai.operation.name</code>, <code>gen_ai.tool.name</code>'],
         ['<code>dsh.token.detail</code>', 'Histogram', '<code>dsh.token.detail_kind</code> (<code>cache_read</code>/<code>cache_write</code>/<code>reasoning</code>)'],
         ['<code>dsh.tool.invocations</code>', 'Counter', '<code>gen_ai.tool.name</code>, <code>dsh.tool.outcome</code>'],
         ['<code>dsh.turns</code> / <code>dsh.steps</code>', 'Counter', '—'],
@@ -449,7 +451,9 @@ export const zh: ProductCopy = {
       head: ['Instrument', '类型', '维度'],
       rows: [
         ['<code>gen_ai.client.token.usage</code>', 'Histogram', '<code>gen_ai.token.type</code>（只有 <code>input</code>/<code>output</code>）、model、provider'],
-        ['<code>gen_ai.client.operation.duration</code>', 'Histogram', '<code>gen_ai.operation.name</code>、model'],
+        ['<code>gen_ai.client.operation.duration</code>', 'Histogram', '<code>gen_ai.operation.name</code>、model、provider'],
+        ['<code>gen_ai.invoke_agent.duration</code>', 'Histogram', '<code>gen_ai.operation.name</code>'],
+        ['<code>gen_ai.execute_tool.duration</code>', 'Histogram', '<code>gen_ai.operation.name</code>、<code>gen_ai.tool.name</code>'],
         ['<code>dsh.token.detail</code>', 'Histogram', '<code>dsh.token.detail_kind</code>（<code>cache_read</code>/<code>cache_write</code>/<code>reasoning</code>）'],
         ['<code>dsh.tool.invocations</code>', 'Counter', '<code>gen_ai.tool.name</code>、<code>dsh.tool.outcome</code>'],
         ['<code>dsh.turns</code> / <code>dsh.steps</code>', 'Counter', '—'],
@@ -673,7 +677,9 @@ export const es: ProductCopy = {
       head: ['Instrumento', 'Tipo', 'Dimensiones'],
       rows: [
         ['<code>gen_ai.client.token.usage</code>', 'Histogram', '<code>gen_ai.token.type</code> (solo <code>input</code>/<code>output</code>), model, provider'],
-        ['<code>gen_ai.client.operation.duration</code>', 'Histogram', '<code>gen_ai.operation.name</code>, model'],
+        ['<code>gen_ai.client.operation.duration</code>', 'Histogram', '<code>gen_ai.operation.name</code>, model, provider'],
+        ['<code>gen_ai.invoke_agent.duration</code>', 'Histogram', '<code>gen_ai.operation.name</code>'],
+        ['<code>gen_ai.execute_tool.duration</code>', 'Histogram', '<code>gen_ai.operation.name</code>, <code>gen_ai.tool.name</code>'],
         ['<code>dsh.token.detail</code>', 'Histogram', '<code>dsh.token.detail_kind</code> (<code>cache_read</code>/<code>cache_write</code>/<code>reasoning</code>)'],
         ['<code>dsh.tool.invocations</code>', 'Counter', '<code>gen_ai.tool.name</code>, <code>dsh.tool.outcome</code>'],
         ['<code>dsh.turns</code> / <code>dsh.steps</code>', 'Counter', '—'],
