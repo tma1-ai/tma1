@@ -174,13 +174,13 @@ export const zh: T = {
   nav: { features: '功能', how: '工作原理', security: '安全' },
   hero: {
     hooks: [
-      'agent 一直在改我刚手动动过的文件。我希望它能注意到。',
-      '我想知道 agent 到底花了多少钱、有没有在搞危险操作。',
-      'agent 在同一个炸了的测试上 retry 了五次。我希望它能从自己的失败里学。',
+      'agent 一直在改我刚手工改过的文件，我希望它能察觉。',
+      '我想知道 agent 到底花了多少钱，有没有执行危险操作。',
+      'agent 在同一个失败的测试上重试了五次，我希望它能从自己的失败里学。',
     ],
     h1_1: '你的 agent loop 里埋着一块 monolith。',
-    h1_2: '安静——直到它开口。',
-    subtitle: 'TMA1 在<em>本地</em>记下 agent 每一次 LLM 调用，再通过 hooks、MCP、anomaly 检测把看到的东西送回 agent 的下一轮 reasoning。',
+    h1_2: '静默，直到它开口。',
+    subtitle: 'TMA1 在<em>本地</em>记下 agent 每一次 LLM 调用，再通过 hooks、MCP 和异常检测把观测到的结果送回 agent 的下一轮 reasoning。',
     loop_moment: {
       title_bar: 'claude code · auth.go',
       lines: [
@@ -196,31 +196,31 @@ export const zh: T = {
   },
   onboarding: { label: 'AGENT 接入', manual: '手动安装' },
   highlights: [
-    { title: '你的 agent 会从自己的失败里学', desc: 'Edit 连着失败 3 次、build 一直炸的时候，TMA1 会把具体修复路径塞进 agent 的下一个 prompt——不是下周的 postmortem。' },
-    { title: 'agent 能读到别的 agent 留下的东西', desc: 'Claude Code 可以通过 <code>/tma1-peer</code> 把 Codex 在同一个文件上留下的 review 原样拿过来。不用在两个 terminal 之间拷来拷去。' },
-    { title: '数据不出本机', desc: '一个 Go 二进制。不要 Docker，不要云。数据只在 <code>~/.tma1/</code>。' },
+    { title: '你的 agent 会从自己的失败里学', desc: '同一个 Edit 连续失败三次、build 反复失败时，TMA1 会把具体的修复路径写进 agent 的下一个 prompt，而不是留到下周的 postmortem。' },
+    { title: 'agent 能读到其他 agent 留下的内容', desc: 'Claude Code 可以通过 <code>/tma1-peer</code> 原样读取 Codex 在同一个文件上留下的 review，不需要在两个终端之间来回复制。' },
+    { title: '数据不出本机', desc: '一个 Go 二进制，无需 Docker，不依赖云服务，数据只存放在 <code>~/.tma1/</code>。' },
   ],
   features: {
-    kicker: '功能', title: '看到东西后能做点什么的可观测',
+    kicker: '功能', title: '会对观测结果采取行动的可观测',
     desc: '闭环感知和跨 agent 协作是主轴，dashboard 是补充证据。一个 Go 二进制，本地时序库，不需要 Grafana，不需要 YAML。',
     cards: [
-      { num: '01', title: '让 agent 形成闭环', desc: 'TMA1 盯着重复失败、过期视图、坏 build。规则命中的时候，它会把一条具体的修复路径写进 agent 的下一个 prompt——不是塞进 dashboard 让人明天再去看。<strong>五个 hook</strong> 负责送达。<strong>六条规则</strong>，每条都有可执行的建议。<strong>HIGH</strong> 优先级会 block <code>Stop</code>，以免坏的 build 静默上线。' },
-      { num: '02', title: '跨 agent 的 peer session', desc: 'Claude Code <em>原样</em>读到 Codex 在同一个文件上留下的内容，反过来也一样。<code>/tma1-peer</code> skill 可以拉到 peer 上次 session 里最多 30 条消息 + 工具足迹。调用方自己的 session 会被过滤掉——避免 echo chamber。' },
-      { num: '03', title: '异常检测', desc: 'Agent 卡在重试循环里可以烧掉几百美元。每个 agent 视图有 Anomalies 标签页，点击任何一条异常直接跳到那个 session，看看到底哪儿出了问题。' },
-      { num: '04', title: 'Sessions', desc: '你的 agent 跑了 25 分钟。发生了什么？打开 session overlay：左边是文件活动、上下文分布、API 调用明细，右边是完整时间线。或者打开 live canvas，实时看 agent 工作。' },
-      { num: '05', title: '工具分析', desc: 'Agent 变慢了，是模型的问题还是工具调用的问题？每个工具的 p50、p95 延迟，调用次数、成功率、趋势线。' },
-      { num: '06', title: '费用明细', desc: '哪个模型最贵？哪个对话把预算烧光了？按模型追踪 token 和费用，能看 burn rate 趋势和缓存命中率。' },
-      { num: '07', title: '安全监控', desc: '你的 agent 能跑 shell 命令、请求外部 URL、被注入 prompt。TMA1 全部标记。OpenClaw 的 webhook 错误和卡死的 session 也会追踪。' },
-      { num: '08', title: '全文搜索', desc: '在 Sessions 搜索框输入关键词，所有 session 的对话和工具调用都能搜到。点击结果直接跳到那个事件。' },
+      { num: '01', title: '让 agent 形成闭环', desc: 'TMA1 持续关注重复失败、过期的文件视图和失败的 build。规则命中时，它把一条具体的修复路径写进 agent 的下一个 prompt，而不是写进一块等人明天来看的 dashboard。<strong>五个 hook</strong> 负责送达，<strong>六条规则</strong>各自给出可执行的建议。<strong>HIGH</strong> 级别可以 block <code>Stop</code>，避免失败的 build 静默交付。' },
+      { num: '02', title: '跨 agent 的 peer session', desc: 'Claude Code <em>原样</em>读到 Codex 在同一个文件上留下的内容，反过来同样成立。<code>/tma1-peer</code> skill 可以取到 peer 上次 session 中最多 30 条消息和工具足迹。调用方自己的 session 会被过滤，避免 echo chamber。' },
+      { num: '03', title: '异常检测', desc: 'agent 卡在重试循环里可以烧掉几百美元。每个 agent 视图都有 Anomalies 标签页，点击任意一条异常可以直接跳到对应 session 定位问题。' },
+      { num: '04', title: 'Sessions', desc: 'agent 跑了 25 分钟，中间发生了什么？打开 session overlay：左边是文件活动、上下文分布和 API 调用明细，右边是完整时间线。也可以打开 live canvas 实时观察 agent 工作。' },
+      { num: '05', title: '工具分析', desc: 'agent 变慢了，是模型的问题还是工具调用的问题？每个工具的 p50、p95 延迟，调用次数、成功率和趋势线。' },
+      { num: '06', title: '费用明细', desc: '哪个模型最贵？哪次对话消耗了大部分预算？按模型追踪 token 和费用，并提供 burn rate 趋势和缓存命中率。' },
+      { num: '07', title: '安全监控', desc: 'agent 可以执行 shell 命令、请求外部 URL，也可能被注入 prompt，TMA1 会全部标记。OpenClaw 的 webhook 错误和卡死的 session 同样在追踪范围内。' },
+      { num: '08', title: '全文搜索', desc: '在 Sessions 搜索框输入关键词，可以检索全部 session 的对话和工具调用，点击结果直接跳到对应事件。' },
     ],
   },
   loop_scenarios: {
-    intro: 'TMA1 判断 agent 应该采取行动的时候，会把一条具体建议写进下一个 prompt。下面这些是检测器里的真实字符串——agent 实际读到的内容：',
+    intro: 'TMA1 判断 agent 应该采取行动时，会把一条具体建议写进下一个 prompt。以下是检测器里的真实字符串，也就是 agent 实际读到的内容：',
     items: [
       {
         kind: 'repeated_failed_build',
         severity: 'HIGH',
-        narrative: '用 `tma1 build -- npm test` 包装。Agent 跑了三次，每次都是同一个错误。',
+        narrative: '用 `tma1 build -- npm test` 包装。agent 跑了三次，每次都是同一个错误。',
         // verbatim — do not translate
         suggestion: 'Stop retrying `npm test` and address this error first: TypeError: Cannot read prop ‘user’ of undefined',
         footer: 'injected into next user_prompt_submit',
@@ -228,7 +228,7 @@ export const zh: T = {
       {
         kind: 'stale_file_view',
         severity: 'HIGH',
-        narrative: '人刚手动改了一个文件，agent 准备覆盖这个文件。',
+        narrative: '人工刚修改过某个文件，agent 正准备覆盖它。',
         // verbatim — do not translate
         suggestion: 'Re-read auth.go before the next edit — your in-memory copy is older than what’s on disk.',
         footer: 'injected into next user_prompt_submit',
@@ -236,7 +236,7 @@ export const zh: T = {
     ],
   },
   peer_demo: {
-    intro: 'Claude Code 通过 <code>/tma1-peer</code> skill 原样读到 Codex 留下的东西。反过来也一样。',
+    intro: 'Claude Code 通过 <code>/tma1-peer</code> skill 原样读到 Codex 留下的内容，反过来同样成立。',
     title_bar: 'claude code · in your project',
     lines: [
       { kind: 'prompt', text: '/tma1-peer codex' },
@@ -253,23 +253,23 @@ export const zh: T = {
   },
   how: {
     kicker: '工作原理', title: '安装配置',
-    desc: '把接入指令粘贴给你的 agent，它会自动搞定。或者手动来：',
+    desc: '把接入指令粘贴给 agent，它会自动完成配置。也可以手动操作：',
     steps: [
-      { num: '[1]', title: '安装', desc: '一条命令，所有文件装进 <code>~/.tma1/</code>。不需要 Docker，不需要装别的。' },
-      { num: '[2]', title: '配置你的 agent', desc: '将 OTel endpoint 指向 <code>http://localhost:14318/v1/otlp</code>。支持 Claude Code、Codex、OpenClaw 或任何 OTel SDK。GitHub Copilot CLI 零配置——TMA1 会自动发现它的 session 日志。' },
-      { num: '[3]', title: '看到闭环发生', desc: '浏览器打开 <code>localhost:14318</code> 看 dashboard。有趣的部分发生在 agent 里：它开始看到 <code>&lt;tma1-context&gt;</code> 块并针对性地行动。可选：用 <code>tma1 build -- &lt;command&gt;</code> 包装 dev / test 命令，让 build 失败也进入闭环（支持 <code>--watch</code> / <code>--tag</code> / <code>--filter-regex</code>）。Dashboard 是人事后复盘用的，闭环是给 agent 的。想直接写 SQL 的话，GreptimeDB 自带的 dashboard 在 <code>localhost:14000/dashboard</code>。' },
+      { num: '[1]', title: '安装', desc: '一条命令，所有文件安装到 <code>~/.tma1/</code>。不需要 Docker，也不需要额外的系统包。' },
+      { num: '[2]', title: '配置你的 agent', desc: '将 OTel endpoint 指向 <code>http://localhost:14318/v1/otlp</code>。支持 Claude Code、Codex、OpenClaw 或任何 OTel SDK。GitHub Copilot CLI 零配置，TMA1 会自动发现它的 session 日志。' },
+      { num: '[3]', title: '看到闭环发生', desc: '浏览器打开 <code>localhost:14318</code> 查看 dashboard。真正起作用的部分发生在 agent 里：它开始读到 <code>&lt;tma1-context&gt;</code> 块并据此行动。可选：用 <code>tma1 build -- &lt;command&gt;</code> 包装 dev / test 命令，让 build 失败也进入闭环（支持 <code>--watch</code> / <code>--tag</code> / <code>--filter-regex</code>）。Dashboard 用于人工事后复盘，闭环面向 agent。需要直接写 SQL 时，GreptimeDB 自带的 dashboard 在 <code>localhost:14000/dashboard</code>。' },
     ],
   },
   security: {
     kicker: '安全', title: '安全与隐私',
-    desc: '你的 agent 能读代码库、API 密钥、基础设施配置。把这些发到云端可观测服务？那还谈什么安全。一切留在本地。',
-    panel_title: '数据怎么存的',
+    desc: '你的 agent 能读到代码库、API 密钥和基础设施配置。把这些发到云端可观测服务，等于放弃了这层安全边界。所有数据留在本地。',
+    panel_title: '数据如何存储',
     panel_body: 'TMA1 会把 trace 和对话日志保存在本地 <code>~/.tma1/data/</code>。数据不会上传到任何远程服务，你可以随时查看或删除。',
     cards: [
-      { title: '零网络请求', desc: '首次启动会自动下载内置数据库引擎，之后 TMA1 不再联系任何外部服务。没有数据上报，没有崩溃报告，没有更新检查。' },
+      { title: '零网络请求', desc: '首次启动会下载一次内置数据库引擎，之后 TMA1 不再发起任何网络请求。没有数据上报，没有崩溃报告，没有更新检查。' },
       { title: '完全开源', desc: 'TMA1 采用 Apache-2.0。代码可审计，构建可检查，支持离线运行。' },
-      { title: '单一二进制', desc: '<code>tma1-server</code> 以单进程本地运行，并管理内置存储引擎。不要 Docker，不要系统包，没有运行时依赖。' },
-      { title: '你的数据，你的磁盘', desc: '删掉 <code>~/.tma1/</code> 就全没了。没有残留的云端状态，没有要注销的远程账号。' },
+      { title: '单一二进制', desc: '<code>tma1-server</code> 以单进程本地运行，并管理内置存储引擎。不需要 Docker、系统包和运行时依赖。' },
+      { title: '你的数据，你的磁盘', desc: '删除 <code>~/.tma1/</code>，数据即全部消失。没有残留的云端状态，也没有需要注销的远程账号。' },
     ],
   },
   faq: {
@@ -277,10 +277,10 @@ export const zh: T = {
     items: [
       { q: '支持哪些 agent？', a: '任何发送 OpenTelemetry 数据的 agent，以及通过 JSONL 自动发现的几个 agent。Claude Code 发送 metrics 和 logs；Codex 发送 logs 和 metrics，会话 JSONL 自动解析用于对话回放。GitHub Copilot CLI 零配置：TMA1 自动发现并解析 <code>~/.copilot/session-state/</code> 下的 session JSONL。OpenClaw 发送 traces 和 metrics，会话 JSONL 也会自动解析。任何遵循 GenAI 语义规范的 OTel SDK 应用开箱即用。Dashboard 根据数据自动切换到对应视图。' },
       { q: '能直接用 SQL 查吗？', a: '能。运行 <code>mysql -h 127.0.0.1 -P 14002</code> 连接本地 SQL 端口，或打开 <code><a href="http://localhost:14000/dashboard/">localhost:14000/dashboard/</a></code> 使用内置查询界面。Traces 在 <code>opentelemetry_traces</code>，logs 在 <code>opentelemetry_logs</code>，session 数据在 <code>tma1_hook_events</code> 和 <code>tma1_messages</code>，OTel metrics 自动建表。' },
-      { q: '大概占多少磁盘？', a: '取决于 agent 流量和对话长度。常见场景下，每月大约几百 MB。' },
+      { q: '大约占用多少磁盘？', a: '取决于 agent 流量和对话长度。常见场景下，每月大约几百 MB。' },
     ],
   },
-  footer: { tagline: '取名自《2001 太空漫游》中的 TMA-1——静默记录一切，等你来挖掘。' },
+  footer: { tagline: '名字取自《2001 太空漫游》中的 TMA-1：静默记录一切，直到被挖掘出来。' },
   ui: { copy: '复制', copied: '已复制！' },
 };
 

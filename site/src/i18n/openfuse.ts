@@ -253,7 +253,7 @@ export const zh: ProductCopy = {
     },
     {
       title: '从小起步，按需扩展',
-      desc: '先跑一个 <code>openfuse-standalone</code>。存储可以落本地磁盘，也可以落对象存储，同一个引擎从单机扩展到集群；缩回去也不丢数据。',
+      desc: '先跑一个 <code>openfuse-standalone</code>。存储可以落本地磁盘，也可以落对象存储，同一个引擎从单机扩展到集群，缩容同样不丢数据。',
     },
     {
       title: '便宜的长期留存',
@@ -264,8 +264,8 @@ export const zh: ProductCopy = {
   features: {
     id: 'features',
     kicker: '已经可用',
-    title: '完整的 Langfuse 界面，一点没少',
-    desc: '不是子集。tracing、仪表盘、数据集、评测、导出都能用，覆盖到的读路径逐字节对齐上游 Langfuse。',
+    title: '完整的 Langfuse 界面，没有裁剪',
+    desc: '不是子集。tracing、仪表盘、数据集、评测、导出都可用，覆盖到的读路径逐字节对齐上游 Langfuse。',
     rows: [
       {
         num: '[01]',
@@ -319,7 +319,7 @@ export const zh: ProductCopy = {
       id: 'status',
       kicker: '项目状态',
       title: 'Beta',
-      desc: '拿真实负载去跑，遇到问题开 issue。这些反馈才是推动它走到稳定版的东西。',
+      desc: '拿真实负载去跑，遇到问题请提 issue。这些反馈决定它多快走到稳定版。',
       cards: [
         {
           title: '当前进度',
@@ -327,7 +327,7 @@ export const zh: ProductCopy = {
         },
         {
           title: '已知限制',
-          desc: '<a href="https://github.com/tma1-ai/openfuse/blob/main/docs/known-limitations.md">Known limitations</a> 是一份很短的真实约束清单，外加少数与上游有意的差异。依赖它之前先扫一遍。',
+          desc: '<a href="https://github.com/tma1-ai/openfuse/blob/main/docs/known-limitations.md">Known limitations</a> 是一份简短的真实约束清单，外加少数与上游有意的差异。依赖它之前请先过一遍。',
         },
         {
           title: '社区 fork',
@@ -335,7 +335,7 @@ export const zh: ProductCopy = {
         },
         {
           title: 'MIT',
-          desc: '所有功能都是解锁的。没有企业版，没有商业 license key，没有藏在合同后面的能力。',
+          desc: '所有功能都是解锁的。没有企业版，没有商业 license key，也没有需要签合同才能拿到的能力。',
         },
       ],
     },
