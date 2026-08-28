@@ -66,7 +66,7 @@ func (a *HookAttributor) Classify(ctx context.Context, projectRoot, filePath str
 	if a.httpPort <= 0 || projectRoot == "" || filePath == "" {
 		return AttributionUnknown
 	}
-	root := strings.TrimRight(projectRoot, `/\\`)
+	root := strings.TrimRight(projectRoot, `/\`)
 	if root == "" {
 		return AttributionUnknown
 	}
