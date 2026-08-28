@@ -15,13 +15,13 @@ file index. Read this when you need to know *where* something is or
 | `server/internal/install/` | Download and verify GreptimeDB binary |
 | `server/internal/greptimedb/` | Start, stop, health-check GreptimeDB process + Flow init + versioned schema migrations + per-table DDL (`flows.go` / `anomaly_emits.go` / `build.go` / `external.go` / `project.go`) |
 | `server/internal/handler/` | HTTP handlers: /health, /status, /api/query, /api/evaluate, /api/settings, /api/hooks (returns injection content), /api/hooks/stream (SSE), /api/anomalies{,/budget,/follow-rate}, /v1/otlp/*, dashboard UI |
-| `server/internal/hooks/` | Hook script installer + per-adapter wiring. `install_cc.go` (Claude Code: `~/.claude/settings.json` hooks + `~/.claude.json` MCP + `~/.claude/{skills,commands}/`). `install_codex.go` (Codex: `~/.codex/hooks.json` + `~/.codex/config.toml` `[mcp_servers.tma1]` + `~/.agents/skills/tma1-peer/`, TOML merge via `BurntSushi/toml`). `install_shared.go` carries the helpers both use (atomic writes, JSON-strict reads, owner-prefix-scoped stale sweep, instructions/.gitignore). |
+| `server/internal/hooks/` | Hook script installer + per-adapter wiring. `install_cc.go` (Claude Code: `~/.claude/settings.json` hooks + `~/.claude.json` MCP + `~/.claude/{skills,commands}/`). `install_codex.go` (Codex: `~/.codex/hooks.json` + `~/.codex/config.toml` `[mcp_servers.tma1]` + `~/.agents/skills/tma1-*/`, TOML merge via `BurntSushi/toml`). `install_shared.go` carries the helpers both use (atomic writes, JSON-strict reads, owner-prefix-scoped stale sweep, instructions/.gitignore). |
 | `server/internal/transcript/` | JSONL transcript watcher (Claude Code) + Codex / OpenClaw / Copilot CLI session log parsers |
 | `server/internal/perception/` | v2 perception layer: bundler, anomaly detector (6 rules + channel routing + 10-min suppression + resolvers), incremental injection cache, session readers (peer / search / transcript), read-only query executor, file writer for `.tma1-context.md` |
 | `server/internal/sensor/build/` | `tma1-server build [--watch] -- <cmd>` subprocess capture: stdout/stderr tee + batched writes into `tma1_build_events`, force-colour env injection |
 | `server/internal/sensor/git/` | fsnotify file watcher + 30 s git poll + agent-write attribution honoring `.gitignore` + static ignore list; writes `tma1_external_changes` |
 | `server/internal/sensor/project/` | Lazy project-state indexer (language / build / test / key files / top-level dirs) with 24 h TTL gate; writes `tma1_project_state` |
-| `server/internal/mcp/` | JSON-RPC 2.0 stdio MCP server (7 tools backed by the perception bundler) — runs as a child of each agent (CC, Codex) via `tma1-server mcp-serve`. Pull-channel tools (`get_anomalies`) use side-effect-free `DetectPreview` so reading state can't silently consume the suppression window and weaken the next Stop block. |
+| `server/internal/mcp/` | JSON-RPC 2.0 stdio MCP server (10 tools backed by the perception bundler) — runs as a child of each agent (CC, Codex) via `tma1-server mcp-serve`. Pull-channel tools (`get_anomalies`) use side-effect-free `DetectPreview` so reading state can't silently consume the suppression window and weaken the next Stop block. |
 | `server/internal/writeq/` | Bounded write semaphore (max-in-flight cap, drop counter, recovered-panic counter) used by hook ingest + anomaly emit to keep GreptimeDB from being fork-bombed |
 | `server/internal/sqlutil/` | Single-source SQL helpers (`Escape`, `EscapeLike`, `Quote`) shared by perception, handler, sensors; plus `ValidateSelect` / `LimitedSelect`, the read-only gate behind the `exec_query` MCP tool |
 | `server/internal/strutil/` | UTF-8-safe truncation (`SafeTruncate`) used wherever we cap a string before INSERT |
@@ -50,12 +50,15 @@ Agent (Claude Code / Codex / Copilot CLI / OpenClaw / any GenAI app)
     │                                                    PreCompact (PreCompact is
     │                                                    CC-only — Codex's hook
     │                                                    catalogue has no PreCompact).]
-    │  MCP stdio  ─── tma1-server mcp-serve (child)      [7 tools: get_context_bundle,
+    │  MCP stdio  ─── tma1-server mcp-serve (child)      [10 tools: get_context_bundle,
     │                                                    get_session_state, get_anomalies,
     │                                                    get_build_status,
     │                                                    get_external_changes,
     │                                                    get_project_state,
-    │                                                    get_peer_sessions]
+    │                                                    get_peer_sessions,
+    │                                                    search_sessions,
+    │                                                    get_session_transcript,
+    │                                                    exec_query]
     │  JSONL transcripts → ~/.claude/projects/ (CC) / ~/.codex/sessions/ (Codex) /
     │                      ~/.copilot/session-state/ (Copilot CLI) / ~/.openclaw/agents/ (OpenClaw)
     ▼
@@ -234,8 +237,8 @@ column lists + sample queries that get published with the skill.
 | `TMA1_LLM_PROVIDER` | `anthropic` | LLM provider: `anthropic` or `openai` |
 | `TMA1_LLM_MODEL` | (auto) | Model override (default: `claude-sonnet-4-20250514` / `gpt-4o-mini`) |
 | `TMA1_QUERY_CONCURRENCY` | `4` | Max concurrent SQL queries from dashboard. Lower (e.g. `2`) if GreptimeDB OOMs on 30d. Range `1`–`32`. Hot-reloadable via `/api/settings`. |
-| `TMA1_ADAPTER` | (empty) | **Install-time only** (`install.sh` / `install.ps1`). Set to `claude-code`, `codex`, a comma-separated list, or `all` to wire adapters after the service is healthy. Curl-pipe / iex installs pass `--skip-project-files`, so they write only global hooks, MCP entries, and `/tma1-peer` skills. Run `tma1-server install --adapter <name>` from a project root when you also want the AGENTS.md / CLAUDE.md block and `.gitignore` entry. |
-| `TMA1_MCP_CALLER` | (empty) | **Install-time only.** Adapter installers write this into each agent's MCP `env` block (`claude_code` / `codex`). The MCP child reads it to drive caller-aware peer-session exclusion so an agent never sees its own sessions on `/tma1-peer`. |
+| `TMA1_ADAPTER` | (empty) | **Install-time only** (`install.sh` / `install.ps1`). Set to `claude-code`, `codex`, a comma-separated list, or `all` to wire adapters after the service is healthy. Curl-pipe / iex installs pass `--skip-project-files`, so they write only global hooks, MCP entries, and the TMA1 skills. Run `tma1-server install --adapter <name>` from a project root when you also want the AGENTS.md / CLAUDE.md block and `.gitignore` entry. |
+| `TMA1_MCP_CALLER` | (empty) | **Install-time only.** Adapter installers write this into each agent's MCP `env` block (`claude_code` / `codex`). The MCP child reads it to exclude the caller from the default `get_peer_sessions` fan-out, and to resolve `agent_source: "self"` when an agent asks for its own history. |
 | `TMA1_DISABLE_INJECTION` | (unset) | Set to `1` to short-circuit `generateInjection` — `/api/hooks` still records events but returns empty stdout. Escape hatch for dogfooding. |
 | `TMA1_ENABLE_FILE_CALLBACK` | (unset) | Set to `1` to refresh `<project_root>/.tma1-context.md` after each hook event. Off by default — MCP / hook injection covers MCP-capable agents; the file is for Aider / Cursor and adds IO + git-sensor self-noise. |
 | `TMA1_DEBUG_POSTTOOLUSE` | (unset) | Set to `1` to emit a debug marker on every PostToolUse hook regardless of anomalies. Plumbing aid. |
@@ -267,7 +270,7 @@ column lists + sample queries that get published with the skill.
 | Installed-asset drift check | `server/internal/hooks/status.go` — `CheckInstalledAssets` compares the embedded skill/command trees against what is on disk for adapters that are actually installed (detected from hook registrations, not directory presence). Read-only: the server warns at startup, `tma1-server install` is what rewrites |
 | Project-root resolution | `server/internal/perception/file_writer.go` (`ResolveProjectRoot`) — also writes `.tma1-context.md` for non-MCP agents when `TMA1_ENABLE_FILE_CALLBACK=1` |
 | Incremental injection cache | `server/internal/perception/injection_cache.go` — per-session digest dedupe so identical context isn't re-emitted every turn |
-| MCP stdio server | `server/internal/mcp/server.go` (concurrent loop, write-mutex serialised) + `tools.go` (7 ToolHandlers) + `protocol.go` (JSON-RPC + MCP types) |
+| MCP stdio server | `server/internal/mcp/server.go` (concurrent loop, write-mutex serialised) + `tools.go` (10 ToolHandlers) + `protocol.go` (JSON-RPC + MCP types) |
 | Build sensor | `server/internal/sensor/build/capture.go` (Runner / LongRunner) + `store.go` (writes `tma1_build_events`) |
 | Git/file sensor | `server/internal/sensor/git/sensor.go` (per-project watcher lifecycle) + `watcher.go` (fsnotify + git poll) + `gitignore.go` + `attribution.go` (observed agent writes vs. unknown source) + `store.go` |
 | Project sensor | `server/internal/sensor/project/sensor.go` (TTL-gated indexer) + `indexer.go` (marker-file heuristics) + `store.go` |

@@ -46,9 +46,9 @@ like hex at all. Anything that isn't behind `--session` is search text.
 
 - `sessions[]` — `session_id`, `agent_source`, `last_activity_ago`,
   `hit_count`, and `snippets[]` (each a window around a match).
-- `match_mode` — `term` means whole-word matching, the precise mode.
-  `substring` means the word-boundary pass found nothing and the search
-  widened; results may include noise, and you should say so.
+- `match_mode` — `term` is the indexed pass: whole words, case-sensitive.
+  `substring` means that pass found nothing, so the search widened to a
+  case-folded substring scan; results may include noise, say so.
 - `scope_truncated: true` — this project has more sessions in the window
   than the search scanned. Narrow with `--agent` or `--days`.
 - `note` — present only when nothing matched. Say so plainly; don't invent
@@ -56,10 +56,12 @@ like hex at all. Anything that isn't behind `--session` is search text.
 
 ## Search behaviour worth knowing
 
-Word-boundary matching means `Cwd` does not match `peerCwdFilter`. Search
-for whole identifiers (`peerCwdFilter`, `get_peer_sessions`) or plain
-words. If a query returns nothing, try the fuller identifier before
-concluding it never happened.
+The indexed pass matches whole words and is case-sensitive, so `Cwd` does
+not find `peerCwdFilter` and neither does `peercwdfilter`. Search for the
+identifier as it is written in the code. When that pass finds nothing the
+search widens to a case-folded substring scan and tells you so with
+`match_mode: substring` — that is the mode that rescues a mistyped case,
+at the cost of noisier hits.
 
 ## Related
 

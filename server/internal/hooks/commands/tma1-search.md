@@ -29,7 +29,8 @@ Full reference lives in `skills/tma1-search/SKILL.md`.
    `next_offset`.
 3. Answer by quoting the earlier session, not by summarising it.
 
-Read `match_mode` before presenting results: `substring` means the exact
-word-boundary search found nothing and the query was widened — say so.
+Read `match_mode` before presenting results: `substring` means the
+indexed word-boundary search (which is case-sensitive) found nothing, so
+the query was widened to a case-folded substring scan. Say so.
 Empty results carry a `note`; report the silence rather than inventing a
 session.

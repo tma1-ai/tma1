@@ -27,11 +27,11 @@ until you dig it out.
 
 ```bash
 curl -fsSL https://tma1.ai/install.sh | TMA1_ADAPTER=claude-code bash
-open http://localhost:14318
 ```
 
 That is the whole setup. The installer registers TMA1 as a background
-service and starts it, so there is no server to launch by hand.
+service and starts it, so there is no server to launch by hand — the
+dashboard is already at <http://localhost:14318>.
 
 Use `TMA1_ADAPTER=codex` for Codex, `all` for both. Windows and the
 no-adapter path are under [Install](#install).
@@ -86,11 +86,7 @@ anomaly emits live in `tma1_*` tables.
 Four ways to query them: the TMA1 dashboard, the `exec_query` MCP tool if
 you would rather ask the agent, MySQL protocol on port `14002`, or
 GreptimeDB's own dashboard, which has a SQL/PromQL editor and table
-browser:
-
-```bash
-open http://localhost:14000/dashboard/#/dashboard/query
-```
+browser, at <http://localhost:14000/dashboard/#/dashboard/query>.
 
 ## Closing the agent loop
 
@@ -148,8 +144,11 @@ the `<tma1-context>` block also works) and pages through the conversation.
 
 ## Install
 
-The installer takes an adapter, which is what makes the dashboard show
-something. Without one you get a server with nothing reporting to it.
+The installer takes an adapter, which wires a coding agent's hooks, MCP
+entry, and skills. Claude Code and Codex need it — that is what turns on
+context injection and the `/tma1-*` commands. You can also skip it:
+anything sending OTLP to port 14318 is recorded regardless, and Copilot
+CLI is picked up from its session files with no wiring at all.
 
 ```bash
 # macOS / Linux
@@ -170,11 +169,7 @@ $env:TMA1_ADAPTER = 'claude-code'; irm https://tma1.ai/install.ps1 | iex
 
 The installer registers a background service — launchd agent on macOS,
 systemd user unit on Linux, scheduled task on Windows — and starts it, so
-the dashboard is up when the script finishes:
-
-```bash
-open http://localhost:14318
-```
+the dashboard is up at <http://localhost:14318> when the script finishes.
 
 Run `tma1-server` by hand only if you built from source or skipped the
 service registration.

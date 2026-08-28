@@ -43,17 +43,18 @@ infer a session id from a bare token: commit hashes look identical, and
 
 - `sessions[]` — `session_id`, `agent_source`, `last_activity_ago`,
   `hit_count`, `snippets[]` (a window around each match).
-- `match_mode` — `term` is whole-word matching. `substring` means the
-  word-boundary pass found nothing and the search widened: noisier
-  results, and you should say so.
+- `match_mode` — `term` is the indexed pass: whole words, case-sensitive.
+  `substring` means that pass found nothing, so the search widened to a
+  case-folded substring scan: noisier results, say so.
 - `scope_truncated: true` — more sessions exist in the window than were
   scanned; narrow with `--agent` or `--days`.
 - `note` — only when nothing matched. Report the silence; don't invent a
   plausible past session.
 
-Word-boundary matching means `Cwd` does not match `peerCwdFilter`. Search
-whole identifiers or plain words; if a query comes back empty, try the
-fuller identifier before concluding it never happened.
+The indexed pass matches whole words and is case-sensitive: `Cwd` does not
+find `peerCwdFilter`, and neither does `peercwdfilter`. Search the
+identifier as written. The substring fallback folds case, which is what
+rescues a mistyped query.
 
 ## Related tools
 

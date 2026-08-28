@@ -438,6 +438,11 @@ func (t ExecQueryTool) Definition() Tool {
 	}
 }
 
+// CallTimeout gives exec_query room above its 15s HTTP client deadline,
+// so a slow query fails with the database's own error rather than being
+// cancelled by the dispatch ceiling first.
+func (t ExecQueryTool) CallTimeout() time.Duration { return 20 * time.Second }
+
 func (t ExecQueryTool) Call(ctx context.Context, args map[string]any) (CallToolResult, error) {
 	if t.Bundler == nil {
 		return errorResult("bundler not configured"), nil

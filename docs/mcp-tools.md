@@ -186,11 +186,17 @@ current one, and would make the match-mode decision below depend on
 other projects' data.
 
 **Two match modes.** `matches_term` (the FULLTEXT index on
-`tma1_messages.content`) is word-boundary based and case-insensitive:
-`Cwd` does not match `peerCwdFilter`. When the term pass returns nothing
-*within the scope*, the search widens to `content LIKE '%query%'` and
-reports `match_mode: "substring"` — wider recall, more noise. Consumers
-should surface which mode produced the hits.
+`tma1_messages.content`) is word-boundary based *and case-sensitive*, so
+`Cwd` misses `peerCwdFilter` twice over. Verified on GreptimeDB
+v1.2.0-beta.2: `matches_term('Cat sat', 'cat')` is false, even though the
+column is declared `case_sensitive='false'`.
+
+When the term pass returns nothing *within the scope*, the search widens
+to `lower(content) LIKE '%query%'` and reports
+`match_mode: "substring"`. The fallback folds case deliberately: a query
+typed in the wrong case produces exactly the empty term pass that
+triggers it. Wider recall, more noise — consumers should surface which
+mode produced the hits.
 
 ### Response shape
 
@@ -198,7 +204,7 @@ should surface which mode produced the hits.
 |-------|------|-------|
 | `match_mode` | string | `term` or `substring` (see above) |
 | `sessions[]` | array | `session_id`, `agent_source`, `cwd`, `last_activity_at`, `last_activity_ago`, `hit_count`, `snippets[]` |
-| `snippets[]` | array | `ts`, `role`, `message_type`, `text` — a ±120 character window centred on the match, cut on rune boundaries |
+| `snippets[]` | array | `ts`, `role`, `message_type`, `text` — a ±120 character window centred on the match. Measured in characters, so CJK content gets the same window as ASCII |
 | `scope_truncated` | boolean | The project had more than 500 sessions in the window; the search covered a subset |
 | `note` | string | Present only when nothing matched |
 
@@ -215,7 +221,7 @@ Reads one session's conversation. Takes the `session_id` from
 | `session_id` | string | required | Full id, or a prefix of at least 6 characters |
 | `message_limit` | integer | 40 | Messages per page, clamped to `[1, 200]` |
 | `offset` | integer | 0 | Skip this many of the newest messages |
-| `content_chars` | integer | 1200 | Per-message cap, clamped to `[100, 8000]` |
+| `content_chars` | integer | 1200 | Per-message cap in characters (runes, not bytes), clamped to `[100, 8000]` |
 | `message_type` | string | — | Keep only `assistant` / `user` / `thinking` / `tool_use` / `tool_result` |
 
 **Exact id beats prefix.** A full id is looked up as an equality match
@@ -241,7 +247,7 @@ returned as columns + rows.
 |-----|------|---------|-------------|
 | `sql` | string | required | A single `SELECT` statement |
 | `row_limit` | integer | 100 | Clamped to `[1, 1000]` |
-| `cell_chars` | integer | 2000 | Per-cell cap, clamped to `[100, 20000]` |
+| `cell_chars` | integer | 2000 | Per-cell cap in characters (runes, not bytes), clamped to `[100, 20000]` |
 
 **Accepted surface: one SELECT.** The first keyword (after leading
 whitespace and comments) must be `SELECT`, and only one statement is
@@ -254,9 +260,14 @@ discover tables with `SELECT ... FROM information_schema.tables`.
 The statement is executed as the caller wrote it — comments are skipped
 for inspection, never rewritten away — wrapped as
 `SELECT * FROM (<stmt>) LIMIT row_limit+1` so the database applies the
-cap and the extra row reveals truncation. Deadline is 15 s, well above
-the 3 s the perception sensors use, because an agent-authored aggregate
-can legitimately be slower than a hook-blocking lookup.
+cap and the extra row reveals truncation.
+
+Deadlines: the HTTP client waits 15 s, well above the 3 s the perception
+sensors use, because an agent-authored aggregate can legitimately be
+slower than a hook-blocking lookup. Every other tool is capped at the 10 s
+MCP dispatch ceiling; `exec_query` raises its own to 20 s via
+`CallTimeout()` so the query fails with GreptimeDB's error rather than
+being cancelled from the outside first.
 
 The dashboard's `/api/query` remains an unchecked pass-through: it is
 same-origin and driven by TMA1's own JavaScript. The gate exists for the

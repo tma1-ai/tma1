@@ -11,9 +11,12 @@ import (
 	"github.com/tma1-ai/tma1/server/internal/strutil"
 )
 
-// matches_term is word-boundary based: "Cwd" does not match
-// "peerCwdFilter", a substring LIKE does. When the term pass finds
-// nothing we widen, and report which mode produced the hits.
+// matches_term is word-boundary based AND case-sensitive (verified on
+// GreptimeDB v1.2.0-beta.2: matches_term('Cat sat', 'cat') is false,
+// despite case_sensitive='false' on the index). "Cwd" therefore misses
+// "peerCwdFilter" on both counts. When the term pass finds nothing we
+// widen to a case-folded substring scan and report which mode produced
+// the hits — so a query typed in the wrong case still lands.
 const (
 	MatchModeTerm      = "term"
 	MatchModeSubstring = "substring"
@@ -339,7 +342,9 @@ func buildSearchCandidatesSQL(query, mode string, sids []string, sinceMin, limit
 
 func matchClause(query, mode string) string {
 	if mode == MatchModeSubstring {
-		return fmt.Sprintf("content LIKE '%%%s%%'", escapeSQLLike(query))
+		// lower() on both sides: the fallback exists partly to rescue a
+		// query whose case doesn't match what was written.
+		return fmt.Sprintf("lower(content) LIKE '%%%s%%'", escapeSQLLike(strings.ToLower(query)))
 	}
 	return fmt.Sprintf("matches_term(content, '%s')", escapeSQL(query))
 }
@@ -347,42 +352,41 @@ func matchClause(query, mode string) string {
 // snippetAround centres a window on the first occurrence of query.
 // Term matching can hit on a tokenised form that isn't a literal
 // substring, in which case we fall back to the head of the message.
+//
+// The window is measured in runes, not bytes: a byte radius gives a CJK
+// reader a third of the context an English one gets.
 func snippetAround(content, query string) string {
-	width := snippetRadius*2 + len(query)
-	if len(content) <= width {
+	runes := []rune(content)
+	qLen := len([]rune(query))
+	width := snippetRadius*2 + qLen
+	if len(runes) <= width {
 		return content
 	}
-	idx := strings.Index(strings.ToLower(content), strings.ToLower(query))
+	idx := runeIndexFold(runes, query)
 	if idx < 0 {
-		return strutil.SafeTruncate(content, width) + "…"
+		return string(runes[:width]) + "…"
 	}
-	start := idx - snippetRadius
-	if start < 0 {
-		start = 0
-	}
-	// Walk both cuts back to rune boundaries; a window landing mid-rune
-	// would emit invalid UTF-8.
-	for start > 0 && !isRuneStart(content[start]) {
-		start--
-	}
-	end := idx + len(query) + snippetRadius
-	if end > len(content) {
-		end = len(content)
-	}
-	for end < len(content) && !isRuneStart(content[end]) {
-		end++
-	}
-	out := content[start:end]
+	start := max(idx-snippetRadius, 0)
+	end := min(idx+qLen+snippetRadius, len(runes))
+	out := string(runes[start:end])
 	if start > 0 {
 		out = "…" + out
 	}
-	if end < len(content) {
+	if end < len(runes) {
 		out += "…"
 	}
 	return out
 }
 
-func isRuneStart(b byte) bool { return b&0xC0 != 0x80 }
+// runeIndexFold returns the rune offset of the first case-insensitive
+// occurrence of query, or -1.
+func runeIndexFold(runes []rune, query string) int {
+	byteIdx := strings.Index(strings.ToLower(string(runes)), strings.ToLower(query))
+	if byteIdx < 0 {
+		return -1
+	}
+	return len([]rune(strings.ToLower(string(runes))[:byteIdx]))
+}
 
 // TranscriptOptions parameterises GetSessionTranscript.
 type TranscriptOptions struct {
@@ -464,21 +468,13 @@ func (b *Bundler) GetSessionTranscript(ctx context.Context, opts TranscriptOptio
 	out := &SessionTranscript{SessionID: sid, Offset: offset}
 	b.fillTranscriptHeader(ctx, out)
 
-	// Fetch one extra row: its presence is what tells the caller there
-	// is an older page, without a second COUNT query. The signal comes
-	// from the raw row count, not the deduped slice — replayed JSONL
-	// leaves duplicates, and losing the probe row to dedup would report
-	// the end of history early.
-	msgs, rawRows, err := b.fetchSessionMessagesPage(ctx, sid, limit+1, offset, contentChars, msgType)
+	msgs, hasMore, err := b.fetchSessionMessagesPage(ctx, sid, limit, offset, contentChars, msgType)
 	if err != nil {
 		return nil, err
 	}
-	if rawRows > limit {
+	if hasMore {
 		out.HasMore = true
 		out.NextOffset = offset + limit
-	}
-	if len(msgs) > limit {
-		msgs = msgs[len(msgs)-limit:] // chronological order; drop the oldest
 	}
 	out.Messages = msgs
 	out.MessageCount = len(msgs)
@@ -572,8 +568,14 @@ func (b *Bundler) fillTranscriptHeader(ctx context.Context, t *SessionTranscript
 		escapeSQL(t.SessionID),
 	)
 	if _, rows, err := b.client.Query(ctx, hookSQL); err == nil && len(rows) > 0 {
-		t.StartedAt = time.UnixMilli(int64At(rows[0], 0))
-		t.LastActivityAt = time.UnixMilli(int64At(rows[0], 1))
+		// A session with no hook rows still yields one row, of NULLs.
+		// Guard on the raw value: time.UnixMilli(0) is 1970-01-01, which
+		// is not IsZero(), so converting first would suppress the
+		// fallback below and date JSONL-only sessions to the epoch.
+		if lastMs := int64At(rows[0], 1); lastMs > 0 {
+			t.StartedAt = time.UnixMilli(int64At(rows[0], 0))
+			t.LastActivityAt = time.UnixMilli(lastMs)
+		}
 	}
 	if attr, ok := b.attributionFor(ctx, []string{"'" + escapeSQL(t.SessionID) + "'"})[t.SessionID]; ok {
 		t.AgentSource = attr.AgentSource
@@ -586,8 +588,10 @@ func (b *Bundler) fillTranscriptHeader(ctx context.Context, t *SessionTranscript
 			escapeSQL(t.SessionID),
 		)
 		if _, rows, err := b.client.Query(ctx, msgSQL); err == nil && len(rows) > 0 {
-			t.StartedAt = time.UnixMilli(int64At(rows[0], 0))
-			t.LastActivityAt = time.UnixMilli(int64At(rows[0], 1))
+			if lastMs := int64At(rows[0], 1); lastMs > 0 {
+				t.StartedAt = time.UnixMilli(int64At(rows[0], 0))
+				t.LastActivityAt = time.UnixMilli(lastMs)
+			}
 		}
 	}
 	t.LastActivityAgo = relativeAge(t.LastActivityAt)
@@ -602,9 +606,12 @@ func (b *Bundler) fetchSessionMessages(ctx context.Context, sessionID string, li
 	return msgs, err
 }
 
-// fetchSessionMessagesPage also returns the number of rows the database
-// returned, before dedup — the caller needs that to detect another page.
-func (b *Bundler) fetchSessionMessagesPage(ctx context.Context, sessionID string, limit, offset, contentChars int, messageType string) ([]PeerMessage, int, error) {
+// fetchSessionMessagesPage returns one page plus whether an older page
+// exists. It asks the database for limit+1 rows and drops the extra one
+// BEFORE dedup: offsets index raw rows, so collapsing duplicates first
+// and trimming after would let a row that dedup merged reappear as the
+// first entry of the next page.
+func (b *Bundler) fetchSessionMessagesPage(ctx context.Context, sessionID string, limit, offset, contentChars int, messageType string) ([]PeerMessage, bool, error) {
 	typeFilter := ""
 	if messageType != "" {
 		typeFilter = fmt.Sprintf("AND message_type = '%s' ", escapeSQL(messageType))
@@ -622,11 +629,15 @@ func (b *Bundler) fetchSessionMessagesPage(ctx context.Context, sessionID string
 		   AND %s
 		   %s
 		 ORDER BY ts DESC LIMIT %d%s`,
-		escapeSQL(sessionID), syntheticMessageFilter, typeFilter, limit, offsetClause,
+		escapeSQL(sessionID), syntheticMessageFilter, typeFilter, limit+1, offsetClause,
 	)
 	_, rows, err := b.client.Query(ctx, sql)
 	if err != nil {
-		return nil, 0, fmt.Errorf("fetch session messages: %w", err)
+		return nil, false, fmt.Errorf("fetch session messages: %w", err)
+	}
+	hasMore := len(rows) > limit
+	if hasMore {
+		rows = rows[:limit] // rows are newest-first; the probe is the oldest
 	}
 	// Fetched DESC; flip to chronological for natural reading.
 	msgs := make([]PeerMessage, 0, len(rows))
@@ -634,9 +645,8 @@ func (b *Bundler) fetchSessionMessagesPage(ctx context.Context, sessionID string
 		r := rows[i]
 		content := stringAt(r, 3)
 		truncated := false
-		if contentChars > 0 && len(content) > contentChars {
-			content = strutil.SafeTruncate(content, contentChars)
-			truncated = true
+		if contentChars > 0 {
+			content, truncated = strutil.TruncateRunes(content, contentChars)
 		}
 		msgs = append(msgs, PeerMessage{
 			Timestamp:    time.UnixMilli(int64At(r, 0)),
@@ -650,7 +660,7 @@ func (b *Bundler) fetchSessionMessagesPage(ctx context.Context, sessionID string
 			OutputTokens: int64At(r, 7),
 		})
 	}
-	return dedupPeerMessages(msgs), len(rows), nil
+	return dedupPeerMessages(msgs), hasMore, nil
 }
 
 func clampInt(n, min, max, fallback int) int {

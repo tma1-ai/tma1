@@ -28,3 +28,24 @@ func SafeTruncate(s string, maxBytes int) string {
 	}
 	return s[:end]
 }
+
+// TruncateRunes caps s at maxRunes characters and reports whether it had
+// to cut. Counting runes rather than bytes matters for any limit exposed
+// as a "characters" knob: a 1200-byte cap gives a CJK reader a third of
+// what the same number gives an English one.
+func TruncateRunes(s string, maxRunes int) (string, bool) {
+	if maxRunes <= 0 {
+		return "", s != ""
+	}
+	if utf8.RuneCountInString(s) <= maxRunes {
+		return s, false
+	}
+	n := 0
+	for i := range s {
+		if n == maxRunes {
+			return s[:i], true
+		}
+		n++
+	}
+	return s, false
+}

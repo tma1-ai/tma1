@@ -117,7 +117,7 @@ func TestSearchSessionsScopesBeforeSearchingAndFallsBackInScope(t *testing.T) {
 		{match: "matches_term", rows: [][]any{}},
 		{match: "ORDER BY ts DESC", cols: []string{"ts_ms", "role", "message_type", "content"},
 			rows: [][]any{{float64(1000), "assistant", "assistant", "a needle here"}}},
-		{match: "content LIKE", cols: []string{"session_id", "last_ms", "hits"},
+		{match: "lower(content) LIKE", cols: []string{"session_id", "last_ms", "hits"},
 			rows: [][]any{{"s-1", float64(1000), float64(2)}}},
 	})
 
@@ -218,6 +218,60 @@ func TestGetSessionTranscriptAmbiguousPrefix(t *testing.T) {
 	}
 }
 
+// A session ingested from JSONL has no hook rows. MIN/MAX over zero rows
+// still returns one row, of NULLs, and time.UnixMilli(0) is 1970 rather
+// than the zero time — so converting before checking would suppress the
+// message-table fallback and date the session to the epoch.
+func TestGetSessionTranscriptFallsBackToMessageTimestamps(t *testing.T) {
+	b, _ := newFakeBundler(t, []fakeRule{
+		{match: "FROM tma1_messages WHERE session_id", cols: []string{"started_ms", "last_ms"},
+			rows: [][]any{{float64(1_700_000_000_000), float64(1_700_000_060_000)}}},
+		{match: "ORDER BY ts DESC", cols: messageCols,
+			rows: [][]any{msgRow(1_700_000_060_000, "assistant", "assistant", "hi")}},
+		{match: "FROM tma1_hook_events WHERE session_id", cols: []string{"started_ms", "last_ms"},
+			rows: [][]any{{nil, nil}}},
+		{match: "DISTINCT session_id", cols: []string{"session_id"}, rows: [][]any{{"jsonl-only"}}},
+	})
+
+	out, err := b.GetSessionTranscript(context.Background(), TranscriptOptions{SessionID: "jsonl-only"})
+	if err != nil {
+		t.Fatalf("GetSessionTranscript: %v", err)
+	}
+	if out.LastActivityAt.Year() != 2023 {
+		t.Errorf("last_activity_at = %v, want the message timestamp (2023), not the epoch",
+			out.LastActivityAt)
+	}
+}
+
+// Dedup runs after the probe row is dropped. Doing it the other way
+// round lets a row that dedup collapsed reappear as the first entry of
+// the next page, because offsets index raw rows.
+func TestGetSessionTranscriptPagesWithoutRepeating(t *testing.T) {
+	dup := msgRow(1000, "assistant", "assistant", "same text")
+	uniq := msgRow(900, "assistant", "assistant", "older, distinct")
+	b, _ := newFakeBundler(t, []fakeRule{
+		// Newest first: [dup, dup, uniq]. With limit 2 the probe is uniq.
+		{match: "ORDER BY ts DESC", cols: messageCols, rows: [][]any{dup, dup, uniq}},
+		{match: "DISTINCT session_id", cols: []string{"session_id"}, rows: [][]any{{"sess-1"}}},
+	})
+
+	page1, err := b.GetSessionTranscript(context.Background(), TranscriptOptions{
+		SessionID:    "sess-1",
+		MessageLimit: 2,
+	})
+	if err != nil {
+		t.Fatalf("GetSessionTranscript: %v", err)
+	}
+	if !page1.HasMore || page1.NextOffset != 2 {
+		t.Fatalf("has_more=%v next_offset=%d, want true/2", page1.HasMore, page1.NextOffset)
+	}
+	for _, m := range page1.Messages {
+		if m.Content == "older, distinct" {
+			t.Error("the probe row leaked into page 1; offset 2 will return it again")
+		}
+	}
+}
+
 func TestGetSessionTranscriptShortIDRejected(t *testing.T) {
 	b, _ := newFakeBundler(t, nil)
 	if _, err := b.GetSessionTranscript(context.Background(), TranscriptOptions{SessionID: "abc"}); err == nil {
@@ -303,8 +357,10 @@ func TestFetchSessionMessagesFiltersSyntheticRowsAndTruncates(t *testing.T) {
 	if !msgs[0].Truncated {
 		t.Error("over-long content should be flagged truncated")
 	}
-	if len(msgs[0].Content) > 100 || !isValidUTF8(msgs[0].Content) {
-		t.Errorf("content should be cut to at most 100 bytes on a rune boundary, got %d bytes", len(msgs[0].Content))
+	// content_chars counts characters, not bytes: 100 two-byte runes must
+	// survive as 100 characters, not 50.
+	if n := len([]rune(msgs[0].Content)); n != 100 || !isValidUTF8(msgs[0].Content) {
+		t.Errorf("content should be cut to 100 runes, got %d", n)
 	}
 }
 

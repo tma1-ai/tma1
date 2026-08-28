@@ -45,8 +45,8 @@ func TestBuildSearchCandidatesSQLScoped(t *testing.T) {
 	if !strings.Contains(sub, "AND session_id IN ('a','b')") {
 		t.Errorf("substring pass dropped the scope:\n%s", sub)
 	}
-	if !strings.Contains(sub, "content LIKE '%peer%'") {
-		t.Errorf("substring pass missing LIKE clause:\n%s", sub)
+	if !strings.Contains(sub, "lower(content) LIKE '%peer%'") {
+		t.Errorf("substring pass missing case-folded LIKE clause:\n%s", sub)
 	}
 
 	unscoped := buildSearchCandidatesSQL("peer", MatchModeTerm, nil, 120, 5)
@@ -59,8 +59,9 @@ func TestMatchClauseEscapes(t *testing.T) {
 	if got, want := matchClause("it's", MatchModeTerm), "matches_term(content, 'it''s')"; got != want {
 		t.Errorf("matchClause(term) = %q, want %q", got, want)
 	}
-	// LIKE wildcards in user input must not widen the pattern.
-	if got, want := matchClause("50%_off", MatchModeSubstring), `content LIKE '%50\%\_off%'`; got != want {
+	// LIKE wildcards in user input must not widen the pattern, and the
+	// fallback folds case — it exists partly to rescue a mistyped case.
+	if got, want := matchClause("50%_OFF", MatchModeSubstring), `lower(content) LIKE '%50\%\_off%'`; got != want {
 		t.Errorf("matchClause(substring) = %q, want %q", got, want)
 	}
 }
@@ -79,8 +80,16 @@ func TestSnippetAround(t *testing.T) {
 	if !strings.HasPrefix(got, "…") || !strings.HasSuffix(got, "…") {
 		t.Errorf("snippet should mark both cuts with ellipses: %q", got)
 	}
-	if len(got) > snippetRadius*2+len("NEEDLE")+8 {
-		t.Errorf("snippet too wide (%d bytes): %q", len(got), got)
+	if n := len([]rune(got)); n > snippetRadius*2+len("NEEDLE")+2 {
+		t.Errorf("snippet too wide (%d runes): %q", n, got)
+	}
+
+	// A CJK snippet must get the same number of characters as an ASCII
+	// one, not a third of them.
+	cjkWide := strings.Repeat("观", 400) + "关键字" + strings.Repeat("测", 400)
+	wide := snippetAround(cjkWide, "关键字")
+	if n := len([]rune(wide)); n < snippetRadius*2 {
+		t.Errorf("CJK snippet only %d runes; radius is measured in runes, not bytes", n)
 	}
 
 	// Term matching can hit on a tokenised form that isn't a literal

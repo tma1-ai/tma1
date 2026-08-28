@@ -49,10 +49,12 @@ func (b *Bundler) ExecQuery(ctx context.Context, sql string, rowLimit, cellChars
 	for _, r := range rows {
 		for i, cell := range r {
 			s, ok := cell.(string)
-			if !ok || len(s) <= cellChars {
+			if !ok {
 				continue
 			}
-			r[i] = strutil.SafeTruncate(s, cellChars) + "…"
+			if cut, truncated := strutil.TruncateRunes(s, cellChars); truncated {
+				r[i] = cut + "…"
+			}
 		}
 	}
 	out.Rows = rows
