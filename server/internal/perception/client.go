@@ -7,6 +7,7 @@
 package perception
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -88,7 +89,12 @@ func (c *Client) Query(ctx context.Context, sql string) ([]string, [][]any, erro
 	}
 
 	var r queryResp
-	if err := json.Unmarshal(body, &r); err != nil {
+	dec := json.NewDecoder(bytes.NewReader(body))
+	// Rows are decoded into []any. Keep integer tokens as json.Number so
+	// exec_query does not silently round BIGINT values above 2^53 through
+	// float64 before returning them to the agent.
+	dec.UseNumber()
+	if err := dec.Decode(&r); err != nil {
 		return nil, nil, fmt.Errorf("perception parse response: %w (body=%q)", err, snippet(body))
 	}
 	if r.Code != 0 || r.Error != "" {

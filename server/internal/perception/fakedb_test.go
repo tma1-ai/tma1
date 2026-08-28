@@ -439,3 +439,22 @@ func TestExecQueryCapsRowsAndCells(t *testing.T) {
 		t.Errorf("cell should be truncated, got %d runes", len([]rune(cell)))
 	}
 }
+
+func TestExecQueryPreservesLargeIntegers(t *testing.T) {
+	const want = "9007199254740993" // 2^53 + 1; float64 cannot represent it exactly.
+	b, _ := newFakeBundler(t, []fakeRule{
+		{match: "SELECT * FROM (", cols: []string{"value"}, rows: [][]any{{json.Number(want)}}},
+	})
+
+	res, err := b.ExecQuery(context.Background(), "SELECT 9007199254740993 AS value", 1, 100)
+	if err != nil {
+		t.Fatalf("ExecQuery: %v", err)
+	}
+	got, ok := res.Rows[0][0].(json.Number)
+	if !ok {
+		t.Fatalf("value type = %T, want json.Number", res.Rows[0][0])
+	}
+	if got.String() != want {
+		t.Errorf("value = %s, want %s", got, want)
+	}
+}
