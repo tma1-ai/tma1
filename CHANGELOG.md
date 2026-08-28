@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — Local session management
+## v0.2.0-alpha15 — Local session management
 
 The session data was already all on disk; this release gives the agent a
 read path into it.
