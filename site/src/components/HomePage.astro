@@ -237,10 +237,30 @@ const showcase: ShowcaseEntry[] = [
       })}
     </div>
     {t.features.cards[7] && (
-      <div class="feature-standalone">
+      <div class="feature-standalone feature-standalone--demo">
         <div class="feature-icon">{t.features.cards[7].num}</div>
         <h3>{t.features.cards[7].title}</h3>
         <p set:html={t.features.cards[7].desc} />
+        <p class="peer-snippet-intro" set:html={t.search_demo.intro} />
+        <div class="terminal">
+          <div class="terminal-header">
+            <span class="dot red"></span>
+            <span class="dot yellow"></span>
+            <span class="dot green"></span>
+            <span class="terminal-title">{t.search_demo.title_bar}</span>
+          </div>
+          <div class="terminal-body peer-body">
+            {t.search_demo.lines.map(line => (
+              line.kind === 'blank' ? (
+                <div class="line"><span>&nbsp;</span></div>
+              ) : line.kind === 'prompt' ? (
+                <div class="line"><span class="prompt">$</span><span class="peer-prompt">{line.text}</span></div>
+              ) : (
+                <div class="line peer-output"><span>{line.text}</span></div>
+              )
+            ))}
+          </div>
+        </div>
       </div>
     )}
   </section>
@@ -636,6 +656,19 @@ const showcase: ShowcaseEntry[] = [
   }
 
   /* Standalone feature card (Full-text search) */
+  .feature-standalone--demo {
+    max-width: 860px;
+  }
+
+  .feature-standalone--demo .peer-snippet-intro,
+  .feature-standalone--demo .terminal {
+    text-align: left;
+  }
+
+  .feature-standalone--demo .peer-snippet-intro {
+    margin-top: 24px;
+  }
+
   .feature-standalone {
     background: var(--bg-card);
     border: 1px solid var(--border);

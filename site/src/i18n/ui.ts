@@ -33,6 +33,11 @@ export interface T {
     title_bar: string;
     lines: Array<{ kind: 'prompt' | 'output' | 'blank'; text?: string }>;
   };
+  search_demo: {
+    intro: string;
+    title_bar: string;
+    lines: Array<{ kind: 'prompt' | 'output' | 'blank'; text?: string }>;
+  };
   how: {
     kicker: string; title: string; desc: string;
     steps: Array<{ num: string; title: string; desc: string }>;
@@ -133,6 +138,21 @@ export const en: T = {
       { kind: 'output', text: '  3. Missing rate-limit on /login' },
       { kind: 'blank' },
       { kind: 'output', text: 'Want me to address all three or pick one?' },
+    ],
+  },
+  search_demo: {
+    intro: 'Six weeks of sessions are on disk. The agent searches them itself, then reads the one that matters — via the <code>/tma1-search</code> skill.',
+    title_bar: 'claude code · in your project',
+    lines: [
+      { kind: 'prompt', text: '/tma1-search retry backoff' },
+      { kind: 'blank' },
+      { kind: 'output', text: 'Three sessions match. The most recent is Codex,' },
+      { kind: 'output', text: 'two days ago:' },
+      { kind: 'blank' },
+      { kind: 'output', text: '  "capped the retry at 30s and added full jitter,' },
+      { kind: 'output', text: '   internal/retry/backoff.go:42"' },
+      { kind: 'blank' },
+      { kind: 'output', text: 'Open that session for the full conversation?' },
     ],
   },
   how: {
@@ -253,6 +273,20 @@ export const zh: T = {
       { kind: 'output', text: 'Want me to address all three or pick one?' },
     ],
   },
+  search_demo: {
+    intro: '磁盘上存着六周的会话。agent 自己检索，再把相关的那次完整读回来——通过 <code>/tma1-search</code> skill。',
+    title_bar: 'claude code · in your project',
+    lines: [
+      { kind: 'prompt', text: '/tma1-search retry backoff' },
+      { kind: 'blank' },
+      { kind: 'output', text: '命中三次会话，最近的一次是 Codex，两天前：' },
+      { kind: 'blank' },
+      { kind: 'output', text: '  "把重试上限压到 30s 并加了 full jitter，' },
+      { kind: 'output', text: '   internal/retry/backoff.go:42"' },
+      { kind: 'blank' },
+      { kind: 'output', text: '要打开这次会话看完整对话吗？' },
+    ],
+  },
   how: {
     kicker: '工作原理', title: '安装配置',
     desc: '把接入指令粘贴给 agent，它会自动完成配置；也可以手动安装：',
@@ -369,6 +403,21 @@ export const es: T = {
       { kind: 'output', text: '  3. Missing rate-limit on /login' },
       { kind: 'blank' },
       { kind: 'output', text: 'Want me to address all three or pick one?' },
+    ],
+  },
+  search_demo: {
+    intro: 'Seis semanas de sesiones en disco. El agente las busca por sí mismo y luego lee la que importa, con la skill <code>/tma1-search</code>.',
+    title_bar: 'claude code · in your project',
+    lines: [
+      { kind: 'prompt', text: '/tma1-search retry backoff' },
+      { kind: 'blank' },
+      { kind: 'output', text: 'Coinciden tres sesiones. La más reciente es Codex,' },
+      { kind: 'output', text: 'hace dos días:' },
+      { kind: 'blank' },
+      { kind: 'output', text: '  "limité el retry a 30s y agregué full jitter,' },
+      { kind: 'output', text: '   internal/retry/backoff.go:42"' },
+      { kind: 'blank' },
+      { kind: 'output', text: '¿Abro esa sesión para ver la conversación completa?' },
     ],
   },
   how: {

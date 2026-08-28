@@ -126,7 +126,10 @@ It exposes:
 `/tma1-peer codex` wraps `get_peer_sessions`: Claude Code reads Codex's
 work on the same project verbatim. The Codex-side skill does the reverse.
 
-Session history is queryable by the agent itself:
+## Session history
+
+Every session from every agent on the machine is stored locally and stays
+queryable, by you in the dashboard and by the agent through MCP:
 
 ```
 /tma1-search retry backoff        # which past sessions discussed this?
@@ -134,9 +137,17 @@ Session history is queryable by the agent itself:
 /tma1-peer self --limit 3         # what did I do here earlier today?
 ```
 
-`search_sessions` returns snippets and a `session_id`.
+`search_sessions` scopes to the current project by default and returns
+matching sessions with snippets and a `session_id`. `--all-projects`
+widens the scope; `--days N` widens the window.
+
 `get_session_transcript` accepts that id, or the 8-character abbreviation
-from the `<tma1-context>` block, and pages through the conversation.
+from the `<tma1-context>` block, and pages through the conversation with
+`offset` / `has_more`.
+
+Keyword matching runs against a FULLTEXT index and is word-boundary based
+and case-sensitive. When that pass returns nothing, the search widens to a
+case-folded substring scan and reports `match_mode: "substring"`.
 
 ## Install
 
