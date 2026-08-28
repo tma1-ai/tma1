@@ -14,12 +14,12 @@ import (
 	"github.com/tma1-ai/tma1/server/internal/sqlutil"
 )
 
-// AttributionWindow bounds exact file-path correlation around an fsnotify event.
+// AttributionWindow bounds exact file-path correlation before an fsnotify event.
 const AttributionWindow = 5 * time.Second
 
 // activeToolLookback bounds the scan for a tool invocation that was still
-// running when fsnotify delivered the change. Unmatched changes remain unknown,
-// so an invocation older than this cannot turn into a false human attribution.
+// running when fsnotify delivered the change. Older invocations cannot be
+// mistaken for active tools.
 const activeToolLookback = 30 * time.Minute
 
 // activeToolCacheTTL coalesces the burst of per-path fsnotify events produced
@@ -42,7 +42,6 @@ type HookAttributor struct {
 
 type activeToolCacheEntry struct {
 	checkedAt time.Time
-	active    bool
 }
 
 // NewHookAttributor returns an Attributor querying GreptimeDB on localhost:<httpPort>.
@@ -57,8 +56,8 @@ func NewHookAttributor(httpPort int) *HookAttributor {
 // Classify returns "agent" when hook data ties a file change to agent activity.
 // The signal sources are, in order:
 //
-//  1. A recent PreToolUse whose extracted file path matches exactly.
-//  2. A tool running in the same project when fsnotify delivered the change.
+//  1. A recent mutating PreToolUse whose extracted file path matches exactly.
+//  2. A mutating tool running in the same project when fsnotify delivered the change.
 //
 // Hook telemetry cannot prove that an unmatched change came from a human.
 // Missing evidence and query failures therefore return "unknown".
@@ -70,21 +69,24 @@ func (a *HookAttributor) Classify(ctx context.Context, projectRoot, filePath str
 	if root == "" {
 		return AttributionUnknown
 	}
-	if active, ok := a.cachedActiveTool(root); ok && active {
+	if a.cachedActiveTool(root) {
 		return AttributionAgent
 	}
 	low := when.Add(-AttributionWindow).UnixMilli()
-	high := when.Add(AttributionWindow).UnixMilli()
+	high := when.UnixMilli()
 
 	// Prefer the ingest-side tool_file_path column; fall back to extraction
-	// for rows written before the derived column was introduced.
+	// for rows written before the derived column was introduced. Read-only
+	// tools are excluded because reading a path is not evidence that the agent
+	// caused a concurrent write to it.
 	editSQL := fmt.Sprintf(
 		`SELECT COUNT(*) FROM tma1_hook_events
 		 WHERE event_type = 'PreToolUse'
 		   AND ts BETWEEN %d AND %d
+		   AND %s
 		   AND COALESCE(tool_file_path,
 		                regexp_match(tool_input, '"file_path":"([^"]+)"')[1]) = '%s'`,
-		low, high, escapeSQLLiteral(filePath),
+		low, high, mutatingToolPredicate("tool_name"), escapeSQLLiteral(filePath),
 	)
 	if count, err := a.queryCount(ctx, editSQL); err != nil {
 		return AttributionUnknown
@@ -95,15 +97,10 @@ func (a *HookAttributor) Classify(ctx context.Context, projectRoot, filePath str
 	// Indirect writes such as builds, git commands, screenshot tools, and
 	// atomic-save temporary files often do not name every changed path. Pair
 	// PreToolUse/PostToolUse by tool_use_id and only consider invocations whose
-	// cwd is the watched project or one of its subdirectories.
+	// cwd is the watched project or one of its subdirectories. Stop and
+	// SessionEnd close orphaned tool calls left by interruption or cancellation.
 	activeLow := when.Add(-activeToolLookback).UnixMilli()
 	activeHigh := when.UnixMilli()
-	if active, ok := a.cachedActiveTool(root); ok {
-		if active {
-			return AttributionAgent
-		}
-		return AttributionUnknown
-	}
 	activeSQL := fmt.Sprintf(
 		`SELECT COUNT(*) FROM tma1_hook_events p
 		 LEFT JOIN tma1_hook_events q
@@ -112,13 +109,24 @@ func (a *HookAttributor) Classify(ctx context.Context, projectRoot, filePath str
 		  AND q.tool_use_id = p.tool_use_id
 		  AND q.event_type IN ('PostToolUse','PostToolUseFailure')
 		  AND q.ts >= p.ts
-		  AND CAST(q.ts AS BIGINT) <= %d
+		  AND q.ts BETWEEN %d AND %d
+		 LEFT JOIN tma1_hook_events s
+		   ON s.agent_source = p.agent_source
+		  AND s.session_id = p.session_id
+		  AND s.event_type IN ('Stop','SessionEnd')
+		  AND s.ts >= p.ts
+		  AND s.ts BETWEEN %d AND %d
 		 WHERE p.event_type = 'PreToolUse'
 		   AND p.tool_use_id IS NOT NULL AND p.tool_use_id != ''
 		   AND p.ts BETWEEN %d AND %d
+		   AND %s
 		   AND (p.cwd = '%s' OR p.cwd LIKE '%s/%%' OR p.cwd LIKE '%s\\%%')
-		   AND q.tool_use_id IS NULL`,
-		activeHigh, activeLow, activeHigh,
+		   AND q.tool_use_id IS NULL
+		   AND s.session_id IS NULL`,
+		activeLow, activeHigh,
+		activeLow, activeHigh,
+		activeLow, activeHigh,
+		mutatingToolPredicate("p.tool_name"),
 		escapeSQLLiteral(root),
 		escapeSQLLikeLiteral(root),
 		escapeSQLLikeLiteral(root),
@@ -127,28 +135,38 @@ func (a *HookAttributor) Classify(ctx context.Context, projectRoot, filePath str
 	if err != nil {
 		return AttributionUnknown
 	}
-	a.storeActiveTool(root, count > 0)
 	if count > 0 {
+		a.storeActiveTool(root)
 		return AttributionAgent
 	}
 
 	return AttributionUnknown
 }
 
-func (a *HookAttributor) cachedActiveTool(root string) (bool, bool) {
+func (a *HookAttributor) cachedActiveTool(root string) bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	entry, ok := a.active[root]
 	if !ok || time.Since(entry.checkedAt) >= activeToolCacheTTL {
-		return false, false
+		return false
 	}
-	return entry.active, true
+	return true
 }
 
-func (a *HookAttributor) storeActiveTool(root string, active bool) {
+func (a *HookAttributor) storeActiveTool(root string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.active[root] = activeToolCacheEntry{checkedAt: time.Now(), active: active}
+	a.active[root] = activeToolCacheEntry{checkedAt: time.Now()}
+}
+
+// mutatingToolPredicate returns a positive capability check. Unknown tools are
+// not treated as writers: failing to recognize a tool may produce an external
+// warning, but it cannot hide a real external modification as agent-caused.
+func mutatingToolPredicate(column string) string {
+	return fmt.Sprintf(
+		`LOWER(%[1]s) IN ('edit','write','multiedit','notebookedit','bash','shell','exec','exec_command','apply_patch','mcp__plugin_playwright_playwright__browser_take_screenshot')`,
+		column,
+	)
 }
 
 func (a *HookAttributor) queryCount(ctx context.Context, sql string) (int, error) {

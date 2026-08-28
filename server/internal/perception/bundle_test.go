@@ -84,6 +84,26 @@ func TestRenderSummaryIncludesKeyFields(t *testing.T) {
 	}
 }
 
+func TestRenderSummaryUsesExternalChangeWording(t *testing.T) {
+	b := &Bundle{
+		Project: "tma1",
+		External: &ExternalChanges{
+			ExternalCount: 1,
+			ExternalChanges: []ExternalChange{
+				{FilePath: "/repo/file.go", Attribution: "unknown"},
+			},
+		},
+	}
+
+	got := b.RenderSummary()
+	if !strings.Contains(got, "external_changes: 1") {
+		t.Fatalf("external change count missing: %q", got)
+	}
+	if strings.Contains(got, "human") {
+		t.Fatalf("external change summary claims a human source: %q", got)
+	}
+}
+
 func TestRenderSummaryStaysShort(t *testing.T) {
 	// 60 tools / 80 files would explode a naive renderer; the bundle should cap each.
 	state := &SessionState{

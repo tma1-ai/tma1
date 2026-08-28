@@ -111,7 +111,7 @@ export const en: T = {
       {
         kind: 'stale_file_view',
         severity: 'HIGH',
-        narrative: 'A human edited the same file the agent was about to overwrite.',
+        narrative: 'The file changed outside observed agent writes before the agent edited it.',
         // verbatim — do not translate (anomaly.go::stale_file_view)
         suggestion: 'Re-read auth.go before the next edit — your in-memory copy is older than what’s on disk.',
         footer: 'injected into next user_prompt_submit',
@@ -345,7 +345,7 @@ export const es: T = {
       {
         kind: 'stale_file_view',
         severity: 'HIGH',
-        narrative: 'Un humano editó el mismo archivo que el agente estaba por sobrescribir.',
+        narrative: 'El archivo cambió fuera de las escrituras observadas del agente antes de que el agente lo editara.',
         // verbatim — do not translate
         suggestion: 'Re-read auth.go before the next edit — your in-memory copy is older than what’s on disk.',
         footer: 'injected into next user_prompt_submit',

@@ -8,12 +8,12 @@ import (
 
 // externalChangesTableDDL creates tma1_external_changes.
 //
-// Captures file-system + git events for any project the agent has touched,
-// so the perception layer can tell an agent "while you were away, a human
-// modified src/auth.rs and committed README.md". Append-only.
+// Captures file-system + git events for any project the agent has touched, so
+// the perception layer can report changes outside observed agent writes.
+// Append-only.
 //
 // project + change_type + attribution are the dominant filters (every
-// R-stale-view / R-human-modified query uses all three) and all are
+// R-stale-view / R-external-modified query uses all three) and all are
 // low-cardinality. Make them PRIMARY KEY for locality per the
 // GreptimeDB design-table guide.
 var externalChangesTableDDL = `CREATE TABLE IF NOT EXISTS tma1_external_changes (

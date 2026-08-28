@@ -252,7 +252,7 @@ func (w *projectWatcher) pollGit() {
 			ChangeType:  ChangeTypeGitBranchSwitch,
 			GitSHA:      sha,
 			GitMessage:  "branch: " + w.lastGitBranch + " → " + branch,
-			Attribution: AttributionHuman, // git commands ≈ human by default
+			Attribution: AttributionUnknown,
 			Host:        w.cfg.Host,
 		})
 		w.lastGitBranch = branch
@@ -267,7 +267,7 @@ func (w *projectWatcher) pollGit() {
 			ChangeType:  ChangeTypeGitCommit,
 			GitSHA:      sha,
 			GitMessage:  msg,
-			Attribution: AttributionHuman,
+			Attribution: AttributionUnknown,
 			Host:        w.cfg.Host,
 		})
 	}

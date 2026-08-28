@@ -144,7 +144,7 @@ func (b *Bundler) BuildBundle(ctx context.Context, sessionID, cwd string) *Bundl
 		}
 		bundle.Build = status
 
-		// External changes: human-attributed file changes + git activity
+		// External changes: unattributed file changes + git activity
 		// in the last 30 minutes (the default window). Agent-attributed
 		// changes are filtered out by GetExternalChanges itself.
 		ext, err := b.GetExternalChanges(ctx, bundle.Project, time.Now().Add(-30*time.Minute))
@@ -329,16 +329,16 @@ func renderBuildBlock(sb *strings.Builder, bs *BuildStatus) {
 	}
 }
 
-// renderExternalBlock — human-attributed file changes + most recent git
+// renderExternalBlock — unattributed file changes + most recent git
 // event since the bundle's window.
 func renderExternalBlock(sb *strings.Builder, ext *ExternalChanges) {
-	if ext == nil || (ext.HumanCount == 0 && ext.GitCount == 0) {
+	if ext == nil || (ext.ExternalCount == 0 && ext.GitCount == 0) {
 		return
 	}
-	if ext.HumanCount > 0 {
-		fmt.Fprintf(sb, "external_human_changes: %d\n", ext.HumanCount)
+	if ext.ExternalCount > 0 {
+		fmt.Fprintf(sb, "external_changes: %d\n", ext.ExternalCount)
 		short := make([]string, 0, 3)
-		for i, c := range ext.HumanChanges {
+		for i, c := range ext.ExternalChanges {
 			if i >= 3 {
 				break
 			}

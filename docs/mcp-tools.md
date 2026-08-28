@@ -39,7 +39,7 @@ switched directories, or as a "what does TMA1 know right now" probe.
 ## get_session_state
 
 Full state for one session: tool history aggregates, token usage,
-current focus, recent files, last build error, external human changes
+current focus, recent files, last build error, external changes
 during the session.
 
 | Arg | Type | Default | Description |
@@ -84,7 +84,7 @@ the agent doesn't act on a stale failure).
 ## get_external_changes
 
 Files modified outside the agent loop, plus git commits and branch
-moves, classified as `human` or `agent` attribution.
+moves, classified as observed `agent` writes or `unknown` source.
 
 | Arg | Type | Default | Description |
 |-----|------|---------|-------------|

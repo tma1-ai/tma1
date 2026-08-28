@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-func TestHookAttributorUsesExactPathFromAnyTool(t *testing.T) {
+func TestHookAttributorUsesExactPathFromMutatingTool(t *testing.T) {
 	attributor, queries := newCountingAttributor(t, 1)
 
 	got := attributor.Classify(context.Background(), "/repo/tma1", "/repo/tma1/output.png", time.UnixMilli(10_000))
@@ -20,8 +20,8 @@ func TestHookAttributorUsesExactPathFromAnyTool(t *testing.T) {
 	if len(*queries) != 1 {
 		t.Fatalf("queries = %d, want 1", len(*queries))
 	}
-	if strings.Contains((*queries)[0], "tool_name IN") {
-		t.Fatalf("exact path attribution must not be limited to hard-coded tool names: %s", (*queries)[0])
+	if !strings.Contains((*queries)[0], "LOWER(tool_name) IN") {
+		t.Fatalf("exact path attribution must require a mutating tool: %s", (*queries)[0])
 	}
 }
 
@@ -40,22 +40,18 @@ func TestHookAttributorUsesActiveProjectToolForIndirectWrite(t *testing.T) {
 		"LEFT JOIN tma1_hook_events q",
 		"q.tool_use_id = p.tool_use_id",
 		"q.event_type IN ('PostToolUse','PostToolUseFailure')",
-		"CAST(q.ts AS BIGINT) <= 10000",
+		"q.ts BETWEEN -1790000 AND 10000",
+		"s.event_type IN ('Stop','SessionEnd')",
+		"s.ts BETWEEN -1790000 AND 10000",
 		"p.ts BETWEEN -1790000 AND 10000",
+		"LOWER(p.tool_name) IN",
 		"p.cwd = '/repo/tma1'",
 		"q.tool_use_id IS NULL",
+		"s.session_id IS NULL",
 	} {
 		if !strings.Contains(activeSQL, fragment) {
 			t.Errorf("active-tool query missing %q: %s", fragment, activeSQL)
 		}
-	}
-
-	got = attributor.Classify(context.Background(), "/repo/tma1", "/repo/tma1/generated/other.go", time.UnixMilli(10_001))
-	if got != AttributionAgent {
-		t.Fatalf("cached Classify() = %q, want %q", got, AttributionAgent)
-	}
-	if len(*queries) != 2 {
-		t.Fatalf("cached classification issued another query; queries = %d, want 2", len(*queries))
 	}
 }
 
@@ -65,6 +61,33 @@ func TestHookAttributorDoesNotInferHumanFromMissingHookEvidence(t *testing.T) {
 	got := attributor.Classify(context.Background(), "/repo/tma1", "/repo/tma1/notes.txt", time.UnixMilli(10_000))
 	if got != AttributionUnknown {
 		t.Fatalf("Classify() = %q, want %q", got, AttributionUnknown)
+	}
+}
+
+func TestMutatingToolPredicateExcludesReadOnlyAndInteractiveTools(t *testing.T) {
+	predicate := strings.ToLower(mutatingToolPredicate("tool_name"))
+	for _, name := range []string{"read", "grep", "glob", "askuserquestion", "exitplanmode"} {
+		if strings.Contains(predicate, "'"+name+"'") {
+			t.Errorf("mutating predicate contains non-mutating tool %q: %s", name, predicate)
+		}
+	}
+	for _, name := range []string{"edit", "write", "bash", "exec_command", "apply_patch"} {
+		if !strings.Contains(predicate, "'"+name+"'") {
+			t.Errorf("mutating predicate missing tool %q: %s", name, predicate)
+		}
+	}
+}
+
+func TestHookAttributorActiveCacheExpiry(t *testing.T) {
+	attributor := NewHookAttributor(1)
+	attributor.active["fresh"] = activeToolCacheEntry{checkedAt: time.Now().Add(time.Minute)}
+	attributor.active["expired"] = activeToolCacheEntry{checkedAt: time.Now().Add(-time.Minute)}
+
+	if !attributor.cachedActiveTool("fresh") {
+		t.Fatal("future cache entry should be active")
+	}
+	if attributor.cachedActiveTool("expired") {
+		t.Fatal("expired cache entry should be inactive")
 	}
 }
 

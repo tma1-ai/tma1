@@ -120,11 +120,11 @@ func digestBuild(bs *BuildStatus) string {
 }
 
 func digestExternal(ec *ExternalChanges) string {
-	if ec == nil || (ec.HumanCount == 0 && ec.GitCount == 0) {
+	if ec == nil || (ec.ExternalCount == 0 && ec.GitCount == 0) {
 		return ""
 	}
-	paths := make([]string, 0, len(ec.HumanChanges))
-	for _, c := range ec.HumanChanges {
+	paths := make([]string, 0, len(ec.ExternalChanges))
+	for _, c := range ec.ExternalChanges {
 		paths = append(paths, c.ChangeType+":"+c.FilePath)
 	}
 	sort.Strings(paths)
@@ -160,4 +160,3 @@ func shortHash(s string) string {
 	h := sha256.Sum256([]byte(s))
 	return hex.EncodeToString(h[:8])
 }
-

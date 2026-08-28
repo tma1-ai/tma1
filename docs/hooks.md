@@ -39,10 +39,10 @@ tools: Bash×18, Edit×12, Read×9, TaskUpdate×4
 recent_files: .../perception/peer.go, .../mcp/tools.go, .../hooks/install_cc.go
 build: make (running)
 build_last_error (6m ago, may have recovered): exit code 1 ...
-external_human_changes: 3
+external_changes: 3
 external_files: .../path/to/file.go
 anomalies:
-  - [MEDIUM] human_modified_during_session — Re-read the listed files before assuming your in-memory copy is current.
+  - [MEDIUM] external_modified_during_session — Re-read the listed files before assuming your in-memory copy is current.
 </tma1-context>
 ```
 
@@ -58,16 +58,15 @@ anomalies:
 | `recent_files` | Up to 5 most recently touched files | No Edit/Write yet |
 | `build` | `make` running / last exit / never invoked | Build sensor never ran |
 | `build_last_error` | Excerpt of stderr from the most recent failed build, with `may have recovered` flag if newer build is green | No build error in session window |
-| `external_human_changes` | Count of file changes attributed to the human (vs. agent) during the session | No human writes detected |
-| `external_files` | Up to 3 paths the human touched outside the agent | Same as above |
+| `external_changes` | Count of file changes not attributed to observed agent writes during the session | No external changes detected |
+| `external_files` | Up to 3 paths changed outside observed agent writes | Same as above |
 | `anomalies` | List of `[SEVERITY] kind — suggestion` lines from the Detector | No active anomalies |
 
 **Why fields suppress when empty:** the block is injected at every
 user turn — keeping it tight (under ~20 lines typically) preserves the
-agent's context budget. The `external_files` row only appears when
-the human has edited files behind the agent's back, because that's
-the case where the agent must invalidate its in-memory snapshot
-before reading.
+agent's context budget. The `external_files` row only appears when files
+changed outside observed agent writes, because the agent must invalidate its
+in-memory snapshot before continuing.
 
 ## Hook script protocol
 

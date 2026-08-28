@@ -229,7 +229,7 @@ func (s *Server) handleAnomaliesBudget(w http.ResponseWriter, r *http.Request) {
 // session, the agent ran a Read tool against a file listed in the
 // anomaly's related_files. This is the canonical action for the
 // related-file rules (stale_file_view, build_broken_after_my_edit,
-// human_modified_during_session). Rules without related_files are
+// external_modified_during_session). Rules without related_files are
 // returned with status="no-signal" so Dennis can see the denominator
 // without misinterpreting a zero rate.
 //
