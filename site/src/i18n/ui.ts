@@ -95,7 +95,7 @@ export const en: T = {
       { num: '05', title: 'Tool analytics', desc: 'When your agent feels slow, is it the model or the tool calls? p50 and p95 latency per tool, call counts, success rates, and trend lines.' },
       { num: '06', title: 'Cost breakdown', desc: 'Which model costs the most? Which conversation burned through your budget? Token counts and estimated cost per model, plus burn-rate over time and cache hit ratios.' },
       { num: '07', title: 'Security monitoring', desc: 'Your agent can run shell commands, fetch URLs, and be fed injected prompts. TMA1 flags all of it. For OpenClaw it also tracks webhook errors and stuck sessions.' },
-      { num: '08', title: 'Session search — for you and for the agent', desc: 'Type a keyword in the Sessions tab to find matching conversations, tool calls, and results across every session, then click through to that exact event. The agent searches the same data through <code>search_sessions</code>, then reads any session back with <code>get_session_transcript</code>. "How did we fix this last month" becomes a tool call instead of an archaeology project.' },
+      { num: '08', title: 'Session search — for you and for the agent', desc: 'Type a keyword in the Sessions tab to find matching conversations, tool calls, and results across every session, then click through to that exact event. The agent queries the same data through <code>search_sessions</code> and reads any session back with <code>get_session_transcript</code>.' },
     ],
   },
   loop_scenarios: {
@@ -120,7 +120,7 @@ export const en: T = {
     ],
   },
   peer_demo: {
-    intro: 'Claude Code reads what Codex left, verbatim — via the <code>/tma1-peer</code> skill. It works the other way too.',
+    intro: 'Claude Code reads what Codex left, verbatim, through the <code>/tma1-peer</code> skill. The Codex-side skill does the reverse.',
     title_bar: 'claude code · in your project',
     lines: [
       { kind: 'prompt', text: '/tma1-peer codex' },
@@ -137,11 +137,11 @@ export const en: T = {
   },
   how: {
     kicker: 'How it works', title: 'Setup',
-    desc: 'Paste the onboarding instruction into your agent and it handles the rest. Or do it yourself:',
+    desc: 'Paste the onboarding instruction into your agent and it handles the rest, or install manually:',
     steps: [
       { num: '[1]', title: 'Install', desc: 'One command. Downloads everything into <code>~/.tma1/</code>. No Docker, no system packages.' },
       { num: '[2]', title: 'Configure your agent', desc: 'Point the OTel endpoint to <code>http://localhost:14318/v1/otlp</code>. Works with Claude Code, Codex, OpenClaw, or any OTel SDK. GitHub Copilot CLI needs no config — TMA1 auto-discovers its session logs.' },
-      { num: '[3]', title: 'Watch the loop close', desc: 'Browse to <code>localhost:14318</code> for the dashboard. The interesting part happens in your agent: it starts seeing <code>&lt;tma1-context&gt;</code> blocks and acting on them. Optionally wrap dev / test commands with <code>tma1 build -- &lt;command&gt;</code> so build failures feed the loop too (flags: <code>--watch</code>, <code>--tag</code>, <code>--filter-regex</code>). The dashboard is for the human postmortem; the loop is for the agent. For raw SQL, GreptimeDB&rsquo;s own dashboard is at <code>localhost:14000/dashboard</code>.' },
+      { num: '[3]', title: 'Watch the loop close', desc: 'Browse to <code>localhost:14318</code> for the dashboard. The agent begins receiving <code>&lt;tma1-context&gt;</code> blocks and acting on them. Optionally wrap dev / test commands with <code>tma1 build -- &lt;command&gt;</code> so build failures feed the loop too (flags: <code>--watch</code>, <code>--tag</code>, <code>--filter-regex</code>). The dashboard is for the human postmortem; the loop is for the agent. For raw SQL, GreptimeDB&rsquo;s own dashboard is at <code>localhost:14000/dashboard</code>.' },
     ],
   },
   security: {
@@ -170,7 +170,7 @@ export const en: T = {
 
 export const zh: T = {
   lang: 'zh',
-  title: 'TMA1 — agent 能读回的本地可观测',
+  title: 'TMA1 — agent 能读回的本地可观测性',
   description: 'TMA1 在本地记下 agent 每一次 LLM 调用，再把看到的东西送回 agent 的下一轮 reasoning。一个 Go 二进制里的闭环 agent 自我观测。',
   nav: { features: '功能', how: '工作原理', security: '安全' },
   hero: {
@@ -199,12 +199,12 @@ export const zh: T = {
   highlights: [
     { title: '你的 agent 会从自己的失败里学', desc: '同一个 Edit 连续失败三次、build 反复失败时，TMA1 会把具体的修复路径写进 agent 的下一个 prompt，而不是留到下周的 postmortem。' },
     { title: 'agent 能读到其他 agent 留下的内容', desc: 'Claude Code 可以通过 <code>/tma1-peer</code> 原样读取 Codex 在同一个文件上留下的 review，不需要在两个终端之间来回复制。' },
-    { title: '历史会话可检索', desc: '<code>/tma1-search retry backoff</code> 找出上次解决同一问题的那次会话——你自己的或别的 agent 的——并把对话读回来。' },
+    { title: '历史会话可检索', desc: '<code>/tma1-search retry backoff</code> 找出上次解决同一问题的会话（你自己的或其他 agent 的），并把完整对话读回来。' },
     { title: '数据不出本机', desc: '一个 Go 二进制，无需 Docker，不依赖云服务，数据只存放在 <code>~/.tma1/</code>。' },
   ],
   features: {
-    kicker: '功能', title: '会对观测结果采取行动的可观测',
-    desc: '闭环感知和跨 agent 协作是主轴，dashboard 是补充证据。一个 Go 二进制，本地时序库，不需要 Grafana，不需要 YAML。',
+    kicker: '功能', title: '会对观测结果采取行动的可观测性',
+    desc: '闭环感知和跨 agent 协作是主轴，dashboard 提供事后复盘所需的证据。一个 Go 二进制，本地时序库，不需要 Grafana，不需要 YAML。',
     cards: [
       { num: '01', title: '让 agent 形成闭环', desc: 'TMA1 持续关注重复失败、过期的文件视图和失败的 build。规则命中时，它把一条具体的修复路径写进 agent 的下一个 prompt，而不是写进一块等人明天来看的 dashboard。<strong>五个 hook</strong> 负责送达，<strong>六条规则</strong>各自给出可执行的建议。<strong>HIGH</strong> 级别可以 block <code>Stop</code>，避免失败的 build 静默交付。' },
       { num: '02', title: '跨 agent 的 peer session', desc: 'Claude Code <em>原样</em>读到 Codex 在同一个文件上留下的内容，反过来同样成立。<code>/tma1-peer</code> skill 取回 peer 在这个项目上最近一次 session：消息、用过的工具、动过的文件。默认不返回调用方自己的 session，避免 echo chamber；显式指定 <code>self</code> 就能读回自己的历史。' },
@@ -213,7 +213,7 @@ export const zh: T = {
       { num: '05', title: '工具分析', desc: 'agent 变慢了，是模型的问题还是工具调用的问题？每个工具的 p50、p95 延迟，调用次数、成功率和趋势线。' },
       { num: '06', title: '费用明细', desc: '哪个模型最贵？哪次对话消耗了大部分预算？按模型追踪 token 和费用，并提供 burn rate 趋势和缓存命中率。' },
       { num: '07', title: '安全监控', desc: 'agent 可以执行 shell 命令、请求外部 URL，也可能被注入 prompt，TMA1 会全部标记。OpenClaw 的 webhook 错误和卡死的 session 同样在追踪范围内。' },
-      { num: '08', title: '会话检索——人和 agent 用同一份数据', desc: '在 Sessions 搜索框输入关键词，检索全部 session 的对话和工具调用，点击结果直接跳到对应事件。agent 通过 <code>search_sessions</code> 搜同一份数据，再用 <code>get_session_transcript</code> 把某次会话完整读回来。「上个月这个问题是怎么解决的」从考古变成一次工具调用。' },
+      { num: '08', title: '会话检索——人和 agent 用同一份数据', desc: '在 Sessions 搜索框输入关键词，检索全部 session 的对话和工具调用，点击结果直接跳到对应事件。agent 通过 <code>search_sessions</code> 查询同一份数据，再用 <code>get_session_transcript</code> 把某次会话完整读回来。' },
     ],
   },
   loop_scenarios: {
@@ -238,7 +238,7 @@ export const zh: T = {
     ],
   },
   peer_demo: {
-    intro: 'Claude Code 通过 <code>/tma1-peer</code> skill 原样读到 Codex 留下的内容，反过来同样成立。',
+    intro: 'Claude Code 通过 <code>/tma1-peer</code> skill 原样读到 Codex 留下的内容，Codex 侧的 skill 反向同理。',
     title_bar: 'claude code · in your project',
     lines: [
       { kind: 'prompt', text: '/tma1-peer codex' },
@@ -255,11 +255,11 @@ export const zh: T = {
   },
   how: {
     kicker: '工作原理', title: '安装配置',
-    desc: '把接入指令粘贴给 agent，它会自动完成配置。也可以手动操作：',
+    desc: '把接入指令粘贴给 agent，它会自动完成配置；也可以手动安装：',
     steps: [
       { num: '[1]', title: '安装', desc: '一条命令，所有文件安装到 <code>~/.tma1/</code>。不需要 Docker，也不需要额外的系统包。' },
       { num: '[2]', title: '配置你的 agent', desc: '将 OTel endpoint 指向 <code>http://localhost:14318/v1/otlp</code>。支持 Claude Code、Codex、OpenClaw 或任何 OTel SDK。GitHub Copilot CLI 零配置，TMA1 会自动发现它的 session 日志。' },
-      { num: '[3]', title: '看到闭环发生', desc: '浏览器打开 <code>localhost:14318</code> 查看 dashboard。真正起作用的部分发生在 agent 里：它开始读到 <code>&lt;tma1-context&gt;</code> 块并据此行动。可选：用 <code>tma1 build -- &lt;command&gt;</code> 包装 dev / test 命令，让 build 失败也进入闭环（支持 <code>--watch</code> / <code>--tag</code> / <code>--filter-regex</code>）。Dashboard 用于人工事后复盘，闭环面向 agent。需要直接写 SQL 时，GreptimeDB 自带的 dashboard 在 <code>localhost:14000/dashboard</code>。' },
+      { num: '[3]', title: '看到闭环发生', desc: '浏览器打开 <code>localhost:14318</code> 查看 dashboard。agent 会开始读到 <code>&lt;tma1-context&gt;</code> 块并据此行动。可选：用 <code>tma1 build -- &lt;command&gt;</code> 包装 dev / test 命令，让 build 失败也进入闭环（支持 <code>--watch</code> / <code>--tag</code> / <code>--filter-regex</code>）。Dashboard 用于人工事后复盘，闭环面向 agent。需要直接写 SQL 时，GreptimeDB 自带的 dashboard 在 <code>localhost:14000/dashboard</code>。' },
     ],
   },
   security: {
@@ -278,7 +278,7 @@ export const zh: T = {
     kicker: 'FAQ', title: '常见问题',
     items: [
       { q: '支持哪些 agent？', a: '任何发送 OpenTelemetry 数据的 agent，以及通过 JSONL 自动发现的几个 agent。Claude Code 发送 metrics 和 logs；Codex 发送 logs 和 metrics，会话 JSONL 自动解析用于对话回放。GitHub Copilot CLI 零配置：TMA1 自动发现并解析 <code>~/.copilot/session-state/</code> 下的 session JSONL。OpenClaw 发送 traces 和 metrics，会话 JSONL 也会自动解析。任何遵循 GenAI 语义规范的 OTel SDK 应用开箱即用。Dashboard 根据数据自动切换到对应视图。' },
-      { q: '能直接用 SQL 查吗？', a: '能。运行 <code>mysql -h 127.0.0.1 -P 14002</code> 连接本地 SQL 端口，或打开 <code><a href="http://localhost:14000/dashboard/">localhost:14000/dashboard/</a></code> 使用内置查询界面。agent 也可以查——通过 <code>exec_query</code> MCP 工具，每次一条只读 SELECT。Traces 在 <code>opentelemetry_traces</code>，logs 在 <code>opentelemetry_logs</code>，session 数据在 <code>tma1_hook_events</code> 和 <code>tma1_messages</code>，OTel metrics 自动建表。' },
+      { q: '能直接用 SQL 查吗？', a: '能。运行 <code>mysql -h 127.0.0.1 -P 14002</code> 连接本地 SQL 端口，或打开 <code><a href="http://localhost:14000/dashboard/">localhost:14000/dashboard/</a></code> 使用内置查询界面。agent 也可以查询：通过 <code>exec_query</code> MCP 工具，每次执行一条只读 SELECT。Traces 在 <code>opentelemetry_traces</code>，logs 在 <code>opentelemetry_logs</code>，session 数据在 <code>tma1_hook_events</code> 和 <code>tma1_messages</code>，OTel metrics 自动建表。' },
       { q: '大约占用多少磁盘？', a: '取决于 agent 流量和对话长度。常见场景下，每月大约几百 MB。' },
     ],
   },
@@ -326,12 +326,12 @@ export const es: T = {
     cards: [
       { num: '01', title: 'Cierra el loop del agente', desc: 'TMA1 vigila fallos repetidos, vistas obsoletas y builds rotos. Cuando una regla se dispara, escribe un camino concreto de solución en el siguiente prompt del agente — no en un dashboard para que alguien lo lea mañana. <strong>Cinco hooks</strong> lo entregan. <strong>Seis reglas</strong>, cada una con una sugerencia accionable. Severidad <strong>HIGH</strong> puede bloquear <code>Stop</code> para que un build roto no se publique en silencio.' },
       { num: '02', title: 'Sesiones de agentes pares', desc: 'Claude Code lee <em>palabra por palabra</em> lo que Codex dejó en el mismo archivo. Codex lee lo que Claude hizo. La skill <code>/tma1-peer</code> trae la última sesión del par en este proyecto: mensajes, herramientas usadas, archivos tocados. Por defecto un agente no ve sus propias sesiones en la lista de pares — sin cámaras de eco; pide <code>self</code> y recupera su propio historial.' },
-      { num: '03', title: 'Detección de anomalías', desc: 'Un agente en un loop de reintentos puede quemar cientos de dólares. Cada vista de agente tiene una pestaña Anomalies. Hacé clic en cualquiera para saltar a esa sesión y ver qué salió mal.' },
-      { num: '04', title: 'Sessions', desc: 'Tu agente corrió 25 minutos. ¿Qué pasó? Abrí el overlay de sesión: a la izquierda la actividad de archivos, contexto y API calls. A la derecha, el timeline completo. O mirá el canvas en vivo mientras tu agente trabaja.' },
+      { num: '03', title: 'Detección de anomalías', desc: 'Un agente en un loop de reintentos puede quemar cientos de dólares. Cada vista de agente tiene una pestaña Anomalies. Haz clic en cualquiera para saltar a esa sesión y ver qué salió mal.' },
+      { num: '04', title: 'Sessions', desc: 'Tu agente corrió 25 minutos. ¿Qué pasó? Abre el overlay de sesión: a la izquierda la actividad de archivos, contexto y API calls. A la derecha, el timeline completo. También puedes ver el canvas en vivo mientras tu agente trabaja.' },
       { num: '05', title: 'Análisis de herramientas', desc: 'Cuando tu agente se siente lento, ¿es el modelo o las herramientas? p50 y p95 de latencia por herramienta, conteos de llamadas, tasas de éxito y líneas de tendencia.' },
       { num: '06', title: 'Desglose de costos', desc: '¿Qué modelo cuesta más? ¿Qué conversación quemó tu presupuesto? Tokens y costo estimado por modelo, más burn rate y ratios de cache hit.' },
       { num: '07', title: 'Monitoreo de seguridad', desc: 'Tu agente puede ejecutar comandos shell, hacer fetches a URLs externas y recibir prompts inyectados. TMA1 marca todo. Para OpenClaw también rastrea errores de webhook y sesiones atascadas.' },
-      { num: '08', title: 'Búsqueda de texto completo', desc: 'Escribí una palabra clave en la pestaña de búsqueda de Sessions y aparecen las conversaciones, herramientas y resultados que coinciden. Hacé clic en un resultado para abrir la sesión en ese evento exacto.' },
+      { num: '08', title: 'Búsqueda de sesiones — para ti y para el agente', desc: 'Escribe una palabra clave en la pestaña Sessions para encontrar conversaciones, llamadas a herramientas y resultados en todas las sesiones, y haz clic para abrir la sesión en ese evento exacto. El agente consulta los mismos datos con <code>search_sessions</code> y recupera cualquier sesión con <code>get_session_transcript</code>.' },
     ],
   },
   loop_scenarios: {
@@ -356,7 +356,7 @@ export const es: T = {
     ],
   },
   peer_demo: {
-    intro: 'Claude Code lee lo que Codex dejó, palabra por palabra — vía la skill <code>/tma1-peer</code>. Funciona al revés también.',
+    intro: 'Claude Code lee lo que Codex dejó, palabra por palabra, con la skill <code>/tma1-peer</code>. La skill del lado de Codex hace lo inverso.',
     title_bar: 'claude code · in your project',
     lines: [
       { kind: 'prompt', text: '/tma1-peer codex' },
@@ -373,30 +373,30 @@ export const es: T = {
   },
   how: {
     kicker: 'Cómo funciona', title: 'Configuración',
-    desc: 'Pegá la instrucción de onboarding en tu agente y se encarga del resto. O hacelo vos:',
+    desc: 'Pega la instrucción de onboarding en tu agente y se encarga del resto, o instálalo manualmente:',
     steps: [
       { num: '[1]', title: 'Instalar', desc: 'Un comando. Todo se descarga en <code>~/.tma1/</code>. Sin Docker, sin paquetes del sistema.' },
-      { num: '[2]', title: 'Configurar tu agente', desc: 'Apuntá el endpoint OTel a <code>http://localhost:14318/v1/otlp</code>. Funciona con Claude Code, Codex, OpenClaw o cualquier SDK OTel. GitHub Copilot CLI no necesita configuración — TMA1 detecta sus logs de sesión automáticamente.' },
-      { num: '[3]', title: 'Mirá el loop cerrarse', desc: 'Abrí <code>localhost:14318</code> para el dashboard. La parte interesante pasa en tu agente: empieza a ver bloques <code>&lt;tma1-context&gt;</code> y a actuar sobre ellos. Opcional: envolvé tus comandos dev / test con <code>tma1 build -- &lt;command&gt;</code> para que los fallos de build también entren al loop (flags: <code>--watch</code>, <code>--tag</code>, <code>--filter-regex</code>). El dashboard es para el postmortem humano; el loop es para el agente. Para SQL directo, el dashboard propio de GreptimeDB está en <code>localhost:14000/dashboard</code>.' },
+      { num: '[2]', title: 'Configurar tu agente', desc: 'Apunta el endpoint OTel a <code>http://localhost:14318/v1/otlp</code>. Funciona con Claude Code, Codex, OpenClaw o cualquier SDK OTel. GitHub Copilot CLI no necesita configuración — TMA1 detecta sus logs de sesión automáticamente.' },
+      { num: '[3]', title: 'Observa el loop cerrarse', desc: 'Abre <code>localhost:14318</code> para el dashboard. El agente empieza a recibir bloques <code>&lt;tma1-context&gt;</code> y a actuar sobre ellos. Opcional: envuelve tus comandos dev / test con <code>tma1 build -- &lt;command&gt;</code> para que los fallos de build también entren al loop (flags: <code>--watch</code>, <code>--tag</code>, <code>--filter-regex</code>). El dashboard es para el postmortem humano; el loop es para el agente. Para SQL directo, el dashboard propio de GreptimeDB está en <code>localhost:14000/dashboard</code>.' },
     ],
   },
   security: {
     kicker: 'Seguridad', title: 'Seguridad y privacidad',
     desc: 'Tu agente lee tu código, tus API keys, tu infraestructura. Mandar eso a un servicio de observabilidad en la nube anula el propósito. Todo se queda local.',
     panel_title: 'Cómo se almacenan los datos',
-    panel_body: 'TMA1 guarda traces y logs de conversación en tu disco local, en <code>~/.tma1/data/</code>. No se sube nada a servicios remotos y podés inspeccionar o borrar los datos cuando quieras.',
+    panel_body: 'TMA1 guarda traces y logs de conversación en tu disco local, en <code>~/.tma1/data/</code>. No se sube nada a servicios remotos y puedes inspeccionar o borrar los datos cuando quieras.',
     cards: [
       { title: 'Sin llamadas de red', desc: 'Tras el primer inicio (que descarga el motor de base de datos integrado una sola vez), TMA1 no hace más llamadas de red. Sin analíticas, sin reportes de error, sin chequeos de actualización.' },
-      { title: 'Completamente open source', desc: 'TMA1 usa licencia Apache-2.0. Leé el código, auditá el build y corrélo sin conexión.' },
+      { title: 'Completamente open source', desc: 'TMA1 usa licencia Apache-2.0. Puedes leer el código, auditar el build y ejecutarlo sin conexión.' },
       { title: 'Un solo binario', desc: '<code>tma1-server</code> corre como un único proceso local y administra su motor de almacenamiento integrado. Sin Docker, sin paquetes del sistema, sin dependencias runtime.' },
-      { title: 'Tus datos, tu disco', desc: 'Borrá <code>~/.tma1/</code> y todo desaparece. Sin estado huérfano en la nube, sin cuentas remotas que cerrar.' },
+      { title: 'Tus datos, tu disco', desc: 'Borra <code>~/.tma1/</code> y todo desaparece. Sin estado huérfano en la nube, sin cuentas remotas que cerrar.' },
     ],
   },
   faq: {
     kicker: 'FAQ', title: 'Preguntas frecuentes',
     items: [
-      { q: '¿Qué agentes soporta?', a: 'Cualquier agente que emita datos OpenTelemetry, más algunos vía auto-descubrimiento de JSONL. Claude Code envía métricas y logs. Codex envía logs y métricas, y los archivos JSONL de sesión se analizan automáticamente para la reproducción de conversaciones. GitHub Copilot CLI no requiere configuración: sus logs de sesión en <code>~/.copilot/session-state/</code> se detectan automáticamente. OpenClaw envía traces y métricas, y los archivos JSONL de sesión se analizan automáticamente. Cualquier SDK OTel con convenciones semánticas GenAI funciona de entrada. El dashboard detecta automáticamente la fuente de datos y muestra la vista correspondiente.' },
-      { q: '¿Se pueden consultar los datos con SQL?', a: 'Sí. Ejecutá <code>mysql -h 127.0.0.1 -P 14002</code> para conectarte al endpoint SQL local, o abrí <code><a href="http://localhost:14000/dashboard/">localhost:14000/dashboard/</a></code> para la interfaz de consultas. Traces en <code>opentelemetry_traces</code>, logs en <code>opentelemetry_logs</code>, datos de sesión en <code>tma1_hook_events</code> y <code>tma1_messages</code>, y las métricas OTel crean tablas automáticamente.' },
+      { q: '¿Qué agentes son compatibles?', a: 'Cualquier agente que emita datos OpenTelemetry, más algunos vía auto-descubrimiento de JSONL. Claude Code envía métricas y logs. Codex envía logs y métricas, y los archivos JSONL de sesión se analizan automáticamente para la reproducción de conversaciones. GitHub Copilot CLI no requiere configuración: sus logs de sesión en <code>~/.copilot/session-state/</code> se detectan automáticamente. OpenClaw envía traces y métricas, y los archivos JSONL de sesión se analizan automáticamente. Cualquier SDK OTel con convenciones semánticas GenAI funciona sin configuración adicional. El dashboard detecta automáticamente la fuente de datos y muestra la vista correspondiente.' },
+      { q: '¿Se pueden consultar los datos con SQL?', a: 'Sí. Ejecuta <code>mysql -h 127.0.0.1 -P 14002</code> para conectarte al endpoint SQL local, o abre <code><a href="http://localhost:14000/dashboard/">localhost:14000/dashboard/</a></code> para la interfaz de consultas. Tu agente también puede consultarlos con la herramienta MCP <code>exec_query</code>: un SELECT de solo lectura por llamada. Traces en <code>opentelemetry_traces</code>, logs en <code>opentelemetry_logs</code>, datos de sesión en <code>tma1_hook_events</code> y <code>tma1_messages</code>, y las métricas OTel crean tablas automáticamente.' },
       { q: '¿Cuánto disco ocupa?', a: 'Depende de la actividad del agente y del largo de las conversaciones. En un uso típico, unos cientos de MB por mes.' },
     ],
   },
