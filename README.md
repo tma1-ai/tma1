@@ -42,7 +42,7 @@ TMA1 does two things.
 It feeds context to the agent. Before each turn the agent receives a
 `<tma1-context>` block: what it has done this session, which files changed
 under it, whether the build is broken, and any anomaly worth acting on.
-The `Stop` hook can refuse to end a turn while a HIGH-severity issue is
+The `Stop` hook blocks turn completion while a HIGH-severity issue is
 unresolved. Ten MCP tools answer further queries on demand, including
 keyword search across every session recorded on the machine.
 
@@ -181,7 +181,7 @@ Read https://tma1.ai/SKILL.md and follow the instructions to install or upgrade 
 
 The curl installer writes global files only: hook scripts, MCP config,
 and the TMA1 skills. Project-local `AGENTS.md` and `CLAUDE.md` are left
-untouched, since a piped install can run from any directory.
+untouched.
 
 Skill and command files are written by `install`, not refreshed by the
 binary at startup. Re-run `install --adapter` after upgrading;
