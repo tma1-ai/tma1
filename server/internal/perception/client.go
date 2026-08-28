@@ -7,6 +7,7 @@
 package perception
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -26,9 +27,15 @@ type Client struct {
 
 // NewClient creates a Client targeting localhost:<httpPort>.
 func NewClient(httpPort int) *Client {
+	return NewClientWithTimeout(httpPort, 3*time.Second)
+}
+
+// NewClientWithTimeout is NewClient with an explicit deadline, for
+// callers whose queries are allowed to be slower than a sensor lookup.
+func NewClientWithTimeout(httpPort int, timeout time.Duration) *Client {
 	return &Client{
 		httpPort: httpPort,
-		http:     &http.Client{Timeout: 3 * time.Second},
+		http:     &http.Client{Timeout: timeout},
 	}
 }
 
@@ -82,7 +89,12 @@ func (c *Client) Query(ctx context.Context, sql string) ([]string, [][]any, erro
 	}
 
 	var r queryResp
-	if err := json.Unmarshal(body, &r); err != nil {
+	dec := json.NewDecoder(bytes.NewReader(body))
+	// Rows are decoded into []any. Keep integer tokens as json.Number so
+	// exec_query does not silently round BIGINT values above 2^53 through
+	// float64 before returning them to the agent.
+	dec.UseNumber()
+	if err := dec.Decode(&r); err != nil {
 		return nil, nil, fmt.Errorf("perception parse response: %w (body=%q)", err, snippet(body))
 	}
 	if r.Code != 0 || r.Error != "" {

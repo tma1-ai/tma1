@@ -153,18 +153,30 @@ type PeerSessionsTool struct {
 func (t PeerSessionsTool) Definition() Tool {
 	return Tool{
 		Name: "get_peer_sessions",
-		Description: "Pull recent session content from peer coding agents " +
-			"(Claude Code, Codex, OpenClaw, Copilot CLI) that worked on the " +
-			"same project. Use this when the user asks you to act on feedback " +
-			"or work left by another agent, or invokes `/tma1-peer`. Filters " +
-			"by agent_source; empty string returns all peers excluding the " +
-			"caller (the agent invoking this MCP tool).",
+		Description: "List recent sessions on this project by agent: peers by " +
+			"default (Claude Code, Codex, OpenClaw, Copilot CLI), or your own " +
+			"past sessions with agent_source=\"self\". Use it to act on work or " +
+			"review feedback another agent left, or to recall what you did here " +
+			"earlier. To find sessions by keyword instead, use search_sessions; " +
+			"for one session's full conversation, use get_session_transcript.",
 		InputSchema: InputSchema{
 			Type: "object",
 			Properties: map[string]Property{
 				"agent_source": {
 					Type:        "string",
-					Description: "Peer agent: claude_code / codex / openclaw / copilot_cli. Aliases accepted: cc | claude → claude_code, copilot → copilot_cli. Empty = all peers except the caller (top N per agent).",
+					Description: "Agent to list: claude_code / codex / openclaw / copilot_cli, or \"self\" for your own sessions. Aliases: cc | claude → claude_code, copilot → copilot_cli, me | mine → self. Empty = all peers except you (top N per agent).",
+				},
+				"detail": {
+					Type:        "string",
+					Description: "How much conversation to include: \"summary\" (none — header, tools and files only), \"preview\" (3 recent messages, default), \"full\" (40 recent messages).",
+				},
+				"limit": {
+					Type:        "integer",
+					Description: "Max sessions per agent (1-5, default 1). With an empty agent_source this is per peer agent, not a global cap.",
+				},
+				"since_min": {
+					Type:        "integer",
+					Description: "How many minutes back to look (default 1440 = 24h).",
 				},
 				"project": {
 					Type: "string",
@@ -173,17 +185,9 @@ func (t PeerSessionsTool) Definition() Tool {
 						"name falls back to legacy basename matching. Empty = " +
 						"derive from the caller's cwd.",
 				},
-				"limit": {
-					Type:        "integer",
-					Description: "Max sessions per agent (1-5, default 1). When agent_source is empty, applied per peer agent, not globally.",
-				},
 				"message_limit": {
 					Type:        "integer",
-					Description: "Max messages per session (1-100, default 20).",
-				},
-				"since_min": {
-					Type:        "integer",
-					Description: "How many minutes back to look (default 1440 = 24h).",
+					Description: "Deprecated: use detail. Explicit message count per session (1-100); overrides detail when set.",
 				},
 			},
 		},
@@ -200,20 +204,26 @@ func (t PeerSessionsTool) Call(ctx context.Context, args map[string]any) (CallTo
 	// (toolCallTimeout in server.go), so every tool is bounded uniformly.
 
 	agent, _ := args["agent_source"].(string)
-	limit := intArg(args, "limit", 1)
-	msgLimit := intArg(args, "message_limit", 20)
-	sinceMin := intArg(args, "since_min", 24*60)
+	detail, _ := args["detail"].(string)
 
 	// Project scoping: caller override > absolute root from cwd. Using the
 	// absolute root (not just the basename) means two projects named "server"
 	// don't show each other's sessions.
+	cwd, _ := os.Getwd()
 	project, _ := args["project"].(string)
 	if strings.TrimSpace(project) == "" {
-		cwd, _ := os.Getwd()
 		project = perception.ResolveProjectRoot(cwd)
 	}
 
-	sessions, partialFailures, err := t.Bundler.GetPeerSessions(ctx, agent, project, limit, msgLimit, sinceMin)
+	sessions, partialFailures, err := t.Bundler.GetPeerSessions(ctx, perception.PeerOptions{
+		AgentSource:  agent,
+		Project:      project,
+		Limit:        intArg(args, "limit", 1),
+		Detail:       detail,
+		MessageLimit: intArg(args, "message_limit", 0),
+		SinceMin:     intArg(args, "since_min", 24*60),
+		CWD:          cwd,
+	})
 	if err != nil {
 		return errorResult(fmt.Sprintf("get peer sessions: %v", err)), nil
 	}
@@ -245,6 +255,211 @@ func (t PeerSessionsTool) Call(ctx context.Context, args map[string]any) (CallTo
 	out, err := json.MarshalIndent(payload, "", "  ")
 	if err != nil {
 		return CallToolResult{}, fmt.Errorf("marshal peer sessions: %w", err)
+	}
+	return CallToolResult{Content: []ContentBlock{{Type: "text", Text: string(out)}}}, nil
+}
+
+// SearchSessionsTool finds past sessions by conversation content.
+type SearchSessionsTool struct {
+	Bundler *perception.Bundler
+}
+
+func (t SearchSessionsTool) Definition() Tool {
+	return Tool{
+		Name: "search_sessions",
+		Description: "Search the conversation content of past agent sessions " +
+			"(yours and other agents') by keyword, scoped to this project. Use " +
+			"it for \"how did we fix this before\", \"what did we decide about X\", " +
+			"or any question whose answer is in an earlier session. Returns " +
+			"matching sessions with snippets and a session_id you can pass to " +
+			"get_session_transcript for the full conversation.",
+		InputSchema: InputSchema{
+			Type: "object",
+			Properties: map[string]Property{
+				"query": {
+					Type:        "string",
+					Description: "Keyword or phrase to look for in conversation content.",
+				},
+				"agent_source": {
+					Type:        "string",
+					Description: "Restrict to one agent: claude_code / codex / openclaw / copilot_cli, or \"self\". Empty = every agent, including you.",
+				},
+				"project": {
+					Type:        "string",
+					Description: "Project scope. Empty = the current project; \"*\" searches every project.",
+				},
+				"since_min": {
+					Type:        "integer",
+					Description: "How many minutes back to look (default 10080 = 7 days).",
+				},
+				"limit": {
+					Type:        "integer",
+					Description: "Max sessions to return (1-10, default 5).",
+				},
+				"snippet_limit": {
+					Type:        "integer",
+					Description: "Max matching snippets per session (1-10, default 3).",
+				},
+			},
+			Required: []string{"query"},
+		},
+	}
+}
+
+func (t SearchSessionsTool) Call(ctx context.Context, args map[string]any) (CallToolResult, error) {
+	if t.Bundler == nil {
+		return errorResult("bundler not configured"), nil
+	}
+	query, _ := args["query"].(string)
+	agent, _ := args["agent_source"].(string)
+
+	project, _ := args["project"].(string)
+	switch strings.TrimSpace(strings.ToLower(project)) {
+	case "*", "all":
+		project = ""
+	case "":
+		cwd, _ := os.Getwd()
+		project = perception.ResolveProjectRoot(cwd)
+	}
+
+	res, err := t.Bundler.SearchSessions(ctx, perception.SearchOptions{
+		Query:        query,
+		AgentSource:  agent,
+		Project:      project,
+		SinceMin:     intArg(args, "since_min", 0),
+		Limit:        intArg(args, "limit", 0),
+		SnippetLimit: intArg(args, "snippet_limit", 0),
+	})
+	if err != nil {
+		return errorResult(fmt.Sprintf("search sessions: %v", err)), nil
+	}
+	return jsonResult(res, "marshal search results")
+}
+
+// SessionTranscriptTool returns the conversation of one session.
+type SessionTranscriptTool struct {
+	Bundler *perception.Bundler
+}
+
+func (t SessionTranscriptTool) Definition() Tool {
+	return Tool{
+		Name: "get_session_transcript",
+		Description: "Read the conversation of one session — yours or another " +
+			"agent's — given its id. Accepts the abbreviated id shown in the " +
+			"<tma1-context> block. Returns one page of messages, newest page " +
+			"first; when has_more is true, call again with the returned " +
+			"next_offset to walk further back.",
+		InputSchema: InputSchema{
+			Type: "object",
+			Properties: map[string]Property{
+				"session_id": {
+					Type:        "string",
+					Description: "Full session id, or a prefix of at least 6 characters. An ambiguous prefix returns candidates instead of a guess.",
+				},
+				"message_limit": {
+					Type:        "integer",
+					Description: "Messages per page (1-200, default 40).",
+				},
+				"offset": {
+					Type:        "integer",
+					Description: "Skip this many of the newest messages. 0 (default) is the most recent page.",
+				},
+				"content_chars": {
+					Type:        "integer",
+					Description: "Max characters per message (100-8000, default 1200). Longer messages are cut and flagged with truncated.",
+				},
+				"message_type": {
+					Type:        "string",
+					Description: "Keep only one kind of message: assistant / user / thinking / tool_use / tool_result.",
+				},
+			},
+			Required: []string{"session_id"},
+		},
+	}
+}
+
+func (t SessionTranscriptTool) Call(ctx context.Context, args map[string]any) (CallToolResult, error) {
+	if t.Bundler == nil {
+		return errorResult("bundler not configured"), nil
+	}
+	sessionID, _ := args["session_id"].(string)
+	msgType, _ := args["message_type"].(string)
+
+	res, err := t.Bundler.GetSessionTranscript(ctx, perception.TranscriptOptions{
+		SessionID:    sessionID,
+		MessageLimit: intArg(args, "message_limit", 0),
+		ContentChars: intArg(args, "content_chars", 0),
+		MessageType:  msgType,
+		Offset:       intArg(args, "offset", 0),
+	})
+	if err != nil {
+		return errorResult(fmt.Sprintf("get session transcript: %v", err)), nil
+	}
+	return jsonResult(res, "marshal transcript")
+}
+
+// ExecQueryTool is the escape hatch for questions the purpose-built
+// tools don't answer.
+type ExecQueryTool struct {
+	Bundler *perception.Bundler
+}
+
+func (t ExecQueryTool) Definition() Tool {
+	return Tool{
+		Name: "exec_query",
+		Description: "Run one read-only SELECT against TMA1's local GreptimeDB " +
+			"and get columns + rows back. Tables: tma1_hook_events (tool calls), " +
+			"tma1_messages (conversation content, FULLTEXT on content), " +
+			"opentelemetry_traces, opentelemetry_logs, plus auto-created metric " +
+			"tables. Use this for aggregates and joins the other tools don't " +
+			"cover — cost by model, tool-failure rates, custom time buckets. " +
+			"Do NOT use it to find sessions by keyword (search_sessions), read a " +
+			"session's conversation (get_session_transcript), or fetch current " +
+			"session state (get_session_state): those return richer, cheaper " +
+			"answers. Only SELECT is accepted.",
+		InputSchema: InputSchema{
+			Type: "object",
+			Properties: map[string]Property{
+				"sql": {
+					Type:        "string",
+					Description: "A single SELECT statement. Run `SELECT * FROM information_schema.tables` if you need to discover tables first.",
+				},
+				"row_limit": {
+					Type:        "integer",
+					Description: "Max rows (1-1000, default 100). Applied by the database, and truncated is set when more rows existed.",
+				},
+				"cell_chars": {
+					Type:        "integer",
+					Description: "Max characters per string cell (100-20000, default 2000).",
+				},
+			},
+			Required: []string{"sql"},
+		},
+	}
+}
+
+// CallTimeout gives exec_query room above its 15s HTTP client deadline,
+// so a slow query fails with the database's own error rather than being
+// cancelled by the dispatch ceiling first.
+func (t ExecQueryTool) CallTimeout() time.Duration { return 20 * time.Second }
+
+func (t ExecQueryTool) Call(ctx context.Context, args map[string]any) (CallToolResult, error) {
+	if t.Bundler == nil {
+		return errorResult("bundler not configured"), nil
+	}
+	sql, _ := args["sql"].(string)
+	res, err := t.Bundler.ExecQuery(ctx, sql, intArg(args, "row_limit", 0), intArg(args, "cell_chars", 0))
+	if err != nil {
+		return errorResult(fmt.Sprintf("exec_query: %v", err)), nil
+	}
+	return jsonResult(res, "marshal query result")
+}
+
+// jsonResult renders a payload as an indented-JSON tool result.
+func jsonResult(payload any, failCtx string) (CallToolResult, error) {
+	out, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return CallToolResult{}, fmt.Errorf("%s: %w", failCtx, err)
 	}
 	return CallToolResult{Content: []ContentBlock{{Type: "text", Text: string(out)}}}, nil
 }

@@ -341,3 +341,18 @@ func TestServerConcurrentToolsDoNotBlockEachOther(t *testing.T) {
 func mustParams(s string) json.RawMessage {
 	return json.RawMessage(s)
 }
+
+// exec_query's HTTP client waits up to 15s; a 10s dispatch ceiling would
+// cancel legitimate aggregates from the outside before that.
+func TestTimeoutForRespectsToolOverride(t *testing.T) {
+	if got := timeoutFor(ContextBundleTool{}); got != toolCallTimeout {
+		t.Errorf("timeoutFor(default tool) = %v, want %v", got, toolCallTimeout)
+	}
+	got := timeoutFor(ExecQueryTool{})
+	if got <= toolCallTimeout {
+		t.Errorf("timeoutFor(exec_query) = %v, want more than the %v default", got, toolCallTimeout)
+	}
+	if got <= 15*time.Second {
+		t.Errorf("timeoutFor(exec_query) = %v, must exceed the 15s client deadline", got)
+	}
+}

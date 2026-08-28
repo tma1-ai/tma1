@@ -38,6 +38,24 @@ const (
 	toolCallTimeout = 10 * time.Second
 )
 
+// TimeoutOverrider lets one tool ask for a deadline other than
+// toolCallTimeout. exec_query needs it: an agent-authored aggregate can
+// legitimately outlast the perception sensors' budget, and a ceiling
+// below the tool's own client timeout would cancel it from the outside
+// with a less useful error.
+type TimeoutOverrider interface {
+	CallTimeout() time.Duration
+}
+
+func timeoutFor(t ToolHandler) time.Duration {
+	if o, ok := t.(TimeoutOverrider); ok {
+		if d := o.CallTimeout(); d > 0 {
+			return d
+		}
+	}
+	return toolCallTimeout
+}
+
 // ServerVersion can be overridden by callers (e.g. main package sets it from build ldflags).
 var ServerVersion = "dev"
 
@@ -227,7 +245,7 @@ func (s *Server) handle(ctx context.Context, req Request) {
 			})
 			return
 		}
-		callCtx, cancel := context.WithTimeout(ctx, toolCallTimeout)
+		callCtx, cancel := context.WithTimeout(ctx, timeoutFor(t))
 		defer cancel()
 		result, err := t.Call(callCtx, params.Arguments)
 		if err != nil {

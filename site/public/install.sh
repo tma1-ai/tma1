@@ -404,7 +404,7 @@ post_install() {
 
   if [ -n "$TMA1_ADAPTER" ]; then
     echo "Adapter(s) wired globally: ${TMA1_ADAPTER}"
-    echo "  - Hooks, MCP server entry, and /tma1-peer skill installed for each."
+    echo "  - Hooks, MCP server entry, and TMA1 skills installed for each."
     echo "  - Project-local CLAUDE.md / AGENTS.md blocks were NOT written here."
     echo "    To seed the TMA1 context block in a project, cd into it and run:"
     echo "      tma1 install --adapter <claude-code|codex>"
@@ -412,7 +412,7 @@ post_install() {
   else
     echo "Next: wire TMA1 into an agent."
     echo ""
-    echo "Option A — One-shot adapter (recommended; hooks + MCP + /tma1-peer):"
+    echo "Option A — One-shot adapter (recommended; hooks + MCP + skills):"
     echo "  tma1 install --adapter claude-code"
     echo "  tma1 install --adapter codex"
     echo "  (run from a project directory to also seed CLAUDE.md / AGENTS.md)"

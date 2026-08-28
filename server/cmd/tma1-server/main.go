@@ -491,6 +491,7 @@ func main() {
 	} else {
 		logger.Info("hook script ready — configure in ~/.claude/settings.json", "path", hookPath)
 	}
+	reportStaleAssets(logger)
 
 	bc := handler.NewHookBroadcaster()
 	tw := transcript.NewWatcher(cfg.GreptimeDBHTTPPort, logger, bc.Broadcast)
@@ -1028,6 +1029,9 @@ func runMCPServe() error {
 		mcp.ExternalChangesTool{Bundler: bundler},
 		mcp.ProjectStateTool{Bundler: bundler},
 		mcp.PeerSessionsTool{Bundler: bundler},
+		mcp.SearchSessionsTool{Bundler: bundler},
+		mcp.SessionTranscriptTool{Bundler: bundler},
+		mcp.ExecQueryTool{Bundler: bundler},
 	)
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -1046,6 +1050,24 @@ func readVersionFile(path string) string {
 
 func parsePort(s string) (int, error) {
 	return strconv.Atoi(s)
+}
+
+// reportStaleAssets warns when an installed adapter's skills/commands
+// on disk no longer match the ones this binary ships. Upgrading the
+// binary doesn't refresh them, and a stale SKILL.md silently teaches
+// the agent an outdated tool contract. We only report: rewriting files
+// under the user's home without being asked isn't ours to do.
+func reportStaleAssets(logger *slog.Logger) {
+	drifts, err := hooks.CheckInstalledAssets()
+	if err != nil {
+		logger.Debug("skill freshness check failed", "err", err)
+	}
+	for _, d := range drifts {
+		logger.Warn("installed tma1 skills are out of date — agents will read the old contract",
+			"adapter", d.Adapter,
+			"stale_files", len(d.StalePaths),
+			"fix", d.FixCommand)
+	}
 }
 
 func onUpgrade(httpPort int, logger *slog.Logger) error {

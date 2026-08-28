@@ -2,6 +2,7 @@ package perception
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -341,6 +342,11 @@ func intAt(row []any, i int) int {
 	switch v := row[i].(type) {
 	case float64:
 		return int(v)
+	case json.Number:
+		n, err := v.Int64()
+		if err == nil {
+			return int(n)
+		}
 	case int64:
 		return int(v)
 	case int:
@@ -356,6 +362,11 @@ func int64At(row []any, i int) int64 {
 	switch v := row[i].(type) {
 	case float64:
 		return int64(v)
+	case json.Number:
+		n, err := v.Int64()
+		if err == nil {
+			return n
+		}
 	case int64:
 		return v
 	case int:
@@ -373,6 +384,11 @@ func msTimestamp(row []any, i int) time.Time {
 	switch v := row[i].(type) {
 	case float64:
 		return time.UnixMilli(int64(v))
+	case json.Number:
+		n, err := v.Int64()
+		if err == nil {
+			return time.UnixMilli(n)
+		}
 	case int64:
 		return time.UnixMilli(v)
 	case int:

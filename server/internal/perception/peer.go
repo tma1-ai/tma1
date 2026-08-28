@@ -29,15 +29,23 @@ type PeerSession struct {
 	Messages        []PeerMessage `json:"messages,omitempty"`
 	RecentToolNames []string      `json:"recent_tool_names,omitempty"` // top 5
 	FilesTouched    []string      `json:"files_touched,omitempty"`     // unique paths
+	// IsLatestForCWD marks the newest session this agent ran in the
+	// caller's cwd — on a self lookup that is almost always the caller's
+	// own live session. Deliberately NOT called "is_current": the MCP
+	// child is never told its parent's session_id, so concurrent
+	// sessions of the same agent in one directory are indistinguishable.
+	IsLatestForCWD bool `json:"is_latest_for_cwd,omitempty"`
 }
 
-// PeerMessage is one conversation entry. Role is "user" / "assistant" /
-// "thinking" / "tool_use" / "tool_result" depending on transcript source.
+// PeerMessage is one conversation entry. MessageType carries the shape
+// ("assistant" / "user" / "thinking" / "tool_use" / "tool_result");
+// Role is the speaker and stays "user" / "assistant" regardless.
 type PeerMessage struct {
 	Timestamp    time.Time `json:"ts"`
 	Role         string    `json:"role,omitempty"`
 	MessageType  string    `json:"message_type,omitempty"`
 	Content      string    `json:"content"`
+	Truncated    bool      `json:"truncated,omitempty"`
 	Model        string    `json:"model,omitempty"`
 	ToolName     string    `json:"tool_name,omitempty"`
 	InputTokens  int64     `json:"input_tokens,omitempty"`
@@ -108,11 +116,24 @@ func buildPeerSessionListSQL(sids []string, limit, sinceMin int) string {
 // the outer query keeps only sessions with activity and ranks by their newest
 // activity event. `cwd` must be unescaped — it is escaped here.
 func buildLatestSessionForCWDSQL(cwd string) string {
+	return buildLatestSessionForCWDAgentSQL(cwd, "")
+}
+
+// buildLatestSessionForCWDAgentSQL is buildLatestSessionForCWDSQL scoped
+// to one agent. Without the agent predicate, a directory where both
+// Claude Code and Codex are running returns whichever wrote last —
+// fine for "what happened here", wrong for "which session is mine".
+func buildLatestSessionForCWDAgentSQL(cwd, agent string) string {
+	agentFilter := ""
+	if agent != "" {
+		agentFilter = fmt.Sprintf("AND agent_source = '%s' ", escapeSQL(agent))
+	}
 	return fmt.Sprintf(
 		`SELECT session_id FROM tma1_hook_events
 		 WHERE session_id IN (
 		     SELECT session_id FROM tma1_hook_events
 		     WHERE cwd = '%s' AND session_id != ''
+		       %s
 		       AND ts > now() - INTERVAL '6 hours'
 		 )
 		   AND event_type IN (%s)
@@ -120,65 +141,94 @@ func buildLatestSessionForCWDSQL(cwd string) string {
 		 GROUP BY session_id
 		 ORDER BY MAX(ts) DESC
 		 LIMIT 1`,
-		escapeSQL(cwd), activityEventsSQL,
+		escapeSQL(cwd), agentFilter, activityEventsSQL,
 	)
 }
 
-// GetPeerSessions returns the N most recent sessions for `agentSource`
-// within `project`. agentSource="" returns up to `limit` sessions per peer
-// agent (not `limit` total) — so a chatty agent doesn't crowd out a quiet
-// one.
+// PeerOptions parameterises GetPeerSessions.
 //
-// `project` is interpreted two ways:
+// `Project` is interpreted two ways:
 //   - Absolute path (starts with "/"): cwd prefix match on the resolved
 //     project root. Two unrelated projects with the same basename no
 //     longer collide.
 //   - Anything else: legacy basename LIKE — kept for callers (e.g. tests)
 //     that haven't been updated.
-//
-// Each returned session carries up to `messageLimit` recent messages.
+type PeerOptions struct {
+	// AgentSource selects one agent. "" fans out over every peer
+	// except the caller. `self` / `me` / `mine` resolve to the caller.
+	AgentSource string
+	Project     string
+	// Limit is sessions per agent (not a global cap), clamped to [1,5].
+	Limit int
+	// Detail picks how much conversation content comes back:
+	// DetailSummary / DetailPreview / DetailFull.
+	Detail string
+	// MessageLimit is the deprecated numeric override for Detail. Skill
+	// files installed before Detail existed still send it.
+	MessageLimit int
+	SinceMin     int
+	// CWD, when set, enables IsLatestForCWD marking. Only meaningful on
+	// a self lookup — the caller passes its own working directory.
+	CWD string
+}
+
+const (
+	DetailSummary = "summary"
+	DetailPreview = "preview"
+	DetailFull    = "full"
+)
+
+// resolveDetail maps a detail level to (message count, bytes per
+// message). Unknown values degrade to preview instead of failing —
+// a skill with a typo should still return something.
+func resolveDetail(detail string, messageLimit int) (int, int) {
+	if messageLimit > 0 {
+		return clampInt(messageLimit, 1, 100, 20), 1200
+	}
+	switch strings.ToLower(strings.TrimSpace(detail)) {
+	case DetailSummary:
+		return 0, 0
+	case DetailFull:
+		return 40, 1200
+	default:
+		return 3, 240
+	}
+}
+
+// GetPeerSessions returns the most recent sessions for one agent, or —
+// with an empty AgentSource — up to `Limit` sessions per peer agent
+// (not `Limit` total), so a chatty agent doesn't crowd out a quiet one.
 //
 // Return shape:
 //   - sessions: peer sessions, most-recent first (across all peers in
-//     the empty-agentSource path).
+//     the empty-AgentSource path).
 //   - partialFailures: agent → error message map. Populated ONLY in the
 //     all-peers path when one or more per-agent queries fail. Callers
 //     must check this before treating an empty `sessions` slice as
 //     "no peer activity" — a non-empty `partialFailures` means the
 //     result is incomplete.
-//   - error: returned for input-validation / caller-exclusion failures.
-//     Per-agent SQL errors in the all-peers path are NOT bubbled up
-//     here; they go into partialFailures so one failing peer doesn't
-//     blank out the others.
-func (b *Bundler) GetPeerSessions(
-	ctx context.Context,
-	agentSource, project string,
-	limit, messageLimit, sinceMin int,
-) ([]PeerSession, map[string]string, error) {
-	limit = clampPeerLimit(limit)
-	if messageLimit <= 0 || messageLimit > 100 {
-		messageLimit = 20
-	}
+//   - error: returned for input-validation failures. Per-agent SQL
+//     errors in the all-peers path are NOT bubbled up here; they go
+//     into partialFailures so one failing peer doesn't blank out the
+//     others.
+func (b *Bundler) GetPeerSessions(ctx context.Context, opts PeerOptions) ([]PeerSession, map[string]string, error) {
+	limit := clampPeerLimit(opts.Limit)
+	messageLimit, contentChars := resolveDetail(opts.Detail, opts.MessageLimit)
+	sinceMin := opts.SinceMin
 	if sinceMin <= 0 {
 		sinceMin = 24 * 60
 	}
-	agentSource = normalizePeerAgent(agentSource)
-	if agentSource != "" && !validPeerAgents[agentSource] {
-		return nil, nil, fmt.Errorf("invalid agent_source %q (valid: claude_code, codex, openclaw, copilot_cli, or empty for all peers)", agentSource)
+	agentSource, err := b.resolveAgentAlias(opts.AgentSource)
+	if err != nil {
+		return nil, nil, err
 	}
-
-	// Caller-aware self-exclusion on the explicit-agent path. The
-	// "all peers" branch already excludes Caller via peerAgentList();
-	// without this guard a Codex user asking `/tma1-peer codex`
-	// would receive Codex's own sessions — an echo chamber. Skip
-	// silently if Caller is empty (e.g. HTTP API path with no
-	// TMA1_MCP_CALLER set) so direct callers keep their freedom.
-	if agentSource != "" && b.Caller != "" && agentSource == b.Caller {
-		return nil, nil, fmt.Errorf("agent_source %q is the calling agent; peer sessions exclude self (use an empty agent_source for all-peers or pick a different one)", agentSource)
-	}
+	project := opts.Project
 
 	if agentSource != "" {
-		sessions, err := b.getPeerSessionsOneAgent(ctx, agentSource, project, limit, messageLimit, sinceMin)
+		sessions, err := b.getPeerSessionsOneAgent(ctx, agentSource, project, limit, messageLimit, contentChars, sinceMin)
+		if err == nil && agentSource == b.Caller && opts.CWD != "" {
+			b.markLatestForCWD(ctx, sessions, agentSource, opts.CWD)
+		}
 		return sessions, nil, err
 	}
 
@@ -201,7 +251,7 @@ func (b *Bundler) GetPeerSessions(
 		wg.Add(1)
 		go func(idx int, agent string) {
 			defer wg.Done()
-			sessions, err := b.getPeerSessionsOneAgent(ctx, agent, project, limit, messageLimit, sinceMin)
+			sessions, err := b.getPeerSessionsOneAgent(ctx, agent, project, limit, messageLimit, contentChars, sinceMin)
 			// Both success and failure go through the channel so the
 			// reassembly step below can surface per-agent failures to
 			// the caller. Pre-fix, errors were silently dropped here
@@ -244,7 +294,7 @@ func (b *Bundler) GetPeerSessions(
 func (b *Bundler) getPeerSessionsOneAgent(
 	ctx context.Context,
 	agentSource, project string,
-	limit, messageLimit, sinceMin int,
+	limit, messageLimit, contentChars, sinceMin int,
 ) ([]PeerSession, error) {
 	agentFilter := fmt.Sprintf("AND agent_source = '%s' ", escapeSQL(agentSource))
 
@@ -317,12 +367,24 @@ func (b *Bundler) getPeerSessionsOneAgent(
 		out = append(out, ps)
 	}
 
+	// buildPeerSessionListSQL takes MAX(cwd), which is the lexicographic
+	// maximum rather than where the work happened. Re-resolve it by
+	// event count so a session that moved between repos is labelled with
+	// the directory it actually worked in.
+	if attrs := b.attributionFor(ctx, sids); attrs != nil {
+		for i := range out {
+			if attr, ok := attrs[out[i].SessionID]; ok && attr.CWD != "" {
+				out[i].CWD = attr.CWD
+			}
+		}
+	}
+
 	var wg sync.WaitGroup
 	for i := range out {
 		wg.Add(1)
 		go func(ps *PeerSession) {
 			defer wg.Done()
-			b.enrichPeerSession(ctx, ps, messageLimit)
+			b.enrichPeerSession(ctx, ps, messageLimit, contentChars)
 		}(&out[i])
 	}
 	wg.Wait()
@@ -418,43 +480,20 @@ func isASCIILetter(b byte) bool {
 // of the four, not their sum. Before this change the four roundtrips
 // were serial, making each session ~4x slower than necessary against
 // a GreptimeDB under load.
-func (b *Bundler) enrichPeerSession(ctx context.Context, ps *PeerSession, messageLimit int) {
+func (b *Bundler) enrichPeerSession(ctx context.Context, ps *PeerSession, messageLimit, contentChars int) {
 	var wg sync.WaitGroup
 	wg.Add(4)
 
-	// Messages: pull from tma1_messages.
 	go func() {
 		defer wg.Done()
-		msgSQL := fmt.Sprintf(
-			`SELECT CAST(ts AS BIGINT) AS ts_ms,
-			        message_type, "role", content, model, tool_name,
-			        input_tokens, output_tokens
-			 FROM tma1_messages
-			 WHERE session_id = '%s'
-			   AND content IS NOT NULL
-			 ORDER BY ts DESC LIMIT %d`,
-			escapeSQL(ps.SessionID), messageLimit,
-		)
-		_, rows, err := b.client.Query(ctx, msgSQL)
+		if messageLimit <= 0 {
+			return
+		}
+		msgs, err := b.fetchSessionMessages(ctx, ps.SessionID, messageLimit, contentChars, "")
 		if err != nil {
 			return
 		}
-		// We fetched DESC; flip to chronological order for natural reading.
-		msgs := make([]PeerMessage, 0, len(rows))
-		for i := len(rows) - 1; i >= 0; i-- {
-			r := rows[i]
-			msgs = append(msgs, PeerMessage{
-				Timestamp:    time.UnixMilli(int64At(r, 0)),
-				MessageType:  stringAt(r, 1),
-				Role:         stringAt(r, 2),
-				Content:      stringAt(r, 3),
-				Model:        stringAt(r, 4),
-				ToolName:     stringAt(r, 5),
-				InputTokens:  int64At(r, 6),
-				OutputTokens: int64At(r, 7),
-			})
-		}
-		ps.Messages = dedupPeerMessages(msgs)
+		ps.Messages = msgs
 	}()
 
 	// Token totals (use SUM separately — messages above may be capped by limit).
@@ -526,6 +565,55 @@ func (b *Bundler) enrichPeerSession(ctx context.Context, ps *PeerSession, messag
 	}()
 
 	wg.Wait()
+}
+
+// peerAgentSelf is not a valid agent_source: only the Bundler knows the
+// caller's identity, so resolveAgentAlias swaps it in.
+const peerAgentSelf = "self"
+
+// resolveAgentAlias canonicalises an agent_source argument.
+func (b *Bundler) resolveAgentAlias(agentSource string) (string, error) {
+	agent := normalizePeerAgent(agentSource)
+	if agent == peerAgentSelf {
+		if b.Caller == "" {
+			return "", fmt.Errorf("cannot resolve %q: the caller's identity is unknown (TMA1_MCP_CALLER unset); name the agent explicitly", agentSource)
+		}
+		return b.Caller, nil
+	}
+	if agent != "" && !validPeerAgents[agent] {
+		return "", fmt.Errorf("invalid agent_source %q (valid: claude_code, codex, openclaw, copilot_cli, self, or empty for all peers)", agentSource)
+	}
+	return agent, nil
+}
+
+// markLatestForCWD flags the session this agent most recently worked in
+// under cwd.
+func (b *Bundler) markLatestForCWD(ctx context.Context, sessions []PeerSession, agent, cwd string) {
+	if len(sessions) == 0 {
+		return
+	}
+	latest, err := b.latestSessionForAgentCWD(ctx, cwd, agent)
+	if err != nil || latest == "" {
+		return
+	}
+	for i := range sessions {
+		if sessions[i].SessionID == latest {
+			sessions[i].IsLatestForCWD = true
+			return
+		}
+	}
+}
+
+func (b *Bundler) latestSessionForAgentCWD(ctx context.Context, cwd, agent string) (string, error) {
+	cwd = strings.TrimSpace(cwd)
+	if cwd == "" {
+		return "", nil
+	}
+	_, rows, err := b.client.Query(ctx, buildLatestSessionForCWDAgentSQL(cwd, agent))
+	if err != nil || len(rows) == 0 {
+		return "", err
+	}
+	return stringAt(rows[0], 0), nil
 }
 
 // clampPeerLimit constrains the per-agent session limit into [1, 5].
@@ -604,6 +692,8 @@ func normalizePeerAgent(s string) string {
 	switch s {
 	case "", "all", "*":
 		return ""
+	case "self", "me", "mine":
+		return peerAgentSelf
 	case "cc", "claude", "claude-code", "claudecode":
 		return "claude_code"
 	case "copilot", "copilot-cli", "github-copilot":

@@ -1,7 +1,6 @@
 package perception
 
 import (
-	"context"
 	"strings"
 	"testing"
 	"time"
@@ -179,51 +178,73 @@ func TestClampPeerLimit(t *testing.T) {
 	}
 }
 
-func TestGetPeerSessions_RejectsCallerSelf(t *testing.T) {
-	// Defense-in-depth: skill markdown is supposed to reject self-name
-	// at the prompt layer, but an LLM occasionally bypasses prompt
-	// rules. Server-side must error so a Codex user typing
-	// `/tma1-peer codex` never gets Codex's own sessions back.
-	//
-	// Uses normalized + alias inputs to lock the post-normalize
-	// comparison (cc → claude_code, claude → claude_code, etc.).
+func TestResolveAgentAlias(t *testing.T) {
+	// Naming yourself is allowed: "what did I do here earlier" is a
+	// real question. Only the empty-agent_source fan-out excludes the
+	// caller, and that lives in peerAgentList.
 	cases := []struct {
-		caller, agentSource string
+		caller, in, want string
 	}{
-		{"claude_code", "claude_code"},
-		{"claude_code", "cc"},
-		{"claude_code", "claude"},
-		{"codex", "codex"},
-		{"codex", "CODEX"},
-		{"openclaw", "openclaw"},
-		{"copilot_cli", "copilot"},
-		{"copilot_cli", "copilot-cli"},
+		{"claude_code", "claude_code", "claude_code"},
+		{"claude_code", "cc", "claude_code"},
+		{"codex", "CODEX", "codex"},
+		{"claude_code", "self", "claude_code"},
+		{"claude_code", "me", "claude_code"},
+		{"codex", "mine", "codex"},
+		{"codex", "claude", "claude_code"},
+		{"codex", "", ""},
+		{"", "codex", "codex"},
 	}
 	for _, c := range cases {
 		b := &Bundler{Caller: c.caller}
-		_, _, err := b.GetPeerSessions(context.Background(), c.agentSource, "tma1", 1, 20, 60)
-		if err == nil {
-			t.Errorf("caller=%q agentSource=%q: expected error, got nil", c.caller, c.agentSource)
+		got, err := b.resolveAgentAlias(c.in)
+		if err != nil {
+			t.Errorf("caller=%q resolveAgentAlias(%q) = error %v", c.caller, c.in, err)
 			continue
 		}
-		if !strings.Contains(err.Error(), "calling agent") {
-			t.Errorf("caller=%q agentSource=%q: error %q does not mention caller; expected self-exclusion message", c.caller, c.agentSource, err.Error())
+		if got != c.want {
+			t.Errorf("caller=%q resolveAgentAlias(%q) = %q, want %q", c.caller, c.in, got, c.want)
 		}
 	}
+}
 
-	// Caller="" (HTTP API path with no TMA1_MCP_CALLER env var) must
-	// not trigger self-exclusion — direct callers retain freedom to
-	// query any agent. We recover from the inevitable nil-client panic
-	// and assert the *check* itself didn't fire (no self-exclusion
-	// error raised before the client was dereferenced).
-	func() {
-		defer func() { _ = recover() }()
-		b := &Bundler{Caller: ""}
-		_, _, err := b.GetPeerSessions(context.Background(), "claude_code", "tma1", 1, 20, 60)
-		if err != nil && strings.Contains(err.Error(), "calling agent") {
-			t.Errorf("Caller=\"\" should not trigger self-exclusion, got %q", err.Error())
+func TestResolveAgentAliasErrors(t *testing.T) {
+	// "self" without a known caller can't be resolved to anything; the
+	// message must tell the agent what to do instead.
+	b := &Bundler{Caller: ""}
+	if _, err := b.resolveAgentAlias("self"); err == nil {
+		t.Error("resolveAgentAlias(self) with no Caller: expected error, got nil")
+	} else if !strings.Contains(err.Error(), "explicitly") {
+		t.Errorf("error %q should tell the caller to name the agent explicitly", err)
+	}
+
+	if _, err := (&Bundler{}).resolveAgentAlias("gemini"); err == nil {
+		t.Error("resolveAgentAlias(gemini): expected error for unknown agent")
+	}
+}
+
+func TestResolveDetail(t *testing.T) {
+	cases := []struct {
+		detail                  string
+		messageLimit            int
+		wantMessages, wantChars int
+	}{
+		{DetailSummary, 0, 0, 0},
+		{DetailPreview, 0, 3, 240},
+		{DetailFull, 0, 40, 1200},
+		{"", 0, 3, 240},
+		{"nonsense", 0, 3, 240},
+		// The deprecated numeric override wins, and is clamped.
+		{DetailSummary, 15, 15, 1200},
+		{DetailFull, 500, 100, 1200},
+	}
+	for _, c := range cases {
+		msgs, chars := resolveDetail(c.detail, c.messageLimit)
+		if msgs != c.wantMessages || chars != c.wantChars {
+			t.Errorf("resolveDetail(%q, %d) = (%d, %d), want (%d, %d)",
+				c.detail, c.messageLimit, msgs, chars, c.wantMessages, c.wantChars)
 		}
-	}()
+	}
 }
 
 func TestPeerAgentListExcludesCaller(t *testing.T) {

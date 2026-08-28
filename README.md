@@ -23,22 +23,34 @@ The name comes from TMA-1 (Tycho Magnetic Anomaly-1) in *2001: A Space
 Odyssey*: the monolith buried on the moon, silently recording everything
 until you dig it out.
 
-## What TMA1 Does
+## Quickstart
 
-TMA1 has two jobs:
+```bash
+curl -fsSL https://tma1.ai/install.sh | TMA1_ADAPTER=claude-code bash
+```
 
-1. Show the human what happened.
-2. Tell the agent what it should notice before the next step.
+The installer registers TMA1 as a background service and starts it. The
+dashboard is at <http://localhost:14318>.
 
-The dashboard gives you token usage, cost, latency, tool activity, full
-conversation replay, anomaly history, prompt evaluation, and SQL access to
-the underlying data.
+`TMA1_ADAPTER` accepts `claude-code`, `codex`, or `all`. See
+[Install](#install) for Windows and for installing without an adapter.
 
-The agent loop gives Claude Code and Codex a compact `<tma1-context>` block
-before each turn, can block `Stop` when a HIGH-severity issue is still
-unresolved, and exposes seven MCP tools the agent can call on demand.
+## What it does
 
-## Supported Sources
+TMA1 does two things.
+
+It feeds context to the agent. Before each turn the agent receives a
+`<tma1-context>` block: what it has done this session, which files changed
+under it, whether the build is broken, and any anomaly worth acting on.
+The `Stop` hook blocks turn completion while a HIGH-severity issue is
+unresolved. Ten MCP tools answer further queries on demand, including
+keyword search across every session recorded on the machine.
+
+It reports to you. The dashboard covers token usage, cost, latency,
+tool activity, conversation replay, anomaly history, prompt evaluation,
+and SQL over the raw tables.
+
+## Supported sources
 
 | Source | How TMA1 reads it | What you get |
 |--------|-------------------|--------------|
@@ -50,124 +62,7 @@ unresolved, and exposes seven MCP tools the agent can call on demand.
 
 All data is stored locally under `~/.tma1/`.
 
-## Install
-
-macOS / Linux:
-
-```bash
-curl -fsSL https://tma1.ai/install.sh | bash
-```
-
-Windows PowerShell:
-
-```powershell
-irm https://tma1.ai/install.ps1 | iex
-```
-
-Start the server:
-
-```bash
-tma1-server
-```
-
-Open the dashboard:
-
-```bash
-open http://localhost:14318
-```
-
-On first start, TMA1 writes a GreptimeDB config into `~/.tma1/config/`,
-downloads the GreptimeDB binary if needed, starts it as a child process, and
-serves the dashboard from the same `tma1-server` process.
-
-For ad-hoc SQL over the raw tables, GreptimeDB ships its own dashboard on
-port `14000`:
-
-```bash
-open http://localhost:14000/dashboard/#/dashboard/query
-```
-
-It has a SQL/PromQL editor, table browser, and chart output — useful when you
-want to go past what the TMA1 dashboard shows.
-
-## Wire An Agent
-
-The easiest path is to let the agent read the setup skill:
-
-```text
-Read https://tma1.ai/SKILL.md and follow the instructions to install or upgrade TMA1 for your AI agent
-```
-
-To wire adapters during install:
-
-```bash
-# Claude Code
-curl -fsSL https://tma1.ai/install.sh | TMA1_ADAPTER=claude-code bash
-
-# Codex
-curl -fsSL https://tma1.ai/install.sh | TMA1_ADAPTER=codex bash
-
-# Both
-curl -fsSL https://tma1.ai/install.sh | TMA1_ADAPTER=all bash
-```
-
-The curl installer writes global files only: hook scripts, MCP config, and
-the `/tma1-peer` skill. It does not edit project-local `AGENTS.md` or
-`CLAUDE.md`, because curl-pipe can run from any directory.
-
-To seed project-local instructions, run from the project root:
-
-```bash
-tma1-server install --adapter claude-code --project .
-tma1-server install --adapter codex --project .
-```
-
-Uninstall adapter wiring:
-
-```bash
-tma1-server uninstall --adapter claude-code --project .
-tma1-server uninstall --adapter codex --project .
-```
-
-## Closing The Agent Loop
-
-TMA1 pushes and pulls context.
-
-**Hooks push context into the next agent turn.**
-
-Claude Code gets five injection events: `SessionStart`, `UserPromptSubmit`,
-`PostToolUse`, `Stop`, and `PreCompact`. Codex gets the four it supports;
-Codex has no `PreCompact` hook.
-
-The hook script POSTs to `http://127.0.0.1:14318/api/hooks`. The response
-body becomes agent context. If TMA1 is down or slow, the hook returns empty
-stdout and lets the agent continue.
-
-**MCP lets the agent ask for context on demand.**
-
-The MCP server is the same binary:
-
-```bash
-tma1-server mcp-serve
-```
-
-It exposes:
-
-| Tool | Purpose |
-|------|---------|
-| `get_context_bundle` | One compact view of session state, anomalies, build status, external changes, and project structure |
-| `get_session_state` | Tool history, token totals, current focus, recent files |
-| `get_anomalies` | Active anomalies for the session |
-| `get_build_status` | Last captured build/dev output |
-| `get_external_changes` | Files changed outside the agent loop |
-| `get_project_state` | Cached project language, build system, key files, top-level dirs |
-| `get_peer_sessions` | Recent work left by peer agents on the same project |
-
-`/tma1-peer codex` is a thin skill wrapper around `get_peer_sessions`: it
-lets Claude Code read what Codex just did on the same project, verbatim. The
-Codex-side skill works the other direction.
-
-## How It Fits Together
+## How it fits together
 
 ```text
 Agent -- OTLP/HTTP --+
@@ -185,14 +80,132 @@ transcripts, runs the perception layer, stores everything in GreptimeDB, and
 serves the dashboard.
 
 Traces, metrics, and logs are kept as queryable data. Session data and
-anomaly emits live in `tma1_*` tables. You can query through the TMA1
-dashboard, GreptimeDB's own dashboard on port `14000`, the HTTP SQL API, or
-MySQL protocol on port `14002`.
+anomaly emits live in `tma1_*` tables.
 
-## Build Sensor
+Four query surfaces: the TMA1 dashboard, the `exec_query` MCP tool,
+MySQL protocol on port `14002`, and GreptimeDB's own dashboard
+(SQL/PromQL editor, table browser) at
+<http://localhost:14000/dashboard/#/dashboard/query>.
 
-Use the build wrapper when you want TMA1 to capture dev/test output and feed
-fresh failures back to the agent. Two modes:
+## Closing the agent loop
+
+TMA1 pushes and pulls context.
+
+Hooks push context into the next agent turn. The installer registers all
+27 Claude Code hook events for telemetry, but only five of them inject
+anything back: `SessionStart`, `UserPromptSubmit`, `PostToolUse`, `Stop`,
+and `PreCompact`. Codex registers five and injects on four; it has no
+`PreCompact`, and it ignores `additionalContext` from `PreToolUse`, so
+that one is telemetry only.
+
+The hook script POSTs to `http://127.0.0.1:14318/api/hooks`; the response
+body becomes agent context. When TMA1 is unreachable or slow the hook
+returns empty stdout and the agent continues without it.
+
+MCP serves the pull direction, from the same binary:
+
+```bash
+tma1-server mcp-serve
+```
+
+It exposes:
+
+| Tool | Purpose |
+|------|---------|
+| `get_context_bundle` | One compact view of session state, anomalies, build status, external changes, and project structure |
+| `get_session_state` | Tool history, token totals, current focus, recent files |
+| `get_anomalies` | Active anomalies for the session |
+| `get_build_status` | Last captured build/dev output |
+| `get_external_changes` | Files changed outside the agent loop |
+| `get_project_state` | Cached project language, build system, key files, top-level dirs |
+| `get_peer_sessions` | Recent sessions on this project by agent — peers, or your own with `agent_source: "self"` |
+| `search_sessions` | Find past sessions by what was said in them |
+| `get_session_transcript` | Read one session's conversation, by id or id prefix |
+| `exec_query` | One read-only `SELECT` against the local database |
+
+`/tma1-peer codex` wraps `get_peer_sessions`: Claude Code reads Codex's
+work on the same project verbatim. The Codex-side skill does the reverse.
+
+Session history is queryable by the agent itself:
+
+```
+/tma1-search retry backoff        # which past sessions discussed this?
+/tma1-search --session 3d8f1d0a   # read that session's conversation
+/tma1-peer self --limit 3         # what did I do here earlier today?
+```
+
+`search_sessions` returns snippets and a `session_id`.
+`get_session_transcript` accepts that id, or the 8-character abbreviation
+from the `<tma1-context>` block, and pages through the conversation.
+
+## Install
+
+`TMA1_ADAPTER` wires a coding agent's hooks, MCP entry, and skills.
+Claude Code and Codex require it for context injection and the `/tma1-*`
+commands. It is optional otherwise: OTLP traffic to port 14318 is
+recorded without it, and Copilot CLI sessions are discovered from disk.
+
+```bash
+# macOS / Linux
+curl -fsSL https://tma1.ai/install.sh | TMA1_ADAPTER=claude-code bash
+curl -fsSL https://tma1.ai/install.sh | TMA1_ADAPTER=codex bash
+curl -fsSL https://tma1.ai/install.sh | TMA1_ADAPTER=all bash
+
+# no adapter — server only, wire an agent later
+curl -fsSL https://tma1.ai/install.sh | bash
+```
+
+Windows PowerShell, with the adapter as an environment variable:
+
+```powershell
+$env:TMA1_ADAPTER = 'claude-code'; irm https://tma1.ai/install.ps1 | iex
+```
+
+The installer registers a background service (launchd agent on macOS,
+systemd user unit on Linux, scheduled task on Windows) and starts it. The
+dashboard is available at <http://localhost:14318> when the script exits.
+Start `tma1-server` manually only when building from source, or when
+service registration was skipped.
+
+On first start TMA1 writes a GreptimeDB config into `~/.tma1/config/`,
+downloads the GreptimeDB binary if needed, starts it as a child process,
+and serves the dashboard from the same `tma1-server` process.
+
+## Wire an agent
+
+To have the agent install TMA1 itself:
+
+```text
+Read https://tma1.ai/SKILL.md and follow the instructions to install or upgrade TMA1 for your AI agent
+```
+
+The curl installer writes global files only: hook scripts, MCP config,
+and the TMA1 skills. Project-local `AGENTS.md` and `CLAUDE.md` are left
+untouched.
+
+Skill and command files are written by `install`, not refreshed by the
+binary at startup. Re-run `install --adapter` after upgrading;
+`tma1-server` logs a warning at startup when the installed files no
+longer match the binary.
+
+For project-local instructions, run from the project root:
+
+```bash
+tma1-server install --adapter claude-code --project .
+tma1-server install --adapter codex --project .
+```
+
+Uninstall adapter wiring:
+
+```bash
+tma1-server uninstall --adapter claude-code --project .
+tma1-server uninstall --adapter codex --project .
+```
+
+## Build sensor
+
+The build wrapper captures dev and test output and feeds failures back to
+the agent. Two modes:
 
 ```bash
 # One-shot — wrapper exits with the wrapped command's exit code:
@@ -222,7 +235,7 @@ Supported flags:
 | `--no-color` | Strip ANSI color codes from captured output |
 | `--project DIR` | Override the project directory used for scoping (default: cwd) |
 
-## OTLP Endpoints
+## OTLP endpoints
 
 Use the wildcard endpoint when the agent or SDK supports it:
 
@@ -259,10 +272,10 @@ the single `/v1/otlp` base.
 | `TMA1_LLM_MODEL` | auto | Model override for prompt evaluation |
 | `TMA1_QUERY_CONCURRENCY` | `4` | Max concurrent SQL queries from the dashboard |
 | `TMA1_ADAPTER` | empty | Install-time adapter list: `claude-code`, `codex`, comma-separated, or `all` |
-| `TMA1_MCP_CALLER` | empty | Set by adapter installers so peer-session queries exclude the caller |
+| `TMA1_MCP_CALLER` | empty | Set by adapter installers. Identifies the calling agent, so `get_peer_sessions` can exclude it from the default fan-out and resolve `agent_source: "self"` |
 | `TMA1_DISABLE_INJECTION` | unset | Set to `1` to record hooks but return no injected context |
 | `TMA1_ENABLE_FILE_CALLBACK` | unset | Set to `1` to write `.tma1-context.md` for non-MCP agents |
-| `TMA1_CONTEXT_PRESSURE_THRESHOLD` | `100000` | Input-token threshold for context-pressure anomalies |
+| `TMA1_CONTEXT_PRESSURE_THRESHOLD` | `700000` | Input-token threshold for context-pressure anomalies (~70% of a 1M window). Lower it if your model has a smaller context |
 | `OPENCLAW_STATE_DIR` | `~/.openclaw` | Override the OpenClaw session directory |
 
 Settings changed in the dashboard are saved to `~/.tma1/settings.json`.
@@ -270,15 +283,14 @@ Environment variables take priority.
 
 ## CLI
 
-The `tma1-server` binary (aliased to `tma1` by the installer) is one
-entry point for everything.
+The installer symlinks `tma1-server` as `tma1`.
 
 | Command | Purpose |
 |---------|---------|
 | `tma1 install --adapter <name>` | Wire a coding agent into TMA1 (`claude-code`, `codex`) |
 | `tma1 uninstall --adapter <name>` | Reverse install for one adapter |
 | `tma1 build [--watch] -- <cmd>` | Wrap a build/test command and ship its output into `tma1_build_events` |
-| `tma1 mcp-serve` | JSON-RPC MCP stdio server (spawned by agents, not run by hand) |
+| `tma1 mcp-serve` | JSON-RPC MCP stdio server; spawned by agents, not invoked directly |
 | `tma1 help [SUB]` | Print top-level usage, or details for a specific subcommand |
 | `tma1 version` | Print the tma1-server version |
 
@@ -322,7 +334,10 @@ for `site/public/install.ps1`.
 - [MCP tools](docs/mcp-tools.md): tool schemas and behavior
 - [Anomalies](docs/anomalies.md): rules, channels, suppression, validation
 
-## Explicitly Absent
+Troubleshooting, including the case where no data appears, is covered in
+the setup skill: <https://tma1.ai/SKILL.md>
+
+## Explicitly absent
 
 - No cloud service
 - No OTel Collector requirement

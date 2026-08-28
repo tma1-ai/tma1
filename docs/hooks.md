@@ -288,6 +288,34 @@ producing self-noise the attribution layer then had to filter back
 out. Set the env var when running a CC-less agent that genuinely needs
 the file.
 
+### Upgrading: skills do not refresh themselves
+
+`tma1-server` rewrites its hook script on every start, but not the skill
+and slash-command files. Those are copied into `~/.claude/{skills,commands}/`
+and `~/.agents/skills/` by `tma1-server install`, and nothing else touches
+them — deliberately, since rewriting files under a user's home without
+being asked is not the installer's call to make outside an explicit
+install.
+
+The consequence: upgrade the binary and you keep the previous release's
+skills, which may document tool arguments that have since changed. At
+startup the server compares the embedded trees against what is on disk
+for each installed adapter and logs a warning naming the fix:
+
+```
+WARN installed tma1 skills are out of date — agents will read the old contract
+     adapter=claude-code stale_files=3 fix="tma1 install --adapter claude-code"
+```
+
+"Installed" is decided by the hook registration in `~/.claude/settings.json`
+(or `~/.codex/hooks.json`), not by the presence of the skill directory. A
+deleted skill tree is exactly the case that most needs the warning, and a
+directory check would read it as "never installed" and stay quiet.
+
+Re-running `install --adapter` is idempotent: files whose content already
+matches are left untouched, and the stale sweep is scoped to the `tma1-`
+owner prefix, so skills you installed yourself are never removed.
+
 ### Cache invalidation on every event
 
 Every hook event invalidates the per-session anomaly cache so the next

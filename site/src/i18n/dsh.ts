@@ -118,7 +118,7 @@ export const en: ProductCopy = {
 
   install: {
     label: 'INSTALL',
-    cmd: 'dsh plugin --profile headless add @tma1-ai/dsh-plugin-greptimedb',
+    cmd: 'dsh plugin --profile web add @tma1-ai/dsh-plugin-greptimedb',
     note: 'The package ships a bundle patch, so that one command is the whole install. Requires pnpm 10 or newer. The defaults already point at a local GreptimeDB.',
     more_summary: 'Point it at your own database, or start a local one',
     more: [
@@ -168,8 +168,8 @@ export const en: ProductCopy = {
       },
       {
         num: '[03]',
-        title: 'Five Grafana dashboards',
-        desc: 'They ship in <code>grafana/</code> with a compose stack that brings up GreptimeDB and Grafana together. Every panel query is checked against a live database in CI.',
+        title: 'Seven Grafana dashboards',
+        desc: 'Overview, Cost, Sessions, Agent loop, Trace explorer, Log explorer, Metrics. They ship in <code>grafana/</code> with a compose stack that brings up GreptimeDB and Grafana together, and every panel query is checked against a live database in CI.',
         media: {
           kind: 'image',
           src: `${SHOT}/overview.webp`,
@@ -325,7 +325,7 @@ export const zh: ProductCopy = {
 
   install: {
     label: '安装',
-    cmd: 'dsh plugin --profile headless add @tma1-ai/dsh-plugin-greptimedb',
+    cmd: 'dsh plugin --profile web add @tma1-ai/dsh-plugin-greptimedb',
     note: '包内自带 bundle patch，一条命令即可完成安装。需要 pnpm 10 及以上版本。默认配置指向本地 GreptimeDB。',
     more_summary: '指向自有数据库，或先启动一个本地实例',
     more: [
@@ -375,8 +375,8 @@ export const zh: ProductCopy = {
       },
       {
         num: '[03]',
-        title: '五个 Grafana 仪表盘',
-        desc: '仪表盘放在 <code>grafana/</code>，并附带一个同时启动 GreptimeDB 和 Grafana 的 compose stack。每个面板的查询都在 CI 中针对真实数据库校验。',
+        title: '七个 Grafana 仪表盘',
+        desc: 'Overview、Cost、Sessions、Agent loop、Trace explorer、Log explorer、Metrics。仪表盘放在 <code>grafana/</code>，并附带一个同时启动 GreptimeDB 和 Grafana 的 compose stack，每个面板的查询都在 CI 中针对真实数据库校验。',
         media: {
           kind: 'image',
           src: `${SHOT}/overview.webp`,
@@ -532,7 +532,7 @@ export const es: ProductCopy = {
 
   install: {
     label: 'INSTALACIÓN',
-    cmd: 'dsh plugin --profile headless add @tma1-ai/dsh-plugin-greptimedb',
+    cmd: 'dsh plugin --profile web add @tma1-ai/dsh-plugin-greptimedb',
     note: 'El paquete trae un bundle patch, así que ese comando es toda la instalación. Requiere pnpm 10 o superior. Los valores por defecto ya apuntan a un GreptimeDB local.',
     more_summary: 'Apuntalo a tu propia base de datos, o levantá una local',
     more: [
@@ -582,8 +582,8 @@ export const es: ProductCopy = {
       },
       {
         num: '[03]',
-        title: 'Cinco dashboards de Grafana',
-        desc: 'Vienen en <code>grafana/</code> junto a un stack de compose que levanta GreptimeDB y Grafana a la vez. Cada consulta de panel se verifica contra una base real en CI.',
+        title: 'Siete dashboards de Grafana',
+        desc: 'Overview, Cost, Sessions, Agent loop, Trace explorer, Log explorer y Metrics. Vienen en <code>grafana/</code> junto a un stack de compose que levanta GreptimeDB y Grafana a la vez, y cada consulta de panel se verifica contra una base real en CI.',
         media: {
           kind: 'image',
           src: `${SHOT}/overview.webp`,
