@@ -48,7 +48,7 @@ type EventWriter interface {
 	Write(ctx context.Context, c Change) error
 }
 
-// Attributor decides whether a file change came from the agent or a human.
+// Attributor correlates a file change with available agent hook evidence.
 type Attributor interface {
-	Classify(ctx context.Context, filePath string, when time.Time) string
+	Classify(ctx context.Context, projectRoot, filePath string, when time.Time) string
 }

@@ -189,7 +189,7 @@ func (w *projectWatcher) handleFsEvent(ev fsnotify.Event) {
 	}
 	change.Attribution = AttributionUnknown
 	if w.cfg.Attributor != nil {
-		change.Attribution = w.cfg.Attributor.Classify(w.ctx, ev.Name, change.Timestamp)
+		change.Attribution = w.cfg.Attributor.Classify(w.ctx, w.cfg.Root, ev.Name, change.Timestamp)
 	}
 
 	if err := w.cfg.Writer.Write(w.ctx, change); err != nil {

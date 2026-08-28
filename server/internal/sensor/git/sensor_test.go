@@ -30,7 +30,7 @@ func (s *stubWriter) count() int {
 
 type stubAttributor struct{ verdict string }
 
-func (s stubAttributor) Classify(_ context.Context, _ string, _ time.Time) string {
+func (s stubAttributor) Classify(_ context.Context, _, _ string, _ time.Time) string {
 	return s.verdict
 }
 
