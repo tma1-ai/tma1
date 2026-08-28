@@ -23,20 +23,33 @@ The name comes from TMA-1 (Tycho Magnetic Anomaly-1) in *2001: A Space
 Odyssey*: the monolith buried on the moon, silently recording everything
 until you dig it out.
 
+## Quickstart
+
+```bash
+curl -fsSL https://tma1.ai/install.sh | TMA1_ADAPTER=claude-code bash
+open http://localhost:14318
+```
+
+That is the whole setup. The installer registers TMA1 as a background
+service and starts it, so there is no server to launch by hand.
+
+Use `TMA1_ADAPTER=codex` for Codex, `all` for both. Windows and the
+no-adapter path are under [Install](#install).
+
 ## What it does
 
-TMA1 has two jobs:
+TMA1 has two jobs, and the second one is why it exists.
 
-1. Show the human what happened.
-2. Tell the agent what it should notice before the next step.
+It tells the agent what it should notice. Before each turn the agent gets
+a compact `<tma1-context>` block: what it has already done this session,
+which files changed under it, whether the build is broken, which anomalies
+are worth acting on. A `Stop` hook can refuse to end the turn while a
+HIGH-severity issue is unresolved. Ten MCP tools let the agent pull more
+when it wants to, including every past session on this machine, searchable.
 
-The dashboard gives you token usage, cost, latency, tool activity, full
-conversation replay, anomaly history, prompt evaluation, and SQL access to
-the underlying data.
-
-The agent loop gives Claude Code and Codex a compact `<tma1-context>` block
-before each turn, can block `Stop` when a HIGH-severity issue is still
-unresolved, and exposes ten MCP tools the agent can call on demand.
+It also shows you what happened, which is the part you would expect: token
+usage, cost, latency, tool activity, conversation replay, anomaly history,
+prompt evaluation, and SQL over the raw tables.
 
 ## Supported sources
 
@@ -50,90 +63,33 @@ unresolved, and exposes ten MCP tools the agent can call on demand.
 
 All data is stored locally under `~/.tma1/`.
 
-## Install
+## How it fits together
 
-macOS / Linux:
-
-```bash
-curl -fsSL https://tma1.ai/install.sh | bash
+```text
+Agent -- OTLP/HTTP --+
+       -- /api/hooks +--> tma1-server (port 14318)
+       -- MCP stdio --+        |
+                              v
+                        GreptimeDB (port 14000)
+                              |
+                              v
+                        Embedded dashboard
 ```
 
-Windows PowerShell:
+TMA1 reverse-proxies OTLP to GreptimeDB, ingests hook events and JSONL
+transcripts, runs the perception layer, stores everything in GreptimeDB, and
+serves the dashboard.
 
-```powershell
-irm https://tma1.ai/install.ps1 | iex
-```
+Traces, metrics, and logs are kept as queryable data. Session data and
+anomaly emits live in `tma1_*` tables.
 
-Start the server:
-
-```bash
-tma1-server
-```
-
-Open the dashboard:
-
-```bash
-open http://localhost:14318
-```
-
-On first start, TMA1 writes a GreptimeDB config into `~/.tma1/config/`,
-downloads the GreptimeDB binary if needed, starts it as a child process, and
-serves the dashboard from the same `tma1-server` process.
-
-For ad-hoc SQL over the raw tables, GreptimeDB ships its own dashboard on
-port `14000`:
+Four ways to query them: the TMA1 dashboard, the `exec_query` MCP tool if
+you would rather ask the agent, MySQL protocol on port `14002`, or
+GreptimeDB's own dashboard, which has a SQL/PromQL editor and table
+browser:
 
 ```bash
 open http://localhost:14000/dashboard/#/dashboard/query
-```
-
-SQL/PromQL editor, table browser, chart output. Useful when you want to go
-past what the TMA1 dashboard shows.
-
-## Wire an agent
-
-The easiest path is to let the agent read the setup skill:
-
-```text
-Read https://tma1.ai/SKILL.md and follow the instructions to install or upgrade TMA1 for your AI agent
-```
-
-To wire adapters during install:
-
-```bash
-# Claude Code
-curl -fsSL https://tma1.ai/install.sh | TMA1_ADAPTER=claude-code bash
-
-# Codex
-curl -fsSL https://tma1.ai/install.sh | TMA1_ADAPTER=codex bash
-
-# Both
-curl -fsSL https://tma1.ai/install.sh | TMA1_ADAPTER=all bash
-```
-
-The curl installer writes global files only: hook scripts, MCP config, and
-the TMA1 skills. It does not edit project-local `AGENTS.md` or
-`CLAUDE.md`, because curl-pipe can run from any directory.
-
-Re-run the install command after upgrading the binary. Upgrading replaces
-`tma1-server`, but the skill and slash-command files already copied into
-`~/.claude/` and `~/.agents/` are left alone, so a new binary can end up
-paired with last release's skills documenting arguments that no longer
-exist. `tma1-server` warns at startup when it sees that drift. The fix is
-the same `install --adapter` command you ran the first time.
-
-To seed project-local instructions, run from the project root:
-
-```bash
-tma1-server install --adapter claude-code --project .
-tma1-server install --adapter codex --project .
-```
-
-Uninstall adapter wiring:
-
-```bash
-tma1-server uninstall --adapter claude-code --project .
-tma1-server uninstall --adapter codex --project .
 ```
 
 ## Closing the agent loop
@@ -190,27 +146,75 @@ database, so the agent can go back and read it:
 `get_session_transcript` takes that id (the 8-character abbreviation from
 the `<tma1-context>` block also works) and pages through the conversation.
 
-## How it fits together
+## Install
 
-```text
-Agent -- OTLP/HTTP --+
-       -- /api/hooks +--> tma1-server (port 14318)
-       -- MCP stdio --+        |
-                              v
-                        GreptimeDB (port 14000)
-                              |
-                              v
-                        Embedded dashboard
+The installer takes an adapter, which is what makes the dashboard show
+something. Without one you get a server with nothing reporting to it.
+
+```bash
+# macOS / Linux
+curl -fsSL https://tma1.ai/install.sh | TMA1_ADAPTER=claude-code bash
+curl -fsSL https://tma1.ai/install.sh | TMA1_ADAPTER=codex bash
+curl -fsSL https://tma1.ai/install.sh | TMA1_ADAPTER=all bash
+
+# no adapter — server only, wire an agent later
+curl -fsSL https://tma1.ai/install.sh | bash
 ```
 
-TMA1 reverse-proxies OTLP to GreptimeDB, ingests hook events and JSONL
-transcripts, runs the perception layer, stores everything in GreptimeDB, and
-serves the dashboard.
+Windows PowerShell (the adapter goes in an env var, since `iex` has
+nowhere to put arguments):
 
-Traces, metrics, and logs are kept as queryable data. Session data and
-anomaly emits live in `tma1_*` tables. You can query through the TMA1
-dashboard, GreptimeDB's own dashboard on port `14000`, the HTTP SQL API, or
-MySQL protocol on port `14002`.
+```powershell
+$env:TMA1_ADAPTER = 'claude-code'; irm https://tma1.ai/install.ps1 | iex
+```
+
+The installer registers a background service — launchd agent on macOS,
+systemd user unit on Linux, scheduled task on Windows — and starts it, so
+the dashboard is up when the script finishes:
+
+```bash
+open http://localhost:14318
+```
+
+Run `tma1-server` by hand only if you built from source or skipped the
+service registration.
+
+On first start TMA1 writes a GreptimeDB config into `~/.tma1/config/`,
+downloads the GreptimeDB binary if needed, starts it as a child process,
+and serves the dashboard from the same `tma1-server` process.
+
+## Wire an agent
+
+The easiest path is to let the agent read the setup skill:
+
+```text
+Read https://tma1.ai/SKILL.md and follow the instructions to install or upgrade TMA1 for your AI agent
+```
+
+The curl installer writes global files only: hook scripts, MCP config, and
+the TMA1 skills. It does not edit project-local `AGENTS.md` or
+`CLAUDE.md`, because curl-pipe can run from any directory.
+
+Re-run the install command after upgrading the binary. Upgrading replaces
+`tma1-server`, but the skill and slash-command files already copied into
+`~/.claude/` and `~/.agents/` are left alone, so a new binary can end up
+paired with last release's skills documenting arguments that no longer
+exist. `tma1-server` warns at startup when it sees that drift. The fix is
+the same `install --adapter` command you ran the first time.
+
+To seed project-local instructions, run from the project root:
+
+```bash
+tma1-server install --adapter claude-code --project .
+tma1-server install --adapter codex --project .
+```
+
+Uninstall adapter wiring:
+
+```bash
+tma1-server uninstall --adapter claude-code --project .
+tma1-server uninstall --adapter codex --project .
+```
 
 ## Build sensor
 
@@ -344,6 +348,9 @@ for `site/public/install.ps1`.
 - [Hooks](docs/hooks.md): hook protocol, adapter registration, uninstall
 - [MCP tools](docs/mcp-tools.md): tool schemas and behavior
 - [Anomalies](docs/anomalies.md): rules, channels, suppression, validation
+
+Nothing showing up in the dashboard? The setup skill has a troubleshooting
+walkthrough: <https://tma1.ai/SKILL.md>
 
 ## Explicitly absent
 
