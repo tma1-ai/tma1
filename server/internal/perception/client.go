@@ -26,9 +26,15 @@ type Client struct {
 
 // NewClient creates a Client targeting localhost:<httpPort>.
 func NewClient(httpPort int) *Client {
+	return NewClientWithTimeout(httpPort, 3*time.Second)
+}
+
+// NewClientWithTimeout is NewClient with an explicit deadline, for
+// callers whose queries are allowed to be slower than a sensor lookup.
+func NewClientWithTimeout(httpPort int, timeout time.Duration) *Client {
 	return &Client{
 		httpPort: httpPort,
-		http:     &http.Client{Timeout: 3 * time.Second},
+		http:     &http.Client{Timeout: timeout},
 	}
 }
 

@@ -35,7 +35,7 @@ tma1-server is one Go binary: it manages a child GreptimeDB process, reverse-pro
 **Deep references — read these when you need detail:**
 - [`docs/architecture.md`](docs/architecture.md) — module layout, full data flow, per-agent tables, env vars, file index
 - [`docs/hooks.md`](docs/hooks.md) — hook injection protocol (5 events × 2 adapters)
-- [`docs/mcp-tools.md`](docs/mcp-tools.md) — 7 MCP tools backed by the perception bundler
+- [`docs/mcp-tools.md`](docs/mcp-tools.md) — 10 MCP tools backed by the perception bundler
 - [`docs/anomalies.md`](docs/anomalies.md) — anomaly rules, channels, suppression
 
 ## Commands
@@ -146,5 +146,7 @@ Edit/Write target.
 - Trust `external_files` over your in-memory snapshot — re-read those before editing
 - Call the MCP tool `get_session_state` if you need a fuller view of your prior tool calls
 - Call `get_context_bundle` after compaction or when context feels stale
+- Call `search_sessions` when the answer is in an earlier session ("how did we fix this before"), then `get_session_transcript` with the returned `session_id` to read it
+- Call `exec_query` for aggregates the purpose-built tools don't cover (cost by model, tool failure rates) — one read-only SELECT
 - Wrap persistent processes (dev servers, watchers like `npm run dev`, `cargo watch`) with `tma1 build --watch -- <cmd>` so output persists past your session; the next agent (or you, after compaction) reads it via `get_build_status`. One-shot commands don't need wrapping — use Bash directly.
 <!-- tma1:end -->

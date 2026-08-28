@@ -27,9 +27,13 @@ type Bundle struct {
 
 // Bundler builds Bundles. Safe for concurrent use.
 type Bundler struct {
-	client   *Client
-	detector *Detector
-	logger   *slog.Logger
+	client *Client
+	// execClient serves exec_query, whose agent-authored aggregates can
+	// legitimately run for seconds — far longer than a sensor lookup
+	// blocking a hook response may take.
+	execClient *Client
+	detector   *Detector
+	logger     *slog.Logger
 
 	// Caller identifies which agent is invoking this Bundler when it
 	// runs under `tma1-server mcp-serve`. It's set from the
@@ -49,9 +53,10 @@ func NewBundler(httpPort int, logger *slog.Logger) *Bundler {
 		logger = slog.Default()
 	}
 	return &Bundler{
-		client:   NewClient(httpPort),
-		detector: NewDetector(httpPort, logger),
-		logger:   logger,
+		client:     NewClient(httpPort),
+		execClient: NewClientWithTimeout(httpPort, 15*time.Second),
+		detector:   NewDetector(httpPort, logger),
+		logger:     logger,
 	}
 }
 

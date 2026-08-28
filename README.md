@@ -23,7 +23,7 @@ The name comes from TMA-1 (Tycho Magnetic Anomaly-1) in *2001: A Space
 Odyssey*: the monolith buried on the moon, silently recording everything
 until you dig it out.
 
-## What TMA1 Does
+## What it does
 
 TMA1 has two jobs:
 
@@ -36,9 +36,9 @@ the underlying data.
 
 The agent loop gives Claude Code and Codex a compact `<tma1-context>` block
 before each turn, can block `Stop` when a HIGH-severity issue is still
-unresolved, and exposes seven MCP tools the agent can call on demand.
+unresolved, and exposes ten MCP tools the agent can call on demand.
 
-## Supported Sources
+## Supported sources
 
 | Source | How TMA1 reads it | What you get |
 |--------|-------------------|--------------|
@@ -87,10 +87,10 @@ port `14000`:
 open http://localhost:14000/dashboard/#/dashboard/query
 ```
 
-It has a SQL/PromQL editor, table browser, and chart output — useful when you
-want to go past what the TMA1 dashboard shows.
+SQL/PromQL editor, table browser, chart output. Useful when you want to go
+past what the TMA1 dashboard shows.
 
-## Wire An Agent
+## Wire an agent
 
 The easiest path is to let the agent read the setup skill:
 
@@ -112,8 +112,15 @@ curl -fsSL https://tma1.ai/install.sh | TMA1_ADAPTER=all bash
 ```
 
 The curl installer writes global files only: hook scripts, MCP config, and
-the `/tma1-peer` skill. It does not edit project-local `AGENTS.md` or
+the TMA1 skills. It does not edit project-local `AGENTS.md` or
 `CLAUDE.md`, because curl-pipe can run from any directory.
+
+Re-run the install command after upgrading the binary. Upgrading replaces
+`tma1-server`, but the skill and slash-command files already copied into
+`~/.claude/` and `~/.agents/` are left alone, so a new binary can end up
+paired with last release's skills documenting arguments that no longer
+exist. `tma1-server` warns at startup when it sees that drift. The fix is
+the same `install --adapter` command you ran the first time.
 
 To seed project-local instructions, run from the project root:
 
@@ -129,23 +136,23 @@ tma1-server uninstall --adapter claude-code --project .
 tma1-server uninstall --adapter codex --project .
 ```
 
-## Closing The Agent Loop
+## Closing the agent loop
 
 TMA1 pushes and pulls context.
 
-**Hooks push context into the next agent turn.**
+Hooks push context into the next agent turn. The installer registers all
+27 Claude Code hook events for telemetry, but only five of them inject
+anything back: `SessionStart`, `UserPromptSubmit`, `PostToolUse`, `Stop`,
+and `PreCompact`. Codex registers five and injects on four; it has no
+`PreCompact`, and it ignores `additionalContext` from `PreToolUse`, so
+that one is telemetry only.
 
-Claude Code gets five injection events: `SessionStart`, `UserPromptSubmit`,
-`PostToolUse`, `Stop`, and `PreCompact`. Codex gets the four it supports;
-Codex has no `PreCompact` hook.
+The hook script POSTs to `http://127.0.0.1:14318/api/hooks` and the
+response body becomes agent context. If TMA1 is down or slow the hook
+returns empty stdout, and the agent carries on as if it were never there.
 
-The hook script POSTs to `http://127.0.0.1:14318/api/hooks`. The response
-body becomes agent context. If TMA1 is down or slow, the hook returns empty
-stdout and lets the agent continue.
-
-**MCP lets the agent ask for context on demand.**
-
-The MCP server is the same binary:
+MCP is the other direction: the agent asks when it wants something. Same
+binary, different entry point:
 
 ```bash
 tma1-server mcp-serve
@@ -161,13 +168,29 @@ It exposes:
 | `get_build_status` | Last captured build/dev output |
 | `get_external_changes` | Files changed outside the agent loop |
 | `get_project_state` | Cached project language, build system, key files, top-level dirs |
-| `get_peer_sessions` | Recent work left by peer agents on the same project |
+| `get_peer_sessions` | Recent sessions on this project by agent — peers, or your own with `agent_source: "self"` |
+| `search_sessions` | Find past sessions by what was said in them |
+| `get_session_transcript` | Read one session's conversation, by id or id prefix |
+| `exec_query` | One read-only `SELECT` against the local database |
 
 `/tma1-peer codex` is a thin skill wrapper around `get_peer_sessions`: it
 lets Claude Code read what Codex just did on the same project, verbatim. The
 Codex-side skill works the other direction.
 
-## How It Fits Together
+Everything every agent did on this machine is already in the local
+database, so the agent can go back and read it:
+
+```
+/tma1-search retry backoff        # which past sessions discussed this?
+/tma1-search --session 3d8f1d0a   # read that session's conversation
+/tma1-peer self --limit 3         # what did I do here earlier today?
+```
+
+`search_sessions` returns snippets plus a `session_id`.
+`get_session_transcript` takes that id (the 8-character abbreviation from
+the `<tma1-context>` block also works) and pages through the conversation.
+
+## How it fits together
 
 ```text
 Agent -- OTLP/HTTP --+
@@ -189,7 +212,7 @@ anomaly emits live in `tma1_*` tables. You can query through the TMA1
 dashboard, GreptimeDB's own dashboard on port `14000`, the HTTP SQL API, or
 MySQL protocol on port `14002`.
 
-## Build Sensor
+## Build sensor
 
 Use the build wrapper when you want TMA1 to capture dev/test output and feed
 fresh failures back to the agent. Two modes:
@@ -222,7 +245,7 @@ Supported flags:
 | `--no-color` | Strip ANSI color codes from captured output |
 | `--project DIR` | Override the project directory used for scoping (default: cwd) |
 
-## OTLP Endpoints
+## OTLP endpoints
 
 Use the wildcard endpoint when the agent or SDK supports it:
 
@@ -259,10 +282,10 @@ the single `/v1/otlp` base.
 | `TMA1_LLM_MODEL` | auto | Model override for prompt evaluation |
 | `TMA1_QUERY_CONCURRENCY` | `4` | Max concurrent SQL queries from the dashboard |
 | `TMA1_ADAPTER` | empty | Install-time adapter list: `claude-code`, `codex`, comma-separated, or `all` |
-| `TMA1_MCP_CALLER` | empty | Set by adapter installers so peer-session queries exclude the caller |
+| `TMA1_MCP_CALLER` | empty | Set by adapter installers. Identifies the calling agent, so `get_peer_sessions` can exclude it from the default fan-out and resolve `agent_source: "self"` |
 | `TMA1_DISABLE_INJECTION` | unset | Set to `1` to record hooks but return no injected context |
 | `TMA1_ENABLE_FILE_CALLBACK` | unset | Set to `1` to write `.tma1-context.md` for non-MCP agents |
-| `TMA1_CONTEXT_PRESSURE_THRESHOLD` | `100000` | Input-token threshold for context-pressure anomalies |
+| `TMA1_CONTEXT_PRESSURE_THRESHOLD` | `700000` | Input-token threshold for context-pressure anomalies (~70% of a 1M window). Lower it if your model has a smaller context |
 | `OPENCLAW_STATE_DIR` | `~/.openclaw` | Override the OpenClaw session directory |
 
 Settings changed in the dashboard are saved to `~/.tma1/settings.json`.
@@ -322,7 +345,7 @@ for `site/public/install.ps1`.
 - [MCP tools](docs/mcp-tools.md): tool schemas and behavior
 - [Anomalies](docs/anomalies.md): rules, channels, suppression, validation
 
-## Explicitly Absent
+## Explicitly absent
 
 - No cloud service
 - No OTel Collector requirement

@@ -2,7 +2,7 @@
 name: tma1
 description: "Query TMA1 observability data (Claude Code, Codex, GitHub Copilot CLI, OpenClaw, any OTel SDK). Use when the user asks: how much did I spend, token usage, what has my agent been doing, agent cost, show me traces, show me events, check for errors, model comparison, tool usage."
 context: fork
-allowed-tools: Bash
+allowed-tools: ["mcp__tma1__exec_query", "Bash"]
 ---
 
 # TMA1 Observability Query
@@ -26,10 +26,8 @@ If this fails, tell the user to run `/tma1-setup` first.
 
 ## Step 2: Detect available data sources
 
-```bash
-curl -s -X POST http://localhost:14318/api/query \
-  -H 'Content-Type: application/json' \
-  -d '{"sql": "SHOW TABLES"}'
+```
+exec_query: SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'
 ```
 
 Check which tables exist to determine what queries to use:
@@ -43,7 +41,13 @@ Check which tables exist to determine what queries to use:
 
 ## Step 3: Choose and run query
 
-All queries go through:
+Run every query below through the **`mcp__tma1__exec_query`** MCP tool —
+one read-only `SELECT` per call, returning `columns` + `rows`. It caps
+rows (`row_limit`, default 100) and cell length (`cell_chars`, default
+2000), and sets `truncated` when it had to cut.
+
+If that tool isn't available (an agent without TMA1's MCP server wired
+up), fall back to the HTTP API:
 
 ```bash
 curl -s -X POST http://localhost:14318/api/query \
@@ -51,7 +55,12 @@ curl -s -X POST http://localhost:14318/api/query \
   -d '{"sql": "<SQL>"}'
 ```
 
-**Important**: The underlying database (GreptimeDB) uses `json_get_string()`, `json_get_int()`, `json_get_float()` for JSON column access. The `->` / `->>` operators are NOT supported. Keys containing dots (like `session.id`) are interpreted as nested paths and cannot be accessed via `json_get_*`. All timestamps are stored and returned in **UTC** by default. To use the user's local timezone, add `-H 'X-Greptime-Timezone: <tz>'` (e.g. `+8:00`, `-5:00`, `Asia/Shanghai`, `America/New_York`) — this affects both date parsing in WHERE clauses and timestamp rendering in results.
+Don't reach for SQL when a purpose-built tool answers the question:
+`search_sessions` finds sessions by keyword, `get_session_transcript`
+reads one session's conversation, `get_peer_sessions` lists recent work
+by agent, `get_session_state` describes the session you're in.
+
+**Important**: The underlying database (GreptimeDB) uses `json_get_string()`, `json_get_int()`, `json_get_float()` for JSON column access. The `->` / `->>` operators are NOT supported. Keys containing dots (like `session.id`) are interpreted as nested paths and cannot be accessed via `json_get_*`. All timestamps are stored and returned in **UTC**. Convert in SQL when the user wants local time (`ts + INTERVAL '8 hours'`), or, on the curl fallback, send `-H 'X-Greptime-Timezone: Asia/Shanghai'` to shift both WHERE-clause parsing and rendering.
 
 ---
 
@@ -578,7 +587,7 @@ GROUP BY tool_name ORDER BY calls DESC
 
 ## Step 4: Execute and format
 
-Run the chosen query via curl. Parse the JSON response and present it as a readable table or summary.
+Run the chosen query through `exec_query` (or curl, as the fallback) and present the result as a readable table or summary.
 
 If a table does not exist (error code 4001), skip that query and try the alternative data source.
 

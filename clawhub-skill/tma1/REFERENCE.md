@@ -70,6 +70,11 @@ ORDER BY ts DESC LIMIT 20
 Conversation content (user / assistant / thinking) for every agent.
 13 columns (8 base + 5 added by migration v1). `append_mode`.
 FULLTEXT INDEX on `content` enables `matches_term()` keyword search.
+`matches_term()` is word-boundary based and case-insensitive: it matches
+`peerCwdFilter` for the query `peerCwdFilter`, but not for `Cwd`. Fall
+back to `content LIKE '%needle%'` when you need substring recall — wider,
+noisier, no index. Rows with `message_type = 'usage'` carry empty content
+(Codex writes one per model call); filter them out of any content query.
 
 | Column | Type | Role |
 | --- | --- | --- |
