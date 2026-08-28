@@ -3,8 +3,8 @@
 // (fsnotify) and polls `git log -1` so the perception layer can answer
 // "what changed outside of the agent's edits?".
 //
-// Storage is tma1_external_changes (one row per change). Attribution
-// (agent vs human) is decided at write time by querying tma1_hook_events.
+// Storage is tma1_external_changes (one row per change). Agent attribution
+// is decided at write time by querying tma1_hook_events.
 package git
 
 import (
@@ -25,7 +25,6 @@ const (
 // Attribution constants for the attribution column.
 const (
 	AttributionAgent   = "agent"
-	AttributionHuman   = "human"
 	AttributionUnknown = "unknown"
 )
 
@@ -38,7 +37,7 @@ type Change struct {
 	FilePath    string
 	GitSHA      string
 	GitMessage  string
-	Attribution string // agent | human | unknown
+	Attribution string // agent | unknown
 	Host        string
 }
 
@@ -48,7 +47,7 @@ type EventWriter interface {
 	Write(ctx context.Context, c Change) error
 }
 
-// Attributor decides whether a file change came from the agent or a human.
+// Attributor correlates a file change with available agent hook evidence.
 type Attributor interface {
-	Classify(ctx context.Context, filePath string, when time.Time) string
+	Classify(ctx context.Context, projectRoot, filePath string, when time.Time) string
 }

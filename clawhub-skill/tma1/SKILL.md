@@ -150,7 +150,7 @@ agent pulls state on demand:
 | `get_session_state` | Recovering action history | Tool calls, tokens, current focus, recent files |
 | `get_anomalies` | Before changing approach | Active anomalies, post-suppression |
 | `get_build_status` | After suggesting edits | Last exit, errors in last 30 min, latest stderr line |
-| `get_external_changes` | After a long break | Human-attributed file edits + git activity |
+| `get_external_changes` | After a long break | File changes outside observed agent writes + git activity |
 | `get_project_state` | First time in an unfamiliar repo | Language / build / test / key files / top-level dirs |
 | `get_peer_sessions` | User asks "what did Codex / CC / OpenClaw / Copilot just do" or invokes `/tma1-peer` | Recent peer-agent sessions on the same project |
 
@@ -164,11 +164,11 @@ routes to a specific channel so the same finding never injects twice:
 
 | Kind | Trigger | Channel |
 | --- | --- | --- |
-| `stale_file_view` | Agent edits a file a human modified externally after the agent's last Read | `user_prompt_submit` |
+| `stale_file_view` | Agent edits a file that changed externally after the agent's last Read | `user_prompt_submit` |
 | `build_broken_after_my_edit` | Build/test failure naming a just-edited file | `stop_block` when ≥3 failures, else `user_prompt_submit` |
 | `repeated_failed_build` | Same Bash prefix failed 3+ times in 30 min | `stop_block` |
 | `test_stuck` | Same test-runner prefix failed 3+ times (go test / cargo test / pytest / jest / mocha / rspec / phpunit / mix test) | `user_prompt_submit` |
-| `human_modified_during_session` | Human-attributed changes during the active session | `user_prompt_submit` |
+| `external_modified_during_session` | Files changed outside observed agent writes during the active session | `user_prompt_submit` |
 | `context_pressure` | Session input tokens cross threshold (default 100k; override via `TMA1_CONTEXT_PRESSURE_THRESHOLD`) | `user_prompt_submit` |
 
 Per-session 10-minute suppression dedupes repeat emits. Resolution

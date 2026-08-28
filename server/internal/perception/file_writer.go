@@ -115,11 +115,11 @@ func renderMarkdown(b *Bundle) string {
 		fmt.Fprintf(&sb, "Project: **%s**\n\n", b.Project)
 	}
 
-	if ext := b.External; ext != nil && (ext.HumanCount > 0 || ext.GitCount > 0) {
+	if ext := b.External; ext != nil && (ext.ExternalCount > 0 || ext.GitCount > 0) {
 		sb.WriteString("## External changes (last 30 min)\n\n")
-		if ext.HumanCount > 0 {
-			fmt.Fprintf(&sb, "Human modified %d file(s):\n", ext.HumanCount)
-			for i, c := range ext.HumanChanges {
+		if ext.ExternalCount > 0 {
+			fmt.Fprintf(&sb, "%d file(s) changed outside observed agent writes:\n", ext.ExternalCount)
+			for i, c := range ext.ExternalChanges {
 				if i >= 8 {
 					break
 				}

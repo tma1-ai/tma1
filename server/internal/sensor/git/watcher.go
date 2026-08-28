@@ -189,7 +189,7 @@ func (w *projectWatcher) handleFsEvent(ev fsnotify.Event) {
 	}
 	change.Attribution = AttributionUnknown
 	if w.cfg.Attributor != nil {
-		change.Attribution = w.cfg.Attributor.Classify(w.ctx, ev.Name, change.Timestamp)
+		change.Attribution = w.cfg.Attributor.Classify(w.ctx, w.cfg.Root, ev.Name, change.Timestamp)
 	}
 
 	if err := w.cfg.Writer.Write(w.ctx, change); err != nil {
@@ -252,7 +252,7 @@ func (w *projectWatcher) pollGit() {
 			ChangeType:  ChangeTypeGitBranchSwitch,
 			GitSHA:      sha,
 			GitMessage:  "branch: " + w.lastGitBranch + " → " + branch,
-			Attribution: AttributionHuman, // git commands ≈ human by default
+			Attribution: AttributionUnknown,
 			Host:        w.cfg.Host,
 		})
 		w.lastGitBranch = branch
@@ -267,7 +267,7 @@ func (w *projectWatcher) pollGit() {
 			ChangeType:  ChangeTypeGitCommit,
 			GitSHA:      sha,
 			GitMessage:  msg,
-			Attribution: AttributionHuman,
+			Attribution: AttributionUnknown,
 			Host:        w.cfg.Host,
 		})
 	}

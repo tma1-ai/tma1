@@ -19,7 +19,7 @@ file index. Read this when you need to know *where* something is or
 | `server/internal/transcript/` | JSONL transcript watcher (Claude Code) + Codex / OpenClaw / Copilot CLI session log parsers |
 | `server/internal/perception/` | v2 perception layer: bundler, anomaly detector (6 rules + channel routing + 10-min suppression + resolvers), incremental injection cache, peer-session reader, file writer for `.tma1-context.md` |
 | `server/internal/sensor/build/` | `tma1-server build [--watch] -- <cmd>` subprocess capture: stdout/stderr tee + batched writes into `tma1_build_events`, force-colour env injection |
-| `server/internal/sensor/git/` | fsnotify file watcher + 30 s git poll + agent-vs-human attribution honouring `.gitignore` + static ignore list; writes `tma1_external_changes` |
+| `server/internal/sensor/git/` | fsnotify file watcher + 30 s git poll + agent-write attribution honoring `.gitignore` + static ignore list; writes `tma1_external_changes` |
 | `server/internal/sensor/project/` | Lazy project-state indexer (language / build / test / key files / top-level dirs) with 24 h TTL gate; writes `tma1_project_state` |
 | `server/internal/mcp/` | JSON-RPC 2.0 stdio MCP server (7 tools backed by the perception bundler) — runs as a child of each agent (CC, Codex) via `tma1-server mcp-serve`. Pull-channel tools (`get_anomalies`) use side-effect-free `DetectPreview` so reading state can't silently consume the suppression window and weaken the next Stop block. |
 | `server/internal/writeq/` | Bounded write semaphore (max-in-flight cap, drop counter, recovered-panic counter) used by hook ingest + anomaly emit to keep GreptimeDB from being fork-bombed |
@@ -210,7 +210,7 @@ so they exist before any trace data arrives). All append-only. The
 | `tma1_messages` | Conversation content: user/assistant/thinking messages, tool_use/tool_result. Base DDL in `flows.go`; v1 migration adds `input_tokens` / `output_tokens` / `cache_read_tokens` / `cache_creation_tokens` / `duration_ms`. 13 columns total. FULLTEXT INDEX on `content` (bloom backend, English analyzer) for keyword search via `matches_term()`. |
 | `tma1_anomaly_emits` | One row per anomaly the Detector emitted to an injection channel — the ground-truth feed for the Anomalies dashboard view and the `/api/anomalies/{budget,follow-rate}` validation gates. Created by `InitAnomalyEmitsTable`. DDL in `anomaly_emits.go`. 9 columns: `ts`, `session_id`, `kind`, `severity`, `"channel"`, `evidence`, `suggestion`, `related_files` (JSON array), `first_emitted_at`. |
 | `tma1_build_events` | stdout/stderr/completion events captured by `tma1-server build [--watch] -- <cmd>`. Created by `InitBuildTable`. DDL in `build.go`. 13 columns including FULLTEXT-indexed `"message"`, `exit_code`, `duration_ms`, `"tag"`. |
-| `tma1_external_changes` | File system + git events captured by the git/file sensor; `attribution = agent / human / unknown` set by `HookAttributor` (looks for an Edit/Write/MultiEdit/Bash hook event within ±5 s mentioning the same path). Created by `InitExternalChangesTable`. DDL in `external.go`. 8 columns. |
+| `tma1_external_changes` | File system + git events captured by the git/file sensor; `attribution = agent / unknown` is set by `HookAttributor`. Exact-path correlation and project-scoped active-tool intervals recognize observed writes from mutating tools. Other changes remain `unknown`. Created by `InitExternalChangesTable`. DDL in `external.go`. 8 columns. |
 | `tma1_project_state` | Latest project structure snapshot (language, build/test system, key files, top-level dirs). Created by `InitProjectStateTable`. DDL in `project.go`. 9 columns including reserved-keyword-quoted `"root"` / `"language"`. Lazy refresh, 24 h TTL gate. |
 | `tma1_schema_version` | Migration ledger: one row per applied `Migration` (version, description, ts). Created on demand by `RunSchemaMigrations`. Internal — not for agent queries. |
 
@@ -266,7 +266,7 @@ column lists + sample queries that get published with the skill.
 | Incremental injection cache | `server/internal/perception/injection_cache.go` — per-session digest dedupe so identical context isn't re-emitted every turn |
 | MCP stdio server | `server/internal/mcp/server.go` (concurrent loop, write-mutex serialised) + `tools.go` (7 ToolHandlers) + `protocol.go` (JSON-RPC + MCP types) |
 | Build sensor | `server/internal/sensor/build/capture.go` (Runner / LongRunner) + `store.go` (writes `tma1_build_events`) |
-| Git/file sensor | `server/internal/sensor/git/sensor.go` (per-project watcher lifecycle) + `watcher.go` (fsnotify + git poll) + `gitignore.go` + `attribution.go` (agent vs human) + `store.go` |
+| Git/file sensor | `server/internal/sensor/git/sensor.go` (per-project watcher lifecycle) + `watcher.go` (fsnotify + git poll) + `gitignore.go` + `attribution.go` (observed agent writes vs. unknown source) + `store.go` |
 | Project sensor | `server/internal/sensor/project/sensor.go` (TTL-gated indexer) + `indexer.go` (marker-file heuristics) + `store.go` |
 | Schema migrations | `server/internal/greptimedb/schema_migrations.go` — `[]Migration` + ledger DDL |
 | Write semaphore | `server/internal/writeq/sem.go` |

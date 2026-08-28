@@ -27,7 +27,7 @@ Check which tables exist:
 - `tma1_messages` → conversation content for all agents (session_id prefixes: `cp:` Copilot CLI, `oc:` OpenClaw; Claude Code and Codex use raw session IDs)
 - `tma1_anomaly_emits` → ground-truth log of which anomalies were emitted to which agent session, used by the dashboard's Anomalies tab and the Phase 1.7 validation gates
 - `tma1_build_events` → output of `tma1-server build -- <cmd>` (one-shot or `--watch`): stdout / stderr / completion events with exit code, duration, and last error
-- `tma1_external_changes` → file system + git activity captured by the git/file sensor (agent vs human attribution)
+- `tma1_external_changes` → file system + git activity captured by the git/file sensor (observed agent writes vs. unknown source)
 - `tma1_project_state` → most recent indexed snapshot of each project's structure (language, build / test system, key files, top-level directories)
 
 ---
@@ -171,15 +171,15 @@ File system + git activity outside the agent. 8 columns, `append_mode`.
 | `change_type` | STRING | INVERTED INDEX (`file_modified`, `file_added`, `file_deleted`, `git_commit`, `git_branch_switch`) |
 | `file_path` | STRING NULL | populated for file-system events |
 | `git_sha`, `git_message` | STRING NULL | populated for `git_*` events |
-| `attribution` | STRING NULL | INVERTED INDEX (`agent` / `human` / `unknown`) — derived by HookAttributor: agent if a Pre/PostToolUse Edit/Write/MultiEdit/Bash event within ±5 s mentions the same path; otherwise human |
+| `attribution` | STRING NULL | INVERTED INDEX (`agent` / `unknown`; historical rows may contain `human`) — `HookAttributor` uses exact paths and active intervals from mutating tools to recognize observed agent writes. Other changes remain `unknown`. |
 | `host` | STRING NULL | hostname |
 
-Files a human modified in the last 30 min:
+Files changed outside observed agent writes in the last 30 min:
 
 ```sql
 SELECT ts, file_path FROM tma1_external_changes
 WHERE project = '<project>'
-  AND attribution = 'human'
+  AND attribution IN ('human','unknown')
   AND change_type IN ('file_modified','file_added')
   AND ts > now() - INTERVAL '30 minutes'
 ORDER BY ts DESC
@@ -244,9 +244,9 @@ GROUP BY b.project
 ORDER BY last_event_at DESC
 ```
 
-**Files a human modified during the active session
+**Files changed outside observed agent writes during the active session
 (joins `tma1_hook_events` to find the session window, then
-`tma1_external_changes` for human edits in that window):**
+`tma1_external_changes` for external changes in that window):**
 
 ```sql
 WITH win AS (
@@ -255,7 +255,7 @@ WITH win AS (
 )
 SELECT ec.ts, ec.file_path
 FROM tma1_external_changes ec, win
-WHERE ec.attribution = 'human'
+WHERE ec.attribution IN ('human','unknown')
   AND ec.change_type IN ('file_modified','file_added')
   AND ec.ts BETWEEN win.started_ms AND win.ended_ms
 ORDER BY ec.ts DESC
@@ -687,7 +687,7 @@ ORDER BY p95_ms DESC
 | Agent suddenly can't see `mcp__tma1__*` tools / "Connection closed" | MCP stdio child died or stalled. In Claude Code: `/mcp` to reconnect. In Codex: restart the session. Confirm the parent is still up via `pgrep -fl tma1-server`; if it isn't, restart it and the MCP child respawns automatically |
 | `<tma1-context>` block not appearing in prompts | `UserPromptSubmit` hook isn't registered. CC: `jq '.hooks.UserPromptSubmit' ~/.claude/settings.json` (expect a non-empty array containing `id: "tma1"`). Codex: `jq '.hooks.UserPromptSubmit' ~/.codex/hooks.json`. If empty, re-run `tma1-server install --adapter claude-code` (or `--adapter codex`) |
 | Anomalies exist in dashboard but never reach the agent | Either the hook fires beyond the 300ms injection budget (GreptimeDB is slow — check `~/.tma1/config/standalone.toml` resource limits, the response falls back to empty silently), or the hook script isn't running at all. Run `~/.tma1/hooks/tma1-hook.sh` manually with `{"hook_event_name":"UserPromptSubmit","session_id":"test"}` on stdin; non-empty stdout means the path works |
-| `get_external_changes` response contains `partial_error` field | One of two underlying GreptimeDB queries failed; the partial snapshot in `human_changes` / `git_changes` is still valid. Usually transient — retry. Persistent → check DB health |
+| `get_external_changes` response contains `partial_error` field | One of two underlying GreptimeDB queries failed; the partial snapshot in `external_changes` / `git_changes` is still valid. Usually transient — retry. Persistent → check DB health |
 | Shutdown logs `writeq drain timed out, some background writes may have been dropped` | The 2-second drain budget elapsed before background INSERTs landed. Last few hook events / anomaly emits lost. Acceptable on rare shutdown; recurrent → GreptimeDB under-resourced |
 | `.tma1-context.md` not updating | This file callback is **opt-in** (designed for non-MCP agents like Aider / Cursor). Set `TMA1_ENABLE_FILE_CALLBACK=1` on the tma1-server process and restart. If still missing after enabling, verify the project root resolver picked a writable directory: server log shows `tma1-context.md refresh failed` at Debug level on failure |
 | Same anomaly injected over and over within one session | InjectionCache (1h TTL) should dedupe by Channel. If this happens it's a bug — open an issue with the anomaly `Kind` and the duplicated `<tma1-context>` blocks attached |

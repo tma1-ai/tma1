@@ -388,10 +388,10 @@ tools: Bash×18, Edit×12, Read×9, TaskUpdate×4
 recent_files: .../perception/peer.go, .../mcp/tools.go, .../hooks/install_cc.go
 build: make (running)
 build_last_error (6m ago, may have recovered): exit code 1 ...
-external_human_changes: 3
+external_changes: 3
 external_files: .../path/to/file.go
 anomalies:
-  - [MEDIUM] human_modified_during_session — Re-read the listed files before assuming your in-memory copy is current.
+  - [MEDIUM] external_modified_during_session — Re-read the listed files before assuming your in-memory copy is current.
 </tma1-context>
 ` + "```" + `
 

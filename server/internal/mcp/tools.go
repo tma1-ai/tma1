@@ -320,9 +320,9 @@ func (t ProjectStateTool) Call(ctx context.Context, _ map[string]any) (CallToolR
 	return CallToolResult{Content: []ContentBlock{{Type: "text", Text: string(out)}}}, nil
 }
 
-// ExternalChangesTool returns recent human-attributed file modifications
-// and git activity in the current project — what changed while the agent
-// wasn't looking. Default window: last 30 minutes; override via `since_min`.
+// ExternalChangesTool returns recent file modifications not attributed to an
+// agent and git activity in the current project. Default window: last 30
+// minutes; override via `since_min`.
 type ExternalChangesTool struct {
 	Bundler *perception.Bundler
 }
@@ -330,8 +330,8 @@ type ExternalChangesTool struct {
 func (t ExternalChangesTool) Definition() Tool {
 	return Tool{
 		Name: "get_external_changes",
-		Description: "List files modified by a human + git commits / branch " +
-			"switches that happened in the current project recently. Use this " +
+		Description: "List file changes not attributed to an agent, plus git commits " +
+			"and branch switches in the current project. Use this " +
 			"before continuing work after a context refresh to learn what " +
 			"changed outside of your edits.",
 		InputSchema: InputSchema{
@@ -381,7 +381,7 @@ func (t ExternalChangesTool) Call(ctx context.Context, args map[string]any) (Cal
 	// Partial result: when one of the two underlying queries failed but
 	// the other returned rows, GetExternalChanges returns both. Attach
 	// the error message as a top-level partial_error field so the
-	// success shape (project / human_changes / git_changes / counts at
+	// success shape (project / external_changes / git_changes / counts at
 	// the top level) stays stable for downstream consumers.
 	if err != nil {
 		changes.PartialError = err.Error()

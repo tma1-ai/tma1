@@ -21,11 +21,11 @@ digest, once in the block reason).
 
 | Kind | Severity | Channel | Triggers when |
 |------|----------|---------|---------------|
-| `stale_file_view` | high | user_prompt_submit | Agent Edited file F where the latest Read of F was before a human external change of F. See [Plan scenario](#r-stale-view) below. |
+| `stale_file_view` | high | user_prompt_submit | Agent Edited file F where the latest Read of F was before an external change of F. See [Plan scenario](#r-stale-view) below. |
 | `build_broken_after_my_edit` | high if ≥3 failures, else medium | stop_block (HIGH) / user_prompt_submit (MEDIUM) | Agent edited file F in the last 30 min, then a Bash PostToolUseFailure within ±10 min mentioned F's basename in input or output. |
 | `repeated_failed_build` | high | stop_block | Same Bash command prefix (first 60 chars) failed 3+ times in the last 30 min. |
 | `test_stuck` | medium | user_prompt_submit | Same test identifier (regex-extracted from "FAIL …") appeared in Bash PostToolUseFailure output 3+ times in the last 30 min. |
-| `human_modified_during_session` | medium | user_prompt_submit | At least one human-attributed external change on this project within the session's window, and the changes are no older than 30 min. |
+| `external_modified_during_session` | medium | user_prompt_submit | At least one file changed outside observed agent writes on this project within the session window, and the change is no older than 30 min. |
 | `context_pressure` | medium | user_prompt_submit | `SUM(input_tokens) >= TMA1_CONTEXT_PRESSURE_THRESHOLD` (default 100,000 ≈ 50% of Claude Sonnet's 200k window). One-shot per session. |
 
 ### R-stale-view
@@ -34,7 +34,7 @@ Plan scenario:
 
 ```
 T1 — agent Reads foo.go
-T2 — human modifies foo.go externally   (T2 > T1)
+T2 — foo.go changes externally          (T2 > T1)
 T3 — agent Edits foo.go with no Re-Read in (T2, T3)
 ```
 
@@ -66,7 +66,7 @@ serialise concurrent `Detect` calls.
 | `build_broken_after_my_edit` | Any PostToolUse Bash (non-failure) after the last emit. |
 | `repeated_failed_build` | Same as above. |
 | `test_stuck` | Same as above. |
-| `human_modified_during_session` | None — time-based decay (30 min). |
+| `external_modified_during_session` | None — time-based decay (30 min). |
 | `context_pressure` | None — one-shot per session. |
 
 ## Emit log

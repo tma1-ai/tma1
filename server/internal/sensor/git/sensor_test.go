@@ -30,7 +30,7 @@ func (s *stubWriter) count() int {
 
 type stubAttributor struct{ verdict string }
 
-func (s stubAttributor) Classify(_ context.Context, _ string, _ time.Time) string {
+func (s stubAttributor) Classify(_ context.Context, _, _ string, _ time.Time) string {
 	return s.verdict
 }
 
@@ -40,7 +40,7 @@ func TestSensorObserveIsIdempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	sensor := NewSensor(&stubWriter{}, stubAttributor{AttributionHuman}, nil)
+	sensor := NewSensor(&stubWriter{}, stubAttributor{AttributionUnknown}, nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	sensor.Start(ctx)
@@ -60,7 +60,7 @@ func TestSensorObserveSkipsBeforeStart(t *testing.T) {
 	root := t.TempDir()
 	_ = os.MkdirAll(filepath.Join(root, ".git"), 0o755)
 
-	sensor := NewSensor(&stubWriter{}, stubAttributor{AttributionHuman}, nil)
+	sensor := NewSensor(&stubWriter{}, stubAttributor{AttributionUnknown}, nil)
 	sensor.Observe(root) // Start not yet called → must no-op
 
 	sensor.mu.Lock()
@@ -77,7 +77,7 @@ func TestSensorObserveDetectsRealFileWrite(t *testing.T) {
 	}
 
 	writer := &stubWriter{}
-	sensor := NewSensor(writer, stubAttributor{AttributionHuman}, nil)
+	sensor := NewSensor(writer, stubAttributor{AttributionUnknown}, nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	sensor.Start(ctx)
@@ -109,8 +109,8 @@ func TestSensorObserveDetectsRealFileWrite(t *testing.T) {
 	for _, c := range writer.events {
 		if c.FilePath == target {
 			saw = true
-			if c.Attribution != AttributionHuman {
-				t.Errorf("attribution = %q, want %q", c.Attribution, AttributionHuman)
+			if c.Attribution != AttributionUnknown {
+				t.Errorf("attribution = %q, want %q", c.Attribution, AttributionUnknown)
 			}
 			break
 		}

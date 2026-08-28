@@ -280,12 +280,12 @@ type ruleFunc func(ctx context.Context, sessionID string) ([]Anomaly, error)
 // downstream consumers (suppression, UI) key on.
 func (d *Detector) rules() map[string]ruleFunc {
 	return map[string]ruleFunc{
-		"build_broken_after_my_edit":     d.ruleBuildBrokenAfterMyEdit,
-		"repeated_failed_build":          d.ruleRepeatedFailedBuild,
-		"stale_file_view":                d.ruleStaleFileView,
-		"test_stuck":                     d.ruleTestStuck,
-		"human_modified_during_session":  d.ruleHumanModifiedDuringSession,
-		"context_pressure":               d.ruleContextPressure,
+		"build_broken_after_my_edit":       d.ruleBuildBrokenAfterMyEdit,
+		"repeated_failed_build":            d.ruleRepeatedFailedBuild,
+		"stale_file_view":                  d.ruleStaleFileView,
+		"test_stuck":                       d.ruleTestStuck,
+		"external_modified_during_session": d.ruleExternalModifiedDuringSession,
+		"context_pressure":                 d.ruleContextPressure,
 	}
 }
 
@@ -301,7 +301,7 @@ type resolverFunc func(ctx context.Context, sessionID string, a Anomaly, lastEmi
 // nil when the anomaly has no programmatic "resolved" signal (e.g.
 // context_pressure has no resolver — it simply stops firing once occupancy
 // recedes, e.g. after the agent compacts history, and otherwise re-emits
-// after the silence window; human_modified_during_session decays purely
+// after the silence window; external_modified_during_session decays purely
 // by time).
 func (d *Detector) resolverFor(kind string) resolverFunc {
 	switch kind {
@@ -638,7 +638,7 @@ func firstErrorLine(raw string) string {
 func (d *Detector) ruleStaleFileView(ctx context.Context, sessionID string) ([]Anomaly, error) {
 	// Plan scenario (Phase 1.7):
 	//   T1 — agent Read foo.go
-	//   T2 — human modifies foo.go externally  (T2 > T1)
+	//   T2 — foo.go changes externally          (T2 > T1)
 	//   T3 — agent Edit foo.go with no Re-Read in (T2, T3)
 	//
 	// The Edit is based on a stale in-memory view of the file. The earlier
@@ -708,7 +708,7 @@ func (d *Detector) ruleStaleFileView(ctx context.Context, sessionID string) ([]A
 		`SELECT file_path, CAST(ts AS BIGINT) AS change_ms
 		 FROM tma1_external_changes
 		 WHERE file_path IN (%s)
-		   AND attribution = 'human'
+		   AND attribution IN ('human','unknown')
 		   AND change_type IN ('file_modified','file_added')
 		   AND ts > now() - INTERVAL '%d minutes'
 		 ORDER BY ts ASC`,
@@ -740,7 +740,7 @@ func (d *Detector) ruleStaleFileView(ctx context.Context, sessionID string) ([]A
 			Severity: SeverityHigh,
 			Channel:  ChannelUserPromptSubmit,
 			Evidence: fmt.Sprintf(
-				"You edited %s after a human modified it externally at %s, without re-reading first.",
+				"You edited %s after it changed externally at %s, without re-reading first.",
 				shortPath(fp), when.Format("15:04"),
 			),
 			Suggestion: fmt.Sprintf(
@@ -759,7 +759,7 @@ func (d *Detector) ruleStaleFileView(ctx context.Context, sessionID string) ([]A
 // Inputs are timestamps (ms) for one file in one session:
 //   - reads:   PreToolUse Read events
 //   - edits:   PreToolUse Edit/MultiEdit/Write events
-//   - changes: external human modifications on the same file
+//   - changes: modifications outside observed agent writes on the same file
 //
 // Returns the most recent change timestamp that triggered the rule, or 0
 // when no Edit was based on a stale view. An Edit triggers when there is
@@ -881,10 +881,10 @@ func (d *Detector) ruleTestStuck(ctx context.Context, sessionID string) ([]Anoma
 }
 
 // ───────────────────────────────────────────────────────────────────────
-// R-human-during — human-attributed changes during this session
+// R-external-during — changes outside observed agent writes during this session
 // ───────────────────────────────────────────────────────────────────────
 
-func (d *Detector) ruleHumanModifiedDuringSession(ctx context.Context, sessionID string) ([]Anomaly, error) {
+func (d *Detector) ruleExternalModifiedDuringSession(ctx context.Context, sessionID string) ([]Anomaly, error) {
 	winSQL := fmt.Sprintf(
 		`SELECT CAST(MIN(ts) AS BIGINT) AS start_ms,
 		        CAST(MAX(ts) AS BIGINT) AS end_ms,
@@ -918,7 +918,7 @@ func (d *Detector) ruleHumanModifiedDuringSession(ctx context.Context, sessionID
 	changesSQL := fmt.Sprintf(
 		`SELECT file_path FROM tma1_external_changes
 		 WHERE project = '%s'
-		   AND attribution = 'human'
+		   AND attribution IN ('human','unknown')
 		   AND change_type IN ('file_modified','file_added')
 		   AND ts > %d
 		   AND file_path IS NOT NULL AND file_path != ''
@@ -943,10 +943,10 @@ func (d *Detector) ruleHumanModifiedDuringSession(ctx context.Context, sessionID
 		preview = preview[:3]
 	}
 	return []Anomaly{{
-		Kind:         "human_modified_during_session",
+		Kind:         "external_modified_during_session",
 		Severity:     SeverityMedium,
 		Channel:      ChannelUserPromptSubmit,
-		Evidence:     fmt.Sprintf("A human modified %d file(s) in this project during this session (e.g. %s).", len(files), strings.Join(preview, ", ")),
+		Evidence:     fmt.Sprintf("%d file(s) changed outside observed agent writes during this session (e.g. %s).", len(files), strings.Join(preview, ", ")),
 		Suggestion:   "Re-read the listed files before assuming your in-memory copy is current.",
 		RelatedFiles: files,
 	}}, nil
