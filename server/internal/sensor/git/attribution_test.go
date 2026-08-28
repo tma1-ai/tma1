@@ -40,6 +40,8 @@ func TestHookAttributorUsesActiveProjectToolForIndirectWrite(t *testing.T) {
 		"LEFT JOIN tma1_hook_events q",
 		"q.tool_use_id = p.tool_use_id",
 		"q.event_type IN ('PostToolUse','PostToolUseFailure')",
+		"CAST(q.ts AS BIGINT) <= 10000",
+		"p.ts BETWEEN -1790000 AND 10000",
 		"p.cwd = '/repo/tma1'",
 		"q.tool_use_id IS NULL",
 	} {

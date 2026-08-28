@@ -97,6 +97,7 @@ func (a *HookAttributor) Classify(ctx context.Context, projectRoot, filePath str
 	// PreToolUse/PostToolUse by tool_use_id and only consider invocations whose
 	// cwd is the watched project or one of its subdirectories.
 	activeLow := when.Add(-activeToolLookback).UnixMilli()
+	activeHigh := when.UnixMilli()
 	if active, ok := a.cachedActiveTool(root); ok {
 		if active {
 			return AttributionAgent
@@ -111,12 +112,13 @@ func (a *HookAttributor) Classify(ctx context.Context, projectRoot, filePath str
 		  AND q.tool_use_id = p.tool_use_id
 		  AND q.event_type IN ('PostToolUse','PostToolUseFailure')
 		  AND q.ts >= p.ts
+		  AND CAST(q.ts AS BIGINT) <= %d
 		 WHERE p.event_type = 'PreToolUse'
 		   AND p.tool_use_id IS NOT NULL AND p.tool_use_id != ''
 		   AND p.ts BETWEEN %d AND %d
 		   AND (p.cwd = '%s' OR p.cwd LIKE '%s/%%' OR p.cwd LIKE '%s\\%%')
 		   AND q.tool_use_id IS NULL`,
-		activeLow, high,
+		activeHigh, activeLow, activeHigh,
 		escapeSQLLiteral(root),
 		escapeSQLLikeLiteral(root),
 		escapeSQLLikeLiteral(root),
