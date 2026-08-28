@@ -316,6 +316,26 @@ Re-running `install --adapter` is idempotent: files whose content already
 matches are left untouched, and the stale sweep is scoped to the `tma1-`
 owner prefix, so skills you installed yourself are never removed.
 
+### The skills CLI is a preview surface, not an install path
+
+The skill files are discoverable by [`skills`](https://github.com/vercel-labs/skills),
+which reads them straight from the repository:
+
+```sh
+npx skills add tma1-ai/tma1 --list
+```
+
+That lists the four skills and their descriptions. Installing through it
+is not supported: every TMA1 skill directs the agent at MCP tools
+(`search_sessions`, `get_peer_sessions`, ...) that exist only after
+`tma1-server install --adapter` has written the MCP server entry into the
+agent's config. A skill installed on its own resolves to no tools.
+
+Installing globally through that CLI also writes to
+`~/.claude/skills/tma1-*`, the paths `tma1-server install` owns. The two
+then disagree, and the startup freshness check reports the result as
+stale.
+
 ### Cache invalidation on every event
 
 Every hook event invalidates the per-session anomaly cache so the next
