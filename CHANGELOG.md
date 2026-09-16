@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.2.0-alpha16 — Database supervision
 
 - **GreptimeDB is supervised.** The child process was started and never
   watched: once it was killed — OOM killer, a stray `pkill`, a crash —
