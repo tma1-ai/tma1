@@ -202,8 +202,11 @@ func TestStopWhileLaunchingKillsNewChild(t *testing.T) {
 	}
 	<-relaunch
 
+	// Release the blocked launch only once shutdown has actually been
+	// requested; a timed sleep would let the supervisor adopt the child
+	// normally and the test would pass without exercising the race.
 	go func() {
-		time.Sleep(50 * time.Millisecond) // let Stop land first
+		<-p.stopReq
 		close(release)
 	}()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

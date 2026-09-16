@@ -33,8 +33,9 @@ const (
 )
 
 // Process wraps a supervised GreptimeDB child process. The supervisor
-// goroutine owns Wait on the child: when the child exits without Stop having
-// been called (killed externally, OOM, crash), it is respawned with backoff.
+// goroutine owns Wait on the child: when the child exits without a shutdown
+// having been requested (killed externally, OOM, crash), it is respawned with
+// backoff.
 type Process struct {
 	logger *slog.Logger
 
@@ -65,9 +66,12 @@ type Config struct {
 }
 
 // Start launches GreptimeDB as a child process and waits until its HTTP API is
-// healthy. The process is parented to the tma1-server process; it will be
-// killed when Stop is called or when the parent exits. Once healthy, a
-// supervisor goroutine keeps it alive until Stop.
+// healthy, then keeps a supervisor goroutine on it until Stop.
+//
+// Stop is what tears the child down. It stays in the parent's process group,
+// so a terminal or service manager that signals the group reaches it too, but
+// a parent killed outright (SIGKILL) leaves it reparented to init, still
+// holding the data dir, and it has to be killed by hand.
 func Start(cfg Config) (*Process, error) {
 	dataPath := filepath.Join(cfg.DataDir, "data")
 	if err := os.MkdirAll(dataPath, 0755); err != nil {
@@ -164,6 +168,10 @@ func (p *Process) supervise() {
 		}
 		next, err := p.launch(p.stopReq)
 		if err != nil {
+			if p.shuttingDown() {
+				// launch was cancelled by the shutdown, not a failure.
+				return
+			}
 			p.logger.Error("greptimedb restart failed", "err", err, "retry_in", backoff.String())
 			backoff = nextBackoff(backoff)
 			continue
@@ -184,6 +192,12 @@ func (p *Process) supervise() {
 		p.logger.Info("greptimedb restarted")
 		backoff = nextBackoff(backoff)
 	}
+}
+
+func (p *Process) shuttingDown() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.stopping
 }
 
 // sleep waits for d, reporting false if shutdown was requested meanwhile.
