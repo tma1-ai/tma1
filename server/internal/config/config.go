@@ -7,10 +7,10 @@ import (
 	"strconv"
 )
 
-// Pinned rather than "latest" because GitHub's /releases/latest redirect skips
-// pre-releases: "latest" would resolve to an older stable tag and re-download it
-// on every start. Mirrored in site/public/install.sh.
-const defaultGreptimeDBVersion = "v1.2.0-beta.2"
+// Pinned to an exact tag so every install runs the version TMA1 was tested
+// against; "latest" only applies the minRequiredVersion floor. Mirrored in
+// site/public/install.sh.
+const defaultGreptimeDBVersion = "v1.2.1"
 
 // Config holds all runtime configuration for tma1-server.
 type Config struct {

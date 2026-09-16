@@ -31,10 +31,10 @@ INSTALL_DIR="${TMA1_INSTALL_DIR:-$HOME/.tma1/bin}"
 TMA1_PORT="${TMA1_PORT:-14318}"
 TMA1_FORCE="${TMA1_FORCE:-0}"
 # Exact GreptimeDB tag tma1 ships against. Keep in sync with
-# defaultGreptimeDBVersion in server/internal/config/config.go. Pinned rather
-# than "latest" because the shipped release is a pre-release, which "latest"
-# never resolves to. Set TMA1_GREPTIMEDB_VERSION=latest to track stable instead.
-TMA1_GREPTIMEDB_VERSION="${TMA1_GREPTIMEDB_VERSION:-v1.2.0-beta.2}"
+# defaultGreptimeDBVersion in server/internal/config/config.go. Pinned so every
+# install runs the tested version; set TMA1_GREPTIMEDB_VERSION=latest to track
+# stable releases instead.
+TMA1_GREPTIMEDB_VERSION="${TMA1_GREPTIMEDB_VERSION:-v1.2.1}"
 # Adapter(s) to wire into agents. Empty = skip. Accepts a comma-separated list
 # or the alias `all` (= claude-code,codex). Each adapter registers hooks, MCP,
 # and the /tma1-peer skill globally. Project-local files are skipped here —
@@ -134,7 +134,7 @@ download() {
 # TMA1_GREPTIMEDB_VERSION=latest. Keep in sync with minRequiredVersion in
 # server/internal/install/install.go, which carries the same released-only
 # constraint.
-MIN_GREPTIMEDB_VERSION="1.1.3"
+MIN_GREPTIMEDB_VERSION="1.2.1"
 
 # version_lt returns 0 (true) if $1 < $2.
 # Compares major.minor.patch numerically; when equal, a pre-release
@@ -187,8 +187,8 @@ download_greptimedb() {
       # Pinned to an exact tag: match exactly, mirroring checkVersionMismatch in
       # server/internal/install/install.go. A floor check would wrongly skip the
       # download whenever the pin is a pre-release of a higher version than the
-      # installed binary (e.g. installed 1.1.3, pinned v1.2.0-beta.2 with the
-      # floor still at 1.1.3). Both sides are normalised to a 'v' prefix because
+      # installed binary (e.g. installed 1.2.1, pinned v1.3.0-beta.1 with the
+      # floor still at 1.2.1). Both sides are normalised to a 'v' prefix because
       # `greptime --version` reports a bare semver.
       if [ "v${installed_ver#v}" = "v${TMA1_GREPTIMEDB_VERSION#v}" ]; then
         info "GreptimeDB ${installed_ver} already installed (pinned), skipping download."

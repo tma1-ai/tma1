@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- **GreptimeDB is supervised.** The child process was started and never
+  watched: once it was killed — OOM killer, a stray `pkill`, a crash —
+  tma1-server kept running against a dead database until someone restarted
+  it by hand. A supervisor goroutine now owns `Wait` on the child and
+  respawns it with backoff (1 s, doubling to 30 s) unless a shutdown is
+  already underway. A child that stayed up for a minute resets the backoff,
+  so a binary that cannot start is retried slowly instead of in a loop.
+- **GreptimeDB pinned to v1.2.1**, up from the v1.2.0-beta.2 pre-release.
+  The minimum version for `TMA1_GREPTIMEDB_VERSION=latest` moves to v1.2.1
+  as well.
+
 ## v0.2.0-alpha15 — Local session management
 
 The session data was already all on disk; this release gives the agent a

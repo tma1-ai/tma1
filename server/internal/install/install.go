@@ -28,7 +28,7 @@ const (
 	// MUST stay a released version: breaching the floor resolves "latest", which
 	// never yields a pre-release, so a pre-release floor is unsatisfiable and
 	// re-downloads forever. Ship pre-releases via config.defaultGreptimeDBVersion.
-	minRequiredVersion = "v1.1.3"
+	minRequiredVersion = "v1.2.1"
 
 	// Downloading the GreptimeDB archive can legitimately take longer than a
 	// fixed request deadline on slow links. Bound connection/header stalls

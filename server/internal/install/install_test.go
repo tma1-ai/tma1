@@ -184,15 +184,13 @@ func TestVersionLessThan(t *testing.T) {
 		{"v0.9.0", "v0.12.0", true},
 		{"v1.0.0", "v1.0.0", false},
 		{"v1.0.1", "v1.0.0", false},
-		{"v1.0.0", "v1.0.2", true}, // pins the v1.0.2 minRequiredVersion floor
 		{"v1.0.1", "v1.0.2", true},
-		{"v1.0.2", "v1.0.2", false},
-		{"v1.0.2", "v1.1.2", true}, // pins the v1.1.2 minRequiredVersion floor
-		{"v1.1.1", "v1.1.2", true},
-		{"v1.1.2", "v1.1.2", false},
-		{"v1.1.0", "v1.1.3", true}, // pins the v1.1.3 minRequiredVersion floor
 		{"v1.1.2", "v1.1.3", true},
-		{"v1.1.3", "v1.1.3", false},
+		// pins the v1.2.1 minRequiredVersion floor
+		{"v1.1.3", "v1.2.1", true},
+		{"v1.2.0", "v1.2.1", true},
+		{"v1.2.0-beta.2", "v1.2.1", true},
+		{"v1.2.1", "v1.2.1", false},
 		{"v2.0.0", "v1.0.0", false},
 		{"v0.12.0", "v0.12.1", true},
 		{"v1.0.0-alpha", "v1.0.0", true}, // pre-release < release

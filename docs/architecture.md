@@ -227,7 +227,7 @@ column lists + sample queries that get published with the skill.
 | `TMA1_HOST` | `127.0.0.1` | Address tma1-server binds to |
 | `TMA1_PORT` | `14318` | HTTP port for tma1-server |
 | `TMA1_DATA_DIR` | `~/.tma1` | Directory for GreptimeDB data + binaries |
-| `TMA1_GREPTIMEDB_VERSION` | `v1.2.0-beta.2` | GreptimeDB version to download. Pinned to an exact tag; set to `latest` to track stable releases instead |
+| `TMA1_GREPTIMEDB_VERSION` | `v1.2.1` | GreptimeDB version to download. Pinned to an exact tag; set to `latest` to track stable releases instead |
 | `TMA1_GREPTIMEDB_HTTP_PORT` | `14000` | GreptimeDB HTTP API + OTLP port |
 | `TMA1_GREPTIMEDB_GRPC_PORT` | `14001` | GreptimeDB gRPC port |
 | `TMA1_GREPTIMEDB_MYSQL_PORT` | `14002` | GreptimeDB MySQL protocol port |
@@ -253,7 +253,7 @@ column lists + sample queries that get published with the skill.
 | Embedded FS mount | `server/cmd/tma1-server/web.go` |
 | Config loading | `server/internal/config/config.go` |
 | GreptimeDB download | `server/internal/install/install.go` |
-| GreptimeDB process mgmt | `server/internal/greptimedb/process.go` |
+| GreptimeDB process mgmt | `server/internal/greptimedb/process.go` — launch + health wait, plus the supervisor goroutine that owns `Wait` on the child and respawns it (1 s → 30 s backoff). `BeginShutdown` retires the supervisor at the top of the shutdown path, because a terminal or service manager signals the child too and the exit would otherwise read as a crash |
 | Flow SQL (aggregations) | `server/internal/greptimedb/flows.sql` |
 | Flow init logic | `server/internal/greptimedb/flows.go` |
 | HTTP routes | `server/internal/handler/handler.go` |
