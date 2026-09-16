@@ -3,6 +3,7 @@ package greptimedb
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -11,13 +12,47 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sync"
 	"time"
 )
 
-// Process wraps a running GreptimeDB child process.
+const (
+	// Restart backoff bounds. The first retry is fast because the common case
+	// is a one-off kill (OOM killer, a stray `pkill greptime`, a crash), and
+	// every query fails until the DB is back.
+	restartBackoffMin = 1 * time.Second
+	restartBackoffMax = 30 * time.Second
+
+	// A child that stayed up this long counts as a healthy run, so the next
+	// unexpected exit starts backing off from scratch. Shorter runs keep the
+	// previous backoff, which is what stops a broken binary from being
+	// respawned in a tight loop.
+	stableRuntime = 60 * time.Second
+
+	healthTimeout = 30 * time.Second
+)
+
+// Process wraps a supervised GreptimeDB child process. The supervisor
+// goroutine owns Wait on the child: when the child exits without a shutdown
+// having been requested (killed externally, OOM, crash), it is respawned with
+// backoff.
 type Process struct {
-	cmd    *exec.Cmd
 	logger *slog.Logger
+
+	// launch starts a fresh child and returns once it reports healthy. It
+	// gives up early when stop is closed, so a shutdown that lands mid-launch
+	// doesn't leave an orphan holding the data dir. Replaced in tests.
+	launch func(stop <-chan struct{}) (*exec.Cmd, error)
+
+	mu sync.Mutex
+	// cmd is the live child, nil between an exit and the next successful
+	// launch. Only the supervisor assigns it after Start.
+	cmd      *exec.Cmd
+	stopping bool
+
+	stopReq  chan struct{} // closed by Stop to wake the supervisor
+	stopOnce sync.Once
+	exited   chan struct{} // closed when the supervisor returns
 }
 
 // Config holds the parameters needed to launch GreptimeDB.
@@ -30,9 +65,13 @@ type Config struct {
 	Logger    *slog.Logger
 }
 
-// Start launches GreptimeDB as a child process and waits until its HTTP API is healthy.
-// The process is parented to the tma1-server process; it will be killed when Stop is called
-// or when the parent exits.
+// Start launches GreptimeDB as a child process and waits until its HTTP API is
+// healthy, then keeps a supervisor goroutine on it until Stop.
+//
+// Stop is what tears the child down. It stays in the parent's process group,
+// so a terminal or service manager that signals the group reaches it too, but
+// a parent killed outright (SIGKILL) leaves it reparented to init, still
+// holding the data dir, and it has to be killed by hand.
 func Start(cfg Config) (*Process, error) {
 	dataPath := filepath.Join(cfg.DataDir, "data")
 	if err := os.MkdirAll(dataPath, 0755); err != nil {
@@ -46,31 +85,145 @@ func Start(cfg Config) (*Process, error) {
 	}
 
 	args := startArgs(cfg, dataPath, configPath)
-
-	cmd := exec.Command(cfg.BinPath, args...) //nolint:gosec
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	setProcAttr(cmd)
-
-	cfg.Logger.Info("starting greptimedb",
-		"bin", cfg.BinPath,
-		"http_port", cfg.HTTPPort,
-		"config_file", configPath,
-	)
-	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("greptimedb: start process: %w", err)
-	}
-
-	p := &Process{cmd: cmd, logger: cfg.Logger}
-
 	healthURL := fmt.Sprintf("http://localhost:%d/health", cfg.HTTPPort)
-	if err := p.waitHealthy(healthURL, 30*time.Second); err != nil {
-		_ = cmd.Process.Kill()
-		return nil, fmt.Errorf("greptimedb: did not become healthy: %w", err)
-	}
 
-	cfg.Logger.Info("greptimedb healthy", "http_port", cfg.HTTPPort)
+	p := newProcess(cfg.Logger, func(stop <-chan struct{}) (*exec.Cmd, error) {
+		cmd := exec.Command(cfg.BinPath, args...) //nolint:gosec
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		setProcAttr(cmd)
+
+		cfg.Logger.Info("starting greptimedb",
+			"bin", cfg.BinPath,
+			"http_port", cfg.HTTPPort,
+			"config_file", configPath,
+		)
+		if err := cmd.Start(); err != nil {
+			return nil, fmt.Errorf("greptimedb: start process: %w", err)
+		}
+
+		if err := waitHealthy(healthURL, healthTimeout, stop); err != nil {
+			_ = cmd.Process.Kill()
+			_ = cmd.Wait()
+			return nil, fmt.Errorf("greptimedb: did not become healthy: %w", err)
+		}
+
+		cfg.Logger.Info("greptimedb healthy", "http_port", cfg.HTTPPort)
+		return cmd, nil
+	})
+
+	cmd, err := p.launch(p.stopReq)
+	if err != nil {
+		return nil, err
+	}
+	p.cmd = cmd
+	go p.supervise()
 	return p, nil
+}
+
+func newProcess(logger *slog.Logger, launch func(stop <-chan struct{}) (*exec.Cmd, error)) *Process {
+	return &Process{
+		logger:  logger,
+		launch:  launch,
+		stopReq: make(chan struct{}),
+		exited:  make(chan struct{}),
+	}
+}
+
+// supervise owns Wait on the child process and respawns it after an
+// unexpected exit. It returns once Stop has been requested, closing exited so
+// Stop knows the child has been reaped.
+func (p *Process) supervise() {
+	defer close(p.exited)
+
+	backoff := restartBackoffMin
+	for {
+		p.mu.Lock()
+		cmd := p.cmd
+		p.mu.Unlock()
+
+		if cmd != nil {
+			started := time.Now()
+			waitErr := cmd.Wait()
+			ran := time.Since(started)
+
+			p.mu.Lock()
+			p.cmd = nil
+			stopping := p.stopping
+			p.mu.Unlock()
+
+			if stopping {
+				p.logger.Info("greptimedb exited", "err", waitErr)
+				return
+			}
+			if ran >= stableRuntime {
+				backoff = restartBackoffMin
+			}
+			p.logger.Error("greptimedb exited unexpectedly, restarting",
+				"err", waitErr, "ran", ran.Round(time.Second).String(), "delay", backoff.String())
+		}
+
+		if !p.sleep(backoff) {
+			return
+		}
+		next, err := p.launch(p.stopReq)
+		if err != nil {
+			if p.shuttingDown() {
+				// launch was cancelled by the shutdown, not a failure.
+				return
+			}
+			p.logger.Error("greptimedb restart failed", "err", err, "retry_in", backoff.String())
+			backoff = nextBackoff(backoff)
+			continue
+		}
+
+		p.mu.Lock()
+		if p.stopping {
+			// Stop landed while we were launching: it can't see this child,
+			// so tear it down here.
+			p.mu.Unlock()
+			_ = next.Process.Kill()
+			_ = next.Wait()
+			return
+		}
+		p.cmd = next
+		p.mu.Unlock()
+
+		p.logger.Info("greptimedb restarted")
+		backoff = nextBackoff(backoff)
+	}
+}
+
+func (p *Process) shuttingDown() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.stopping
+}
+
+// sleep waits for d, reporting false if shutdown was requested meanwhile.
+func (p *Process) sleep(d time.Duration) bool {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-t.C:
+		// select picks randomly when both are ready, so re-check: a backoff
+		// that expires as shutdown starts must not spawn a child.
+		select {
+		case <-p.stopReq:
+			return false
+		default:
+			return true
+		}
+	case <-p.stopReq:
+		return false
+	}
+}
+
+func nextBackoff(d time.Duration) time.Duration {
+	if d*2 > restartBackoffMax {
+		return restartBackoffMax
+	}
+	return d * 2
 }
 
 // excludeFromSpotlight drops a `.metadata_never_index` marker in the data dir
@@ -110,39 +263,61 @@ func writeSpotlightExcludeMarker(dataPath string, logger *slog.Logger) bool {
 	return true
 }
 
-// Stop sends an interrupt signal to the GreptimeDB process and waits for it to exit.
+// BeginShutdown retires the supervisor without touching the child yet. Call it
+// as soon as a shutdown starts: SIGINT from a terminal and `launchctl stop` /
+// `systemctl stop` reach the whole process group, so the child usually dies
+// before the server has finished draining and calls Stop. Without this the
+// supervisor reads that as a crash and respawns a database that is about to be
+// torn down. The child keeps running until Stop, so in-flight writes still land.
+func (p *Process) BeginShutdown() {
+	p.mu.Lock()
+	p.stopping = true
+	p.mu.Unlock()
+	p.stopOnce.Do(func() { close(p.stopReq) })
+}
+
+// Stop disables the supervisor, interrupts the GreptimeDB process, and waits
+// for it to be reaped. Safe to call more than once.
 func (p *Process) Stop(ctx context.Context) error {
-	if p.cmd == nil || p.cmd.Process == nil {
-		return nil
-	}
-	p.logger.Info("stopping greptimedb")
-	if err := sendInterrupt(p.cmd.Process); err != nil {
-		_ = p.cmd.Process.Kill()
-	}
-	done := make(chan error, 1)
-	go func() { done <- p.cmd.Wait() }()
-	select {
-	case err := <-done:
-		if err != nil {
-			p.logger.Info("greptimedb exited", "err", err)
+	p.BeginShutdown()
+
+	p.mu.Lock()
+	cmd := p.cmd
+	p.mu.Unlock()
+
+	// cmd is nil when the child already exited and the supervisor is between
+	// restarts; signalling then would target a dead (possibly recycled) pid.
+	if cmd != nil && cmd.Process != nil {
+		p.logger.Info("stopping greptimedb")
+		if err := sendInterrupt(cmd.Process); err != nil {
+			_ = cmd.Process.Kill()
 		}
+	}
+
+	select {
+	case <-p.exited:
 		return nil
 	case <-ctx.Done():
-		_ = p.cmd.Process.Kill()
+		if cmd != nil && cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
 		return ctx.Err()
 	}
 }
 
-// IsRunning returns true if the child process is still alive.
+// IsRunning returns true if a child process is currently alive.
 func (p *Process) IsRunning() bool {
-	if p == nil || p.cmd == nil || p.cmd.Process == nil {
+	if p == nil {
 		return false
 	}
-	return p.cmd.ProcessState == nil // nil = not yet exited
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.cmd != nil
 }
 
-// waitHealthy polls the GreptimeDB /health endpoint until it returns 200 or timeout.
-func (p *Process) waitHealthy(url string, timeout time.Duration) error {
+// waitHealthy polls the GreptimeDB /health endpoint until it returns 200,
+// timeout expires, or stop is closed.
+func waitHealthy(url string, timeout time.Duration, stop <-chan struct{}) error {
 	deadline := time.Now().Add(timeout)
 	client := &http.Client{Timeout: 2 * time.Second}
 	for time.Now().Before(deadline) {
@@ -154,7 +329,11 @@ func (p *Process) waitHealthy(url string, timeout time.Duration) error {
 				return nil
 			}
 		}
-		time.Sleep(500 * time.Millisecond)
+		select {
+		case <-time.After(500 * time.Millisecond):
+		case <-stop:
+			return errors.New("shutdown requested")
+		}
 	}
 	return fmt.Errorf("timeout after %s", timeout)
 }

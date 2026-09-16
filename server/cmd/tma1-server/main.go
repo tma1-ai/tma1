@@ -546,6 +546,12 @@ func main() {
 		sig := <-sigCh
 		logger.Info("received signal, shutting down", "signal", sig)
 
+		// The same signal reaches GreptimeDB (terminals and service managers
+		// signal the whole group), so retire the supervisor now — otherwise it
+		// respawns the child midway through this shutdown. Teardown still
+		// happens in stopGDB below, after the writes have drained.
+		gdb.BeginShutdown()
+
 		flowCancel()
 		bgCancel()
 		codexCancel()

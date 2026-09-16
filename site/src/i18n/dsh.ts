@@ -71,7 +71,7 @@ const dockerRun = (title: string): CodeBlock => ({
   lines: [
     { text: 'docker run -p 127.0.0.1:4000-4003:4000-4003 \\' },
     { text: '  -v "$(pwd)/greptimedb_data:/greptimedb_data" \\' },
-    { text: '  --name greptime --rm greptime/greptimedb:v1.2.0-beta.2 standalone start \\' },
+    { text: '  --name greptime --rm greptime/greptimedb:v1.2.1 standalone start \\' },
     { text: '  --http-addr 0.0.0.0:4000 --rpc-bind-addr 0.0.0.0:4001 \\' },
     { text: '  --mysql-addr 0.0.0.0:4002 --postgres-addr 0.0.0.0:4003' },
   ],
