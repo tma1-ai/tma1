@@ -31,10 +31,10 @@ INSTALL_DIR="${TMA1_INSTALL_DIR:-$HOME/.tma1/bin}"
 TMA1_PORT="${TMA1_PORT:-14318}"
 TMA1_FORCE="${TMA1_FORCE:-0}"
 # Exact GreptimeDB tag tma1 ships against. Keep in sync with
-# defaultGreptimeDBVersion in server/internal/config/config.go. Pinned so every
-# install runs the tested version; set TMA1_GREPTIMEDB_VERSION=latest to track
-# stable releases instead.
-TMA1_GREPTIMEDB_VERSION="${TMA1_GREPTIMEDB_VERSION:-v1.2.1}"
+# defaultGreptimeDBVersion in server/internal/config/config.go. Pinned rather
+# than "latest" because the shipped release is a pre-release, which "latest"
+# never resolves to. Set TMA1_GREPTIMEDB_VERSION=latest to track stable instead.
+TMA1_GREPTIMEDB_VERSION="${TMA1_GREPTIMEDB_VERSION:-v1.3.0-beta.2}"
 # Adapter(s) to wire into agents. Empty = skip. Accepts a comma-separated list
 # or the alias `all` (= claude-code,codex). Each adapter registers hooks, MCP,
 # and the /tma1-peer skill globally. Project-local files are skipped here —

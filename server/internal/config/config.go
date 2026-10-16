@@ -8,9 +8,10 @@ import (
 )
 
 // Pinned to an exact tag so every install runs the version TMA1 was tested
-// against; "latest" only applies the minRequiredVersion floor. Mirrored in
-// site/public/install.sh.
-const defaultGreptimeDBVersion = "v1.2.1"
+// against. "latest" would not reach it: GitHub's /releases/latest redirect
+// skips pre-releases, and "latest" only applies the minRequiredVersion floor.
+// Mirrored in site/public/install.sh.
+const defaultGreptimeDBVersion = "v1.3.0-beta.2"
 
 // Config holds all runtime configuration for tma1-server.
 type Config struct {
