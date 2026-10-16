@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- **GreptimeDB pinned to v1.3.0-beta.2**, up from v1.2.1. The minimum
+  version for `TMA1_GREPTIMEDB_VERSION=latest` stays at v1.2.1, since
+  `latest` only resolves to stable releases.
+
 ## v0.2.0-alpha16 — Database supervision
 
 - **GreptimeDB is supervised.** The child process was started and never
