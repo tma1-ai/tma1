@@ -391,8 +391,9 @@ type codexFileContext struct {
 	// can stamp model into tma1_messages alongside the assistant payload
 	// — without it, the dashboard's per-call cost lookup can't price
 	// rollout-derived inference rows.
-	model string
-	live  bool // true after initial backfill completes (first EOF)
+	model          string
+	lastTotalUsage string
+	live           bool // true after initial backfill completes (first EOF)
 }
 
 // effectiveSessionID returns the conversation UUID once session_meta
@@ -450,7 +451,9 @@ func (w *Watcher) processCodexLine(sessionID, line string, seen map[string]struc
 			// NOT the filename prefix, which would create a
 			// "rollout-..." pseudo-session_id that mismatches
 			// every hook-derived row and confuses the UI.
-			if parentUUID := w.lookupCodexParentSession(sessionID); parentUUID != "" {
+			if meta.parentID != "" {
+				fctx.sessionID = meta.parentID
+			} else if parentUUID := w.lookupCodexParentSession(sessionID); parentUUID != "" {
 				fctx.sessionID = parentUUID
 			} else if meta.id != "" {
 				fctx.sessionID = meta.id
@@ -477,6 +480,9 @@ func (w *Watcher) processCodexLine(sessionID, line string, seen map[string]struc
 		if fctx.live {
 			w.broadcastHookEvent(sid, "SessionStart", "", "", "", "", "", "")
 		}
+
+	case "compacted":
+		w.insertCodexHookEvent(fctx.effectiveSessionID(sessionID), ts, "ContextCompaction", "", "", "", "", fctx)
 
 	case "turn_context":
 		// Stash the model on the file context so subsequent
@@ -545,7 +551,8 @@ func (w *Watcher) processCodexLine(sessionID, line string, seen map[string]struc
 			// OTel logs aren't present).
 			var tc struct {
 				Info struct {
-					LastTokenUsage struct {
+					TotalTokenUsage json.RawMessage `json:"total_token_usage"`
+					LastTokenUsage  struct {
 						InputTokens           int64 `json:"input_tokens"`
 						CachedInputTokens     int64 `json:"cached_input_tokens"`
 						OutputTokens          int64 `json:"output_tokens"`
@@ -554,6 +561,14 @@ func (w *Watcher) processCodexLine(sessionID, line string, seen map[string]struc
 				} `json:"info"`
 			}
 			if json.Unmarshal(ev.Payload, &tc) == nil {
+				// Quota updates can repeat the previous response's usage at a new timestamp.
+				total := string(tc.Info.TotalTokenUsage)
+				if total != "" && total != "null" {
+					if total == fctx.lastTotalUsage {
+						break
+					}
+					fctx.lastTotalUsage = total
+				}
 				usage := tc.Info.LastTokenUsage
 				// Skip zero-usage events (handshake / no-op turns).
 				// Output OR reasoning > 0 is the marker that the
@@ -589,6 +604,7 @@ type codexSessionMeta struct {
 	id       string
 	cwd      string
 	subagent string
+	parentID string
 }
 
 // parseCodexSessionMeta normalises the {id, cwd, source} shape Codex
@@ -604,7 +620,17 @@ func parseCodexSessionMeta(raw json.RawMessage) codexSessionMeta {
 	if err := json.Unmarshal(raw, &meta); err != nil {
 		return codexSessionMeta{}
 	}
+	var source struct {
+		Subagent struct {
+			ThreadSpawn struct {
+				ParentID string `json:"parent_thread_id"`
+			} `json:"thread_spawn"`
+		} `json:"subagent"`
+	}
+	// Legacy sources are strings, so only the structured form has a parent.
+	_ = json.Unmarshal(meta.Source, &source)
 	return codexSessionMeta{
+		parentID: source.Subagent.ThreadSpawn.ParentID,
 		id:       meta.ID,
 		cwd:      meta.CWD,
 		subagent: parseCodexSubagentSource(meta.Source),
@@ -639,6 +665,21 @@ func parseCodexSubagentSource(raw json.RawMessage) string {
 	var subagent string
 	if json.Unmarshal(source.Subagent, &subagent) == nil {
 		return strings.TrimSpace(subagent)
+	}
+	var spawn struct {
+		ThreadSpawn *struct {
+			AgentPath string `json:"agent_path"`
+			AgentRole string `json:"agent_role"`
+		} `json:"thread_spawn"`
+	}
+	if json.Unmarshal(source.Subagent, &spawn) == nil && spawn.ThreadSpawn != nil {
+		if spawn.ThreadSpawn.AgentRole != "" {
+			return spawn.ThreadSpawn.AgentRole
+		}
+		if spawn.ThreadSpawn.AgentPath != "" {
+			return spawn.ThreadSpawn.AgentPath
+		}
+		return "thread_spawn"
 	}
 	// {"subagent":{"other":"guardian"}} — Codex 0.131.0 auto-review.
 	var subagentObj map[string]string

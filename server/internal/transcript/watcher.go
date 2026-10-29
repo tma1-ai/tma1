@@ -17,6 +17,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/tma1-ai/tma1/server/internal/strutil"
 )
 
 // lastInsertTS ensures each message gets a unique, monotonically increasing timestamp.
@@ -97,7 +99,7 @@ func (w *Watcher) lookupCodexParentSession(prefix string) string {
 type sessionWatch struct {
 	cancel  context.CancelFunc
 	seen    map[string]struct{} // content hashes for dedup
-	stopped bool               // true after watcher goroutine exits (can be restarted)
+	stopped bool                // true after watcher goroutine exits (can be restarted)
 }
 
 // NewWatcher creates a transcript watcher that writes to the given GreptimeDB instance.
@@ -269,9 +271,9 @@ type contentBlock struct {
 	Type      string          `json:"type"` // "text", "thinking", "tool_use", "tool_result"
 	Text      string          `json:"text"`
 	Thinking  string          `json:"thinking"`
-	Name      string          `json:"name"`      // tool_use
-	ID        string          `json:"id"`         // tool_use
-	Input     json.RawMessage `json:"input"`      // tool_use
+	Name      string          `json:"name"`        // tool_use
+	ID        string          `json:"id"`          // tool_use
+	Input     json.RawMessage `json:"input"`       // tool_use
 	ToolUseID string          `json:"tool_use_id"` // tool_result
 	Content   json.RawMessage `json:"content"`     // tool_result (string or array)
 }
@@ -394,6 +396,9 @@ func (w *Watcher) processLine(sessionID, line string, seen map[string]struct{}) 
 			w.insertMessage(sessionID, "tool_result", role, truncate(resultStr, maxToolContent), model, "", b.ToolUseID, nil)
 		}
 	}
+	if usage != nil {
+		w.insertMessage(sessionID, "usage", "assistant", "", model, "", "", usage)
+	}
 }
 
 // extractToolResultContent normalizes tool_result content (string or [{text}] array).
@@ -505,10 +510,7 @@ func (w *Watcher) execSQL(sql string) {
 }
 
 func truncate(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen]
+	return strutil.SafeTruncate(s, maxLen)
 }
 
 func escapeSQLString(s string) string {
