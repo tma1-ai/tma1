@@ -517,10 +517,6 @@ async function loadTraceDetailData(traceId) {
 // Infer span type from span data for badge display
 function inferSpanType(s) {
   var n = s.span_name || '';
-  if (n === 'openclaw.model.usage') return 'llm';
-  if (n.indexOf('openclaw.message.') === 0) return 'msg';
-  if (n.indexOf('openclaw.webhook.') === 0) return 'webhook';
-  if (n === 'openclaw.session.stuck') return 'session';
   if (n.indexOf('sessions_spawn') >= 0) return 'spawn';
   if (n.indexOf('subagent') >= 0) return 'subagent';
   if (n.indexOf('tool_result') >= 0 || n.indexOf('tool_call') >= 0 ||

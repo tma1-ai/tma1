@@ -151,8 +151,7 @@ func InitSessionTables(httpPort int, logger *slog.Logger) error {
 // InitFlows runs the flows.sql DDL against the GreptimeDB HTTP SQL API.
 // It is idempotent (all statements use IF NOT EXISTS).
 // Flow creation (CREATE FLOW) failures are non-fatal — they are logged as warnings
-// and skipped, since the source table may have a different schema (e.g. openclaw.*
-// columns instead of gen_ai.*).
+// and skipped, since the source table may have a different schema without gen_ai.* columns.
 func InitFlows(httpPort int, logger *slog.Logger) error {
 	sqlURL := fmt.Sprintf("http://localhost:%d/v1/sql", httpPort)
 

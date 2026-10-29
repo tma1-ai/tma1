@@ -6,7 +6,7 @@ GO_PACKAGES:=./cmd/... ./internal/... ./web
 # are POSIX so this is a strict superset of the prior behaviour.
 SHELL := /bin/bash
 
-.PHONY: build build-linux build-windows vet lint lint-js test check install install-hooks clean run dev sync-plugin sync-skills
+.PHONY: build build-linux build-windows vet lint lint-js test-js test check install install-hooks clean run dev sync-plugin sync-skills
 
 # Where `make install` lays down the binary. Matches the install.sh convention
 # so the dev build slots into the same path the released installer uses
@@ -51,11 +51,14 @@ lint:
 lint-js:
 	cd server/web && npx eslint js/
 
+test-js:
+	cd server/web && node --test tests/*.test.mjs
+
 test:
 	cd server && go test -race -count=1 $(GO_PACKAGES)
 
 # Run all checks CI runs (vet, lint, test, lint-js). Used by the pre-push hook.
-check: vet lint test lint-js
+check: vet lint test lint-js test-js
 
 # Install the dev build to $(INSTALL_DIR) — same path the released installer
 # uses. Does NOT restart the running tma1-server; that's a deliberate choice

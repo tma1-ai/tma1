@@ -3,10 +3,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "sync:skill": "cp ../clawhub-skill/tma1/SKILL.md ../clawhub-skill/tma1/REFERENCE.md public/",
+    "sync:skill": "cp ../claude-plugin/skills/tma1-setup/SKILL.md public/SKILL.md && cp ../claude-plugin/skills/tma1/SKILL.md public/REFERENCE.md",
     "predev": "npm run sync:skill",
-    "dev": "astro dev",
     "prebuild": "npm run sync:skill",
+    "dev": "astro dev",
     "build": "astro build",
     "preview": "astro preview"
   },

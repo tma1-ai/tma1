@@ -54,7 +54,7 @@ func TestClaudeThinkingOnlyKeepsUsage(t *testing.T) {
 	defer srv.Close()
 	w := &Watcher{sqlURL: srv.URL, logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	seen := map[string]struct{}{sessionStartKey: {}}
-	w.processLine("session", `{"type":"assistant","uuid":"message-one","message":{"role":"assistant","model":"test-model","content":[{"type":"thinking","thinking":"analysis"}],"usage":{"input_tokens":100,"output_tokens":20,"cache_read_input_tokens":80}}}`, seen)
+	w.processLine("session", `{"type":"assistant","uuid":"message-one","message":{"role":"assistant","model":"test-model","content":[{"type":"thinking","thinking":"analysis"}],"usage":{"input_tokens":100,"output_tokens":20,"cache_read_input_tokens":80}}}`, seen, make(map[string]msgUsage))
 	sqls := []string{waitForSQL(t, ch), waitForSQL(t, ch)}
 	assertAnySQLContains(t, sqls, "'usage'", "100, 20, 80, 0")
 }
@@ -74,5 +74,47 @@ func BenchmarkCodexSessionMeta(b *testing.B) {
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		parseCodexSessionMeta(raw)
+	}
+}
+
+func TestClaudeStreamingUsageDeltas(t *testing.T) {
+	ch := make(chan string, 8)
+	srv := httptest.NewServer(httpTestHandler(ch))
+	defer srv.Close()
+	w := &Watcher{sqlURL: srv.URL, logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	seen := map[string]struct{}{sessionStartKey: {}}
+	usage := map[string]msgUsage{}
+	line := `{"timestamp":"2026-10-28T10:00:00Z","type":"assistant","message":{"id":"response-1","role":"assistant","content":[{"type":"text","text":"answer"}],"usage":{"input_tokens":100,"output_tokens":1,"cache_read_input_tokens":80}}}`
+	w.processLine("session", line, seen, usage)
+	first := waitForSQL(t, ch)
+	if !strings.Contains(first, "1793181600000") {
+		t.Fatalf("source timestamp lost: %s", first)
+	}
+	w.processLine("session", line, seen, usage)
+	w.processLine("session", strings.Replace(line, `"output_tokens":1`, `"output_tokens":21`, 1), seen, usage)
+	sql := waitForSQL(t, ch)
+	if !strings.Contains(sql, "'usage'") || !strings.Contains(sql, ", 0, 20, 0, 0)") {
+		t.Fatalf("expected incremental output only: %s", sql)
+	}
+	select {
+	case extra := <-ch:
+		t.Fatalf("duplicate usage: %s", extra)
+	case <-time.After(150 * time.Millisecond):
+	}
+}
+
+func TestCodexPreservesSourceTimeAcrossSessions(t *testing.T) {
+	ch := make(chan string, 4)
+	srv := httptest.NewServer(httpTestHandler(ch))
+	defer srv.Close()
+	w := &Watcher{sqlURL: srv.URL, logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	newer := time.Date(2026, 10, 29, 10, 0, 0, 0, time.UTC)
+	older := newer.Add(-24 * time.Hour)
+	w.insertCodexMessage("newer-session", newer, "assistant", "newer", map[string]struct{}{})
+	waitForSQL(t, ch)
+	w.insertCodexMessage("older-session", older, "assistant", "older", map[string]struct{}{})
+	sql := waitForSQL(t, ch)
+	if !strings.Contains(sql, "1793181600000") {
+		t.Fatalf("source time shifted by unrelated session: %s", sql)
 	}
 }

@@ -89,18 +89,6 @@
       <code>endpoint = "http://localhost:14318/v1/metrics"</code><br/>
       <code>protocol = "binary"</code>
       <br/><br/>
-      <code># OpenClaw</code><br/>
-      <code>openclaw plugins install @openclaw/diagnostics-otel</code><br/>
-      <code>openclaw plugins enable diagnostics-otel</code><br/>
-      <code>openclaw config set diagnostics.enabled true</code><br/>
-      <code>openclaw config set diagnostics.otel.enabled true</code><br/>
-      <code>openclaw config set diagnostics.otel.endpoint http://localhost:14318/v1/otlp</code><br/>
-      <code>openclaw config set diagnostics.otel.serviceName openclaw-gateway</code><br/>
-      <code>openclaw config set diagnostics.otel.traces true</code><br/>
-      <code>openclaw config set diagnostics.otel.metrics true</code><br/>
-      <code>openclaw config set diagnostics.otel.logs true</code> <span style="color:var(--text-muted);font-size:12px"># optional: gateway internal logs</span><br/>
-      <code>openclaw gateway restart</code>
-      <br/><br/>
       <code># Any OTel SDK</code><br/>
       <code>OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:14318/v1/otlp your-agent</code>
     </p>
@@ -525,324 +513,6 @@
     </div>
   </div>
 
-  <!-- ========================= OPENCLAW VIEW ========================= -->
-  <div id="view-openclaw" style="display:none">
-    <div class="cards cards-5">
-      <div class="card">
-        <div class="label" data-i18n="card.total_cost">Total Cost</div>
-        <div class="value cost" id="oc-val-cost">&mdash;</div>
-      </div>
-      <div class="card">
-        <div class="label" data-i18n="card.total_tokens">Total Tokens</div>
-        <div class="value tokens" id="oc-val-tokens">&mdash;</div>
-      </div>
-      <div class="card">
-        <div class="label" data-i18n="card.api_requests">Requests</div>
-        <div class="value requests" id="oc-val-requests">&mdash;</div>
-      </div>
-      <div class="card">
-        <div class="label" data-i18n="card.avg_latency">Avg Latency</div>
-        <div class="value latency" id="oc-val-latency">&mdash;</div>
-      </div>
-      <div class="card" style="display:flex;align-items:center;justify-content:center">
-        <div id="oc-health-indicator" class="health-indicator health-na">
-          <span class="health-dot"></span><span class="health-text">N/A</span>
-        </div>
-      </div>
-    </div>
-
-    <div class="tabs" id="oc-tabs">
-      <button class="tab active" data-octab="oc-overview" data-i18n="tab.oc_overview">Overview</button>
-      <button class="tab" data-octab="oc-sessions" data-i18n="tab.oc_sessions">Sessions</button>
-      <button class="tab" data-octab="oc-traces" data-i18n="tab.oc_traces">Traces</button>
-      <button class="tab" data-octab="oc-cost" data-i18n="tab.oc_cost">Cost</button>
-      <button class="tab" data-octab="oc-security" data-i18n="tab.oc_security">Security</button>
-      <button class="tab" data-link="sessions" onclick="switchToSessions('openclaw')" data-i18n="tab.sessions">Sessions→</button>
-    </div>
-
-    <!-- OC Overview -->
-    <div class="tab-content active" id="tab-oc-overview">
-      <div class="chart-container">
-        <h3 data-i18n="section.token_usage">Token Usage Over Time</h3>
-        <div id="oc-chart-tokens"><div class="chart-empty" data-i18n="empty.waiting">Waiting for data...</div></div>
-      </div>
-      <div class="chart-container">
-        <h3 data-i18n="section.cost_over_time">Cost Over Time</h3>
-        <div id="oc-chart-cost"><div class="chart-empty" data-i18n="empty.waiting">Waiting for data...</div></div>
-      </div>
-      <div class="chart-container">
-        <h3 data-i18n="section.oc_latency">Latency Over Time (p50 / p95)</h3>
-        <div id="oc-chart-latency"><div class="chart-empty" data-i18n="empty.waiting">Waiting for data...</div></div>
-      </div>
-      <div class="chart-container">
-        <h3 data-i18n="section.success_rate">Success Rate</h3>
-        <div id="oc-chart-success-rate"><div class="chart-empty" data-i18n="empty.waiting">Waiting for data...</div></div>
-      </div>
-      <div class="chart-container">
-        <h3 data-i18n="section.channel_distribution">Channel Distribution</h3>
-        <div id="oc-channel-dist" class="bar-chart"><div class="chart-empty" data-i18n="empty.waiting">Waiting for data...</div></div>
-      </div>
-      <div class="chart-container">
-        <h3 data-i18n="section.cache_efficiency">Cache Efficiency</h3>
-        <div id="oc-cache-efficiency" class="bar-chart"><div class="chart-empty" data-i18n="empty.waiting">Waiting for data...</div></div>
-      </div>
-      <div class="chart-container">
-        <h3 data-i18n="section.provider_distribution">Provider Distribution</h3>
-        <div id="oc-provider-dist" class="bar-chart"><div class="chart-empty" data-i18n="empty.waiting">Waiting for data...</div></div>
-      </div>
-      <div class="chart-container">
-        <h3 data-i18n="section.message_flow">Message Flow</h3>
-        <div id="oc-chart-msg-flow"><div class="chart-empty" data-i18n="empty.waiting">Waiting for data...</div></div>
-      </div>
-      <div class="chart-container">
-        <h3 data-i18n="section.context_window_usage">Context Window Usage</h3>
-        <div id="oc-chart-context"><div class="chart-empty" data-i18n="empty.waiting">Waiting for data...</div></div>
-      </div>
-      <div class="chart-container">
-        <h3 data-i18n="section.outcome_distribution">Outcome Distribution</h3>
-        <div id="oc-outcome-dist" class="bar-chart"><div class="chart-empty" data-i18n="empty.waiting">Waiting for data...</div></div>
-      </div>
-      <div class="chart-container">
-        <h3 data-i18n="section.session_state">Session State</h3>
-        <div id="oc-session-state" class="bar-chart"><div class="chart-empty" data-i18n="empty.waiting">Waiting for data...</div></div>
-      </div>
-      <div class="chart-container">
-        <h3 data-i18n="section.queue_depth">Queue Depth</h3>
-        <div id="oc-chart-queue"><div class="chart-empty" data-i18n="empty.waiting">Waiting for data...</div></div>
-      </div>
-      <div class="chart-container">
-        <h3 data-i18n="section.run_duration">Run Duration</h3>
-        <div id="oc-chart-run-duration"><div class="chart-empty" data-i18n="empty.waiting">Waiting for data...</div></div>
-      </div>
-      <div class="chart-container">
-        <h3 data-i18n="section.activity_heatmap">Activity Heatmap</h3>
-        <div id="oc-activity-heatmap"><div class="chart-empty" data-i18n="empty.waiting">Waiting for data...</div></div>
-      </div>
-      <div class="chart-container" id="oc-metrics-explorer-section" style="display:none">
-        <h3 data-i18n="section.metrics_explorer">Metrics Explorer</h3>
-        <p style="font-size:13px;color:var(--text-muted);margin-bottom:12px" data-i18n="section.metrics_explorer_desc">Explore OTel metrics with PromQL.</p>
-        <div class="me-controls">
-          <select id="oc-metrics-metric-select" class="filter-select" onchange="meOnMetricSelect('oc-metrics')">
-            <option value="" data-i18n="filter.select_metric">Select a metric...</option>
-          </select>
-          <div id="oc-metrics-label-tags" class="me-label-tags"></div>
-        </div>
-        <div class="me-query-row">
-          <input id="oc-metrics-promql-input" class="filter-input me-promql-input"
-                 placeholder="PromQL: rate(metric[5m])"
-                 onkeydown="if(event.key==='Enter')meRunQuery('oc-metrics')" />
-          <button class="filter-btn primary" onclick="meRunQuery('oc-metrics')" data-i18n="btn.run_query">Run</button>
-        </div>
-        <div id="oc-metrics-quick-actions" class="me-quick-actions"></div>
-        <div id="oc-metrics-chart-area"></div>
-        <div id="oc-metrics-legend" class="me-legend"></div>
-      </div>
-    </div>
-
-    <!-- OC Sessions -->
-    <div class="tab-content" id="tab-oc-sessions">
-      <div class="filters">
-        <input class="filter-input" id="oc-session-filter" type="text"
-               placeholder="Filter by session key..." data-i18n-placeholder="filter.filter_session_key" onkeydown="if(event.key==='Enter')oc_loadSessions()" />
-        <button class="filter-btn primary" onclick="oc_loadSessions()" data-i18n="btn.refresh">Refresh</button>
-      </div>
-      <div style="overflow-x:auto">
-        <table>
-          <thead>
-            <tr>
-              <th data-i18n="table.session">Session</th>
-              <th data-i18n="table.channel">Channel</th>
-              <th data-i18n="table.messages">Messages</th>
-              <th data-i18n="table.tokens">Tokens</th>
-              <th data-i18n="table.cost">Cost</th>
-              <th data-i18n="table.duration">Duration</th>
-              <th data-i18n="table.errors">Errors</th>
-            </tr>
-          </thead>
-          <tbody id="oc-sessions-body">
-            <tr><td colspan="7" class="loading" data-i18n="empty.loading">Loading...</td></tr>
-          </tbody>
-        </table>
-      </div>
-      <div class="filters" style="margin-top:12px;justify-content:flex-end">
-        <button class="filter-btn" id="oc-sessions-prev-btn" onclick="oc_prevSessionsPage()" data-i18n="pager.prev">Prev</button>
-        <span id="oc-sessions-page-info" style="color:var(--text-muted);font-size:13px;min-width:120px;text-align:center">Page 1</span>
-        <button class="filter-btn" id="oc-sessions-next-btn" onclick="oc_nextSessionsPage()" data-i18n="pager.next">Next</button>
-      </div>
-    </div>
-
-    <!-- OC Traces -->
-    <div class="tab-content" id="tab-oc-traces">
-      <div class="filters">
-        <select class="filter-select" id="oc-trace-span-filter" onchange="oc_onTraceFilterChange()">
-          <option value="" data-i18n="filter.all_span_types">All span types</option>
-        </select>
-        <select class="filter-select" id="oc-trace-model-filter" onchange="oc_onTraceFilterChange()">
-          <option value="" data-i18n="filter.all_models">All models</option>
-        </select>
-        <select class="filter-select" id="oc-trace-channel-filter" onchange="oc_onTraceFilterChange()">
-          <option value="" data-i18n="filter.all_channels">All channels</option>
-        </select>
-        <select class="filter-select" id="oc-trace-session-filter" onchange="oc_onTraceFilterChange()">
-          <option value="" data-i18n="filter.all_sessions">All sessions</option>
-        </select>
-        <select class="filter-select" id="oc-trace-outcome-filter" onchange="oc_onTraceFilterChange()">
-          <option value="" data-i18n="filter.all_outcomes">All outcomes</option>
-        </select>
-        <input class="filter-input" id="oc-trace-query-filter" type="text"
-               placeholder="Search trace/span/model/channel..." data-i18n-placeholder="filter.search_trace" onkeydown="if(event.key==='Enter')oc_onTraceFilterChange()" />
-        <button class="filter-btn primary" onclick="oc_onTraceFilterChange()" data-i18n="btn.refresh">Refresh</button>
-      </div>
-      <div style="overflow-x:auto">
-        <table id="oc-traces-table">
-          <thead>
-            <tr>
-              <th data-i18n="table.timestamp">Timestamp</th>
-              <th data-i18n="table.span">Span</th>
-              <th data-i18n="table.model">Model</th>
-              <th data-i18n="table.channel">Channel</th>
-              <th data-i18n="table.input_tok">Input Tok</th>
-              <th data-i18n="table.output_tok">Output Tok</th>
-              <th data-i18n="table.cache_read">Cache Read</th>
-              <th data-i18n="table.duration">Duration</th>
-              <th data-i18n="table.status">Status</th>
-            </tr>
-          </thead>
-          <tbody id="oc-traces-body">
-            <tr><td colspan="9" class="loading" data-i18n="empty.loading_traces">Loading traces...</td></tr>
-          </tbody>
-        </table>
-      </div>
-      <div class="filters" style="margin-top:12px;justify-content:flex-end">
-        <button class="filter-btn" id="oc-trace-prev-btn" onclick="oc_prevTracePage()" data-i18n="pager.prev">Prev</button>
-        <span id="oc-trace-page-info" style="color:var(--text-muted);font-size:13px;min-width:120px;text-align:center">Page 1</span>
-        <button class="filter-btn" id="oc-trace-next-btn" onclick="oc_nextTracePage()" data-i18n="pager.next">Next</button>
-      </div>
-    </div>
-
-    <!-- OC Cost -->
-    <div class="tab-content" id="tab-oc-cost">
-      <div class="chart-container">
-        <h3 data-i18n="section.cost_by_model">Cost by Model</h3>
-        <div id="oc-cost-by-model" class="bar-chart"></div>
-      </div>
-      <div class="chart-container">
-        <h3 data-i18n="section.cost_by_channel">Cost by Channel</h3>
-        <div id="oc-cost-by-channel" class="bar-chart"></div>
-      </div>
-      <div class="chart-container">
-        <h3 data-i18n="section.top_expensive_oc">Top Expensive Requests</h3>
-        <table>
-          <thead>
-            <tr>
-              <th data-i18n="table.timestamp">Timestamp</th>
-              <th data-i18n="table.model">Model</th>
-              <th data-i18n="table.input_tok">Input Tok</th>
-              <th data-i18n="table.output_tok">Output Tok</th>
-              <th data-i18n="table.est_cost">Est. Cost</th>
-              <th data-i18n="table.duration">Duration</th>
-            </tr>
-          </thead>
-          <tbody id="oc-expensive-body">
-            <tr><td colspan="6" class="loading" data-i18n="empty.loading">Loading...</td></tr>
-          </tbody>
-        </table>
-      </div>
-      <div class="chart-container">
-        <h3 data-i18n="section.cache_savings">Cache Savings Estimate</h3>
-        <div id="oc-cache-savings" class="bar-chart"><div class="chart-empty" data-i18n="empty.waiting">Waiting for data...</div></div>
-      </div>
-      <div class="chart-container">
-        <h3 data-i18n="section.model_comparison">Model Comparison</h3>
-        <table>
-          <thead>
-            <tr>
-              <th data-i18n="table.model">Model</th>
-              <th data-i18n="table.requests">Requests</th>
-              <th data-i18n="table.avg_latency">Avg Latency</th>
-              <th data-i18n="table.avg_cost">Avg Cost</th>
-            </tr>
-          </thead>
-          <tbody id="oc-model-compare-body">
-            <tr><td colspan="4" class="loading" data-i18n="empty.loading">Loading...</td></tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
-
-    <!-- OC Security -->
-    <div class="tab-content" id="tab-oc-security">
-      <div class="cards" style="border-bottom:none;padding-left:0;padding-right:0">
-        <div class="card">
-          <div class="label" data-i18n="card.webhook_errors">Webhook Errors</div>
-          <div class="value cost" id="oc-sec-webhook-errors">&mdash;</div>
-        </div>
-        <div class="card">
-          <div class="label" data-i18n="card.stuck_sessions">Stuck Sessions</div>
-          <div class="value cost" id="oc-sec-stuck-sessions">&mdash;</div>
-        </div>
-        <div class="card">
-          <div class="label" data-i18n="card.failed_outcomes">Failed Outcomes</div>
-          <div class="value latency" id="oc-sec-failed-outcomes">&mdash;</div>
-        </div>
-        <div class="card">
-          <div class="label" data-i18n="card.token_anomalies">Token Anomalies</div>
-          <div class="value tokens" id="oc-sec-token-anomalies">&mdash;</div>
-        </div>
-      </div>
-
-      <div class="chart-container">
-        <h3 data-i18n="section.error_rate_by_channel">Error Rate by Channel</h3>
-        <div id="oc-sec-channel-errors" class="bar-chart"><div class="chart-empty" data-i18n="empty.waiting">Waiting for data...</div></div>
-      </div>
-
-      <div class="chart-container">
-        <h3 data-i18n="section.session_health">Session Health</h3>
-        <div style="overflow-x:auto">
-          <table id="oc-sec-session-table">
-            <thead><tr>
-              <th data-i18n="table.timestamp">Timestamp</th>
-              <th data-i18n="table.session">Session</th>
-              <th data-i18n="table.state">State</th>
-              <th data-i18n="table.channel">Channel</th>
-              <th data-i18n="table.duration">Duration</th>
-            </tr></thead>
-            <tbody id="oc-sec-session-body">
-              <tr><td colspan="5" class="loading" data-i18n="empty.loading">Loading...</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <div class="chart-container">
-        <h3 data-i18n="section.webhook_error_timeline">Webhook Error Timeline</h3>
-        <div class="anomaly-list" id="oc-sec-webhook-timeline">
-          <div class="chart-empty" data-i18n="empty.waiting">Waiting for data...</div>
-        </div>
-      </div>
-
-      <div class="chart-container">
-        <h3 data-i18n="section.token_anomalies">Token Anomalies</h3>
-        <div class="anomaly-list" id="oc-sec-token-anomalies-list">
-          <div class="chart-empty" data-i18n="empty.waiting">Waiting for data...</div>
-        </div>
-      </div>
-
-      <div class="chart-container">
-        <h3 data-i18n="section.channel_activity">Channel Activity (Message Velocity)</h3>
-        <div id="oc-sec-channel-activity"><div class="chart-empty" data-i18n="empty.waiting">Waiting for data...</div></div>
-      </div>
-
-      <div class="chart-container">
-        <h3 data-i18n="section.anomaly_highlights">Anomaly Highlights</h3>
-        <div class="anomaly-list" id="oc-anomaly-list">
-          <div class="loading" data-i18n="empty.loading_anomalies">Loading anomalies...</div>
-        </div>
-      </div>
-    </div>
-
-  </div>
-
   <!-- ========================= TRACES VIEW ========================= -->
   <div id="view-traces" style="display:none">
   <div class="cards cards-5">
@@ -1245,7 +915,6 @@
           <option value="" data-i18n="sessions.source_all">All</option>
           <option value="claude_code" data-i18n="sessions.source_cc">Claude Code</option>
           <option value="codex" data-i18n="sessions.source_codex">Codex</option>
-          <option value="openclaw" data-i18n="sessions.source_openclaw">OpenClaw</option>
           <option value="copilot_cli" data-i18n="sessions.source_copilot_cli">Copilot CLI</option>
         </select>
         <input class="filter-input" id="sess-keyword-filter" type="text"
@@ -1267,7 +936,7 @@
               <th data-i18n="sessions.col_duration">Duration</th>
               <th data-i18n="sessions.col_tools">Tools</th>
               <th data-i18n="sessions.col_subagents">Subagents</th>
-              <th data-i18n="sessions.col_cost">Est. Cost</th>
+              <th data-i18n="compare.reported_tokens">Reported tokens</th>
               <th data-i18n="sessions.col_cwd">Working Dir</th>
             </tr>
           </thead>
@@ -1358,7 +1027,6 @@
         <option value="" data-i18n="sessions.source_all">All</option>
         <option value="claude_code" data-i18n="sessions.source_cc">Claude Code</option>
         <option value="codex" data-i18n="sessions.source_codex">Codex</option>
-        <option value="openclaw" data-i18n="sessions.source_openclaw">OpenClaw</option>
         <option value="copilot_cli" data-i18n="sessions.source_copilot_cli">Copilot CLI</option>
       </select>
     </div>
@@ -1542,8 +1210,8 @@
     </div>
   </div>
 
-  <dialog id="comparison-dialog" class="comparison-dialog">
-    <div class="comparison-heading"><div><span class="eyebrow" data-i18n="compare.eyebrow">SESSION WORKBENCH</span><h2 data-i18n="compare.title">Side by side</h2></div><form method="dialog"><button class="filter-btn" data-i18n="ui.close">Close</button></form></div>
+  <dialog id="comparison-dialog" class="comparison-dialog" aria-labelledby="comparison-title">
+    <div class="comparison-heading"><div><span class="eyebrow" data-i18n="compare.eyebrow">SESSION WORKBENCH</span><h2 id="comparison-title" data-i18n="compare.title">Side by side</h2></div><form method="dialog"><button class="filter-btn" data-i18n="ui.close">Close</button></form></div>
     <div id="comparison-content" aria-live="polite"></div>
   </dialog>
   <script src="/js/i18n.js"></script>
@@ -1554,7 +1222,6 @@
   <script src="/js/claude-code.js"></script>
   <script src="/js/codex.js"></script>
   <script src="/js/copilot-cli.js"></script>
-  <script src="/js/openclaw.js"></script>
   <script src="/js/sessions-stats.js"></script>
   <script src="/js/sessions-timeline.js"></script>
   <script src="/js/sessions-insights.js"></script>

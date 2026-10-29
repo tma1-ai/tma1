@@ -12,10 +12,9 @@ var ME_HIGH_CARDINALITY_RE = /(_id|_uuid|_key|_email|_token|_secret|_password)$|
 var ME_VIEW_PREFIXES = {
   'cc-metrics':  ['claude_code_'],
   'cdx-metrics': ['codex_'],
-  'oc-metrics':  ['openclaw_'],
 };
 // 'metrics' (GenAI/Traces view) has no entry → shows everything except other views' prefixes
-var ME_ALL_VIEW_PREFIXES = ['claude_code_', 'codex_', 'openclaw_'];
+var ME_ALL_VIEW_PREFIXES = ['claude_code_', 'codex_'];
 
 function meRangeVector() {
   var m = { '1h': '5m', '6h': '5m', '24h': '15m', '7d': '1h', '30d': '6h', '60d': '12h' };

@@ -46,7 +46,7 @@ site/node_modules/
 server/web/node_modules/
 site/.astro/
 
-# Synced from clawhub-skill/tma1/ via prebuild
+# Synced from claude-plugin/skills/ via prebuild
 site/public/SKILL.md
 site/public/REFERENCE.md
 .tma1-context.md

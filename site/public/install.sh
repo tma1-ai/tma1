@@ -34,7 +34,7 @@ TMA1_FORCE="${TMA1_FORCE:-0}"
 # defaultGreptimeDBVersion in server/internal/config/config.go. Pinned so every
 # install runs the tested version; set TMA1_GREPTIMEDB_VERSION=latest to track
 # stable releases instead.
-TMA1_GREPTIMEDB_VERSION="${TMA1_GREPTIMEDB_VERSION:-v1.2.1}"
+TMA1_GREPTIMEDB_VERSION="${TMA1_GREPTIMEDB_VERSION:-v1.3.0}"
 # Adapter(s) to wire into agents. Empty = skip. Accepts a comma-separated list
 # or the alias `all` (= claude-code,codex). Each adapter registers hooks, MCP,
 # and the /tma1-peer skill globally. Project-local files are skipped here —

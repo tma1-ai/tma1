@@ -45,7 +45,7 @@ jobs:
 
       - name: Lint JS
         working-directory: server/web
-        run: npm ci && npx eslint js/
+        run: npm ci && npx eslint js/ && node --test tests/*.test.mjs
 
       - name: Lint install.sh
         run: shellcheck site/public/install.sh

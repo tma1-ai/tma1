@@ -7,7 +7,7 @@ title: tma1 — Agent context
 TMA1 is local-first LLM agent observability, powered by GreptimeDB.
 Three pillars (traces + metrics + logs) unified into wide events — all queryable via SQL.
 
-- **Traces** are the core: GenAI / OpenClaw spans carry model, tokens, latency, status
+- **Traces** are the core: GenAI spans carry model, tokens, latency, status
 - **Metrics** are derived from traces via Flow engine (no double-writing), and native OTel metrics are also accepted (auto-creates tables)
 - **Logs** carry conversation content (conversation replay)
 - **Cross-signal JOIN**: `trace_id` connects spans to conversations
@@ -30,7 +30,7 @@ Agent ── OTLP/HTTP ──┐
                         Embedded dashboard
 ```
 
-tma1-server is one Go binary: it manages a child GreptimeDB process, reverse-proxies OTLP, ingests hook events + JSONL transcripts from Claude Code / Codex / Copilot CLI / OpenClaw, runs the perception layer (anomaly detector + injection bundler), and serves the embedded dashboard. The MCP child (`tma1-server mcp-serve`) shares the same GreptimeDB.
+tma1-server is one Go binary: it manages a child GreptimeDB process, reverse-proxies OTLP, ingests hook events + JSONL transcripts from Claude Code / Codex / Copilot CLI, runs the perception layer (anomaly detector + injection bundler), and serves the embedded dashboard. The MCP child (`tma1-server mcp-serve`) shares the same GreptimeDB.
 
 **Deep references — read these when you need detail:**
 - [`docs/architecture.md`](docs/architecture.md) — module layout, full data flow, per-agent tables, env vars, file index

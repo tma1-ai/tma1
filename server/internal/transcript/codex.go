@@ -555,6 +555,7 @@ func (w *Watcher) processCodexLine(sessionID, line string, seen map[string]struc
 					LastTokenUsage  struct {
 						InputTokens           int64 `json:"input_tokens"`
 						CachedInputTokens     int64 `json:"cached_input_tokens"`
+						CacheWriteInputTokens int64 `json:"cache_write_input_tokens"`
 						OutputTokens          int64 `json:"output_tokens"`
 						ReasoningOutputTokens int64 `json:"reasoning_output_tokens"`
 					} `json:"last_token_usage"`
@@ -576,7 +577,7 @@ func (w *Watcher) processCodexLine(sessionID, line string, seen map[string]struc
 				if usage.OutputTokens > 0 || usage.ReasoningOutputTokens > 0 {
 					w.insertCodexUsageMessage(sid, ts, fctx.model,
 						usage.InputTokens, usage.OutputTokens,
-						usage.CachedInputTokens, usage.ReasoningOutputTokens, seen)
+						usage.CachedInputTokens, usage.CacheWriteInputTokens, usage.ReasoningOutputTokens, seen)
 				}
 			}
 		case "user_message":
@@ -840,17 +841,6 @@ func (w *Watcher) insertCodexModelMessage(sessionID string, ts time.Time, model 
 	seen[key] = struct{}{}
 
 	msTs := ts.UnixMilli()
-	for {
-		prev := lastInsertTS.Load()
-		next := msTs
-		if next <= prev {
-			next = prev + 1
-		}
-		if lastInsertTS.CompareAndSwap(prev, next) {
-			msTs = next
-			break
-		}
-	}
 
 	sql := fmt.Sprintf(
 		"INSERT INTO tma1_messages (ts, session_id, message_type, \"role\", content, model, tool_name, tool_use_id) "+
@@ -889,17 +879,6 @@ func (w *Watcher) insertCodexMessage(sessionID string, ts time.Time, role, conte
 	}
 
 	msTs := ts.UnixMilli()
-	for {
-		prev := lastInsertTS.Load()
-		next := msTs
-		if next <= prev {
-			next = prev + 1
-		}
-		if lastInsertTS.CompareAndSwap(prev, next) {
-			msTs = next
-			break
-		}
-	}
 
 	sql := fmt.Sprintf(
 		"INSERT INTO tma1_messages (ts, session_id, message_type, \"role\", content, model, tool_name, tool_use_id) "+
@@ -940,17 +919,6 @@ func (w *Watcher) insertCodexTypedMessage(sessionID string, ts time.Time, messag
 	}
 
 	msTs := ts.UnixMilli()
-	for {
-		prev := lastInsertTS.Load()
-		next := msTs
-		if next <= prev {
-			next = prev + 1
-		}
-		if lastInsertTS.CompareAndSwap(prev, next) {
-			msTs = next
-			break
-		}
-	}
 
 	sql := fmt.Sprintf(
 		"INSERT INTO tma1_messages (ts, session_id, message_type, \"role\", content, model, tool_name, tool_use_id) "+
@@ -986,8 +954,8 @@ func (w *Watcher) insertCodexTypedMessage(sessionID string, ts time.Time, messag
 //
 // NOT gated by codexLiveGate — tma1_messages is never written by
 // the live hook handler, so there's no double-write to suppress.
-func (w *Watcher) insertCodexUsageMessage(sessionID string, ts time.Time, model string, input, output, cachedInput, reasoning int64, seen map[string]struct{}) {
-	key := fmt.Sprintf("usage:%d:%d:%d:%d:%d", ts.UnixMilli(), input, output, cachedInput, reasoning)
+func (w *Watcher) insertCodexUsageMessage(sessionID string, ts time.Time, model string, input, output, cachedInput, cacheWrite, reasoning int64, seen map[string]struct{}) {
+	key := fmt.Sprintf("usage:%d:%d:%d:%d:%d:%d", ts.UnixMilli(), input, output, cachedInput, cacheWrite, reasoning)
 	if seen != nil {
 		if _, ok := seen[key]; ok {
 			return
@@ -996,28 +964,18 @@ func (w *Watcher) insertCodexUsageMessage(sessionID string, ts time.Time, model 
 	}
 
 	msTs := ts.UnixMilli()
-	for {
-		prev := lastInsertTS.Load()
-		next := msTs
-		if next <= prev {
-			next = prev + 1
-		}
-		if lastInsertTS.CompareAndSwap(prev, next) {
-			msTs = next
-			break
-		}
-	}
 
 	sql := fmt.Sprintf(
 		"INSERT INTO tma1_messages (ts, session_id, message_type, \"role\", content, model, tool_name, tool_use_id, "+
-			"input_tokens, output_tokens, cache_read_tokens, reasoning_tokens) "+
-			"VALUES (%d, '%s', 'usage', 'assistant', '', '%s', '', '', %d, %d, %d, %d)",
+			"input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, reasoning_tokens) "+
+			"VALUES (%d, '%s', 'usage', 'assistant', '', '%s', '', '', %d, %d, %d, %d, %d)",
 		msTs,
 		escapeSQLString(sessionID),
 		escapeSQLString(model),
 		input,
 		output,
 		cachedInput,
+		cacheWrite,
 		reasoning,
 	)
 	go func() {
@@ -1080,17 +1038,6 @@ func (w *Watcher) insertCodexSessionStart(sessionID string, ts time.Time, cwd, c
 		return
 	}
 	msTs := ts.UnixMilli()
-	for {
-		prev := lastInsertTS.Load()
-		next := msTs
-		if next <= prev {
-			next = prev + 1
-		}
-		if lastInsertTS.CompareAndSwap(prev, next) {
-			msTs = next
-			break
-		}
-	}
 
 	sql := fmt.Sprintf(
 		"INSERT INTO tma1_hook_events "+
@@ -1121,17 +1068,6 @@ func (w *Watcher) insertCodexSubagentEvent(sessionID string, ts time.Time, agent
 		return
 	}
 	msTs := ts.UnixMilli()
-	for {
-		prev := lastInsertTS.Load()
-		next := msTs
-		if next <= prev {
-			next = prev + 1
-		}
-		if lastInsertTS.CompareAndSwap(prev, next) {
-			msTs = next
-			break
-		}
-	}
 
 	// Write cwd from the subagent's own session_meta so orphan
 	// subagent rollouts (Codex 0.131.0 `code review`, no parent)
@@ -1162,17 +1098,6 @@ func (w *Watcher) insertCodexHookEvent(sessionID string, ts time.Time, eventType
 		return
 	}
 	msTs := ts.UnixMilli()
-	for {
-		prev := lastInsertTS.Load()
-		next := msTs
-		if next <= prev {
-			next = prev + 1
-		}
-		if lastInsertTS.CompareAndSwap(prev, next) {
-			msTs = next
-			break
-		}
-	}
 
 	agentID := ""
 	agentType := ""

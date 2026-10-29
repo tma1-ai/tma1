@@ -506,10 +506,6 @@ func main() {
 	defer codexCancel()
 	go tw.StartCodexScanner(codexCtx)
 
-	// Start OpenClaw session scanner (discovers ~/.openclaw/agents/*/sessions/ JSONL files).
-	openclawCtx, openclawCancel := context.WithCancel(context.Background())
-	defer openclawCancel()
-	go tw.StartOpenClawScanner(openclawCtx)
 
 	// Start Copilot CLI session scanner (discovers ~/.copilot/session-state/*/events.jsonl).
 	copilotCLICtx, copilotCLICancel := context.WithCancel(context.Background())
@@ -555,7 +551,6 @@ func main() {
 		flowCancel()
 		bgCancel()
 		codexCancel()
-		openclawCancel()
 		copilotCLICancel()
 		tw.StopAll()
 

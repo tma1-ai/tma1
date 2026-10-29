@@ -50,6 +50,12 @@ It reports to you. The dashboard covers token usage, cost, latency,
 tool activity, conversation replay, anomaly history, prompt evaluation,
 and SQL over the raw tables.
 
+The Overview page combines activity across agents, recent sessions, and
+recorded tool failures. Sessions supports side-by-side comparison of two
+sessions: reported tokens, cache read share, tool failures, and compaction
+events. Missing usage is shown as unavailable. Input tokens include cache;
+output tokens include reasoning. Elapsed span includes idle time.
+
 ## Supported sources
 
 | Source | How TMA1 reads it | What you get |
@@ -57,7 +63,6 @@ and SQL over the raw tables.
 | Claude Code | OTel metrics/logs/traces, hooks, JSONL transcripts | Cost, tools, traces, sessions, anomalies, injected context |
 | Codex | OTel logs/metrics, hooks, JSONL sessions | Cost, tools, sessions, anomalies, injected context |
 | Copilot CLI | JSONL sessions from `~/.copilot/session-state/` | Sessions, tools, cost where available |
-| OpenClaw | OTel traces/metrics, JSONL sessions | Traces, cost, sessions, security signals |
 | Any GenAI app | OTel traces using GenAI semantic conventions | Traces, latency, cost aggregation |
 
 All data is stored locally under `~/.tma1/`.
@@ -272,7 +277,7 @@ the single `/v1/otlp` base.
 | `TMA1_HOST` | `127.0.0.1` | Address `tma1-server` binds to |
 | `TMA1_PORT` | `14318` | HTTP port for `tma1-server` |
 | `TMA1_DATA_DIR` | `~/.tma1` | Data, config, and binary directory |
-| `TMA1_GREPTIMEDB_VERSION` | `v1.2.1` | GreptimeDB version to install. Pinned to an exact tag; set to `latest` to track stable releases instead |
+| `TMA1_GREPTIMEDB_VERSION` | `v1.3.0` | GreptimeDB version to install. Pinned to an exact tag; set to `latest` to track stable releases instead |
 | `TMA1_GREPTIMEDB_HTTP_PORT` | `14000` | GreptimeDB HTTP and OTLP port |
 | `TMA1_GREPTIMEDB_GRPC_PORT` | `14001` | GreptimeDB gRPC port |
 | `TMA1_GREPTIMEDB_MYSQL_PORT` | `14002` | GreptimeDB MySQL protocol port |
@@ -287,7 +292,6 @@ the single `/v1/otlp` base.
 | `TMA1_DISABLE_INJECTION` | unset | Set to `1` to record hooks but return no injected context |
 | `TMA1_ENABLE_FILE_CALLBACK` | unset | Set to `1` to write `.tma1-context.md` for non-MCP agents |
 | `TMA1_CONTEXT_PRESSURE_THRESHOLD` | `700000` | Input-token threshold for context-pressure anomalies (~70% of a 1M window). Lower it if your model has a smaller context |
-| `OPENCLAW_STATE_DIR` | `~/.openclaw` | Override the OpenClaw session directory |
 
 Settings changed in the dashboard are saved to `~/.tma1/settings.json`.
 Environment variables take priority.

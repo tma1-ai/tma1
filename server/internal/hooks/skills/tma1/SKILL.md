@@ -1,6 +1,6 @@
 ---
 name: tma1
-description: "Query TMA1 observability data (Claude Code, Codex, GitHub Copilot CLI, OpenClaw, any OTel SDK). Use when the user asks: how much did I spend, token usage, what has my agent been doing, agent cost, show me traces, show me events, check for errors, model comparison, tool usage."
+description: "Query TMA1 observability data (Claude Code, Codex, GitHub Copilot CLI, any OTel SDK). Use when the user asks: how much did I spend, token usage, what has my agent been doing, agent cost, show me traces, show me events, check for errors, model comparison, tool usage."
 context: fork
 allowed-tools: ["mcp__tma1__exec_query", "Bash"]
 ---
@@ -9,11 +9,10 @@ allowed-tools: ["mcp__tma1__exec_query", "Bash"]
 
 You are helping the user query their local TMA1 observability data.
 
-TMA1 stores data from five kinds of sources:
+TMA1 stores data from four kinds of sources:
 - **Claude Code** sends OTel **metrics** (cumulative counters) + **logs** (event stream) + hooks + JSONL transcripts
 - **Codex** sends OTel **logs** + **metrics** + session JSONL (auto-parsed from `~/.codex/sessions/`)
 - **GitHub Copilot CLI** — session JSONL only (auto-parsed from `~/.copilot/session-state/<sessionId>/events.jsonl`, no OTel). Data lives in `tma1_hook_events` (`agent_source='copilot_cli'`) and `tma1_messages` (`session_id LIKE 'cp:%'`).
-- **OpenClaw** sends OTel **traces** (spans with openclaw.* attributes) + **metrics** (openclaw_* tables) + session JSONL (auto-parsed from `~/.openclaw/agents/*/sessions/`)
 - **Other agents** (standard GenAI SDK) send OTel **traces** (spans with gen_ai.* semantic conventions)
 
 ## Step 1: Check TMA1 is running
@@ -33,8 +32,7 @@ exec_query: SELECT table_name FROM information_schema.tables WHERE table_schema 
 Check which tables exist to determine what queries to use:
 - If `claude_code_cost_usage_USD_total` exists → use Claude Code metrics queries
 - If `codex_turn_token_usage_sum` or `codex_*` tables exist → use Codex queries
-- If `openclaw_tokens_total` exists → use OpenClaw queries
-- If `opentelemetry_traces` exists → use traces-based queries (check column names to distinguish OpenClaw vs GenAI)
+- If `opentelemetry_traces` exists → use traces-based queries (check for GenAI semantic convention attributes)
 - If `opentelemetry_logs` exists → use logs queries for event details
 - If `tma1_hook_events` has rows with `agent_source = 'copilot_cli'` → use Copilot CLI queries
 - If `tma1_hook_events` or `tma1_messages` exists → use session/conversation queries
@@ -180,77 +178,6 @@ FROM opentelemetry_logs
 WHERE body = 'claude_code.api_request'
 GROUP BY model
 ORDER BY cost_usd DESC
-```
-
----
-
-## OpenClaw Queries (traces + metrics)
-
-These queries work when `openclaw_tokens_total` or `opentelemetry_traces` with openclaw.* attributes exist.
-
-### Recent LLM calls
-
-```sql
-SELECT timestamp,
-       "span_attributes.openclaw.model" AS model,
-       "span_attributes.openclaw.channel" AS channel,
-       CAST("span_attributes.openclaw.tokens.input" AS BIGINT) AS input_tok,
-       CAST("span_attributes.openclaw.tokens.output" AS BIGINT) AS output_tok,
-       CAST("span_attributes.openclaw.tokens.cache_read" AS BIGINT) AS cache_read,
-       ROUND(duration_nano / 1000000.0, 1) AS duration_ms
-FROM opentelemetry_traces
-WHERE span_name = 'openclaw.model.usage'
-ORDER BY timestamp DESC
-LIMIT 20
-```
-
-### Token usage by model (from metrics)
-
-```sql
-SELECT openclaw_model AS model, openclaw_token AS token_type, SUM(greptime_value) AS tokens
-FROM openclaw_tokens_total
-WHERE greptime_timestamp > NOW() - INTERVAL '1 day'
-GROUP BY openclaw_model, openclaw_token
-ORDER BY tokens DESC
-```
-
-### Messages by channel
-
-```sql
-SELECT "span_attributes.openclaw.channel" AS channel,
-       "span_attributes.openclaw.outcome" AS outcome,
-       COUNT(*) AS messages
-FROM opentelemetry_traces
-WHERE span_name = 'openclaw.message.processed'
-  AND timestamp > NOW() - INTERVAL '1 day'
-GROUP BY channel, outcome
-ORDER BY messages DESC
-```
-
-### Error spans
-
-```sql
-SELECT timestamp, span_name,
-       "span_attributes.openclaw.channel" AS channel,
-       "span_attributes.openclaw.sessionKey" AS session
-FROM opentelemetry_traces
-WHERE span_name IN ('openclaw.webhook.error', 'openclaw.session.stuck')
-ORDER BY timestamp DESC
-LIMIT 20
-```
-
-### Cost estimate (from traces)
-
-```sql
-SELECT "span_attributes.openclaw.model" AS model,
-       COUNT(*) AS requests,
-       SUM(CAST("span_attributes.openclaw.tokens.input" AS BIGINT)) AS input_tok,
-       SUM(CAST("span_attributes.openclaw.tokens.output" AS BIGINT)) AS output_tok
-FROM opentelemetry_traces
-WHERE span_name = 'openclaw.model.usage'
-  AND timestamp > NOW() - INTERVAL '1 day'
-GROUP BY model
-ORDER BY input_tok DESC
 ```
 
 ---
@@ -555,7 +482,7 @@ ORDER BY p95_ms DESC
 
 ### Sessions (from hooks + JSONL transcripts)
 
-The `tma1_messages` table includes token usage columns: `input_tokens`, `output_tokens`, `cache_read_tokens`, `cache_creation_tokens`, `duration_ms` (populated for assistant messages from JSONL transcripts). Both `tma1_hook_events` and `tma1_messages` include a `conversation_id` column linking events within the same conversation turn. Agent source is identified by `agent_source` in `tma1_hook_events`: `'claude_code'`, `'codex'`, or `'openclaw'`. OpenClaw session IDs are prefixed `oc:<agentId>:<sessionId>`.
+The `tma1_messages` table includes token usage columns: `input_tokens`, `output_tokens`, `cache_read_tokens`, `cache_creation_tokens`, `duration_ms` (populated for assistant messages from JSONL transcripts). Both `tma1_hook_events` and `tma1_messages` include a `conversation_id` column linking events within the same conversation turn. Agent source is identified by `agent_source` in `tma1_hook_events`: `'claude_code'`, `'codex'`, or `'copilot_cli'`.
 
 ```sql
 -- List recent sessions with tool counts
@@ -574,7 +501,7 @@ ORDER BY ts DESC LIMIT 20
 -- Session token usage (from JSONL transcripts)
 SELECT session_id, SUM(input_tokens) AS input_tok, SUM(output_tokens) AS output_tok,
   SUM(cache_read_tokens) AS cache_read, SUM(cache_creation_tokens) AS cache_write
-FROM tma1_messages WHERE message_type = 'assistant' AND ts > NOW() - INTERVAL '24 hours'
+FROM tma1_messages WHERE ts > NOW() - INTERVAL '24 hours'
 GROUP BY session_id ORDER BY input_tok DESC
 
 -- Session tool breakdown

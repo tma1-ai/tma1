@@ -4,6 +4,10 @@
 var API = '/api/query';
 var currentTimeRange = '24h';
 
+function supportedAgentWhere() {
+  return "agent_source IN ('claude_code','codex','copilot_cli')";
+}
+
 function intervalSQL() {
   var m = { '15m': '15 minutes', '30m': '30 minutes', '1h': '1 hour', '6h': '6 hours', '24h': '1 day', '7d': '7 days', '30d': '30 days', '60d': '60 days' };
   return m[currentTimeRange] || '1 day';

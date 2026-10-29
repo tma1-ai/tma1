@@ -15,15 +15,10 @@ import (
 	"os"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/tma1-ai/tma1/server/internal/strutil"
 )
-
-// lastInsertTS ensures each message gets a unique, monotonically increasing timestamp.
-// When processing a batch of existing lines, time.Now() would be identical for all.
-var lastInsertTS atomic.Int64
 
 const (
 	pollInterval    = 500 * time.Millisecond
@@ -100,6 +95,7 @@ type sessionWatch struct {
 	cancel  context.CancelFunc
 	seen    map[string]struct{} // content hashes for dedup
 	stopped bool                // true after watcher goroutine exits (can be restarted)
+	ccUsage map[string]msgUsage
 }
 
 // NewWatcher creates a transcript watcher that writes to the given GreptimeDB instance.
@@ -140,10 +136,14 @@ func (w *Watcher) Watch(sessionID, transcriptPath string) {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	sw := &sessionWatch{cancel: cancel, seen: seen}
+	usage := make(map[string]msgUsage)
+	if ok && existing.ccUsage != nil {
+		usage = existing.ccUsage
+	}
+	sw := &sessionWatch{cancel: cancel, seen: seen, ccUsage: usage}
 	w.sessions[sessionID] = sw
 
-	go w.tailFile(ctx, sessionID, transcriptPath, seen)
+	go w.tailFile(ctx, sessionID, transcriptPath, seen, usage)
 	w.logger.Info("started watching transcript", "session", sessionID, "path", transcriptPath)
 }
 
@@ -174,7 +174,7 @@ func (w *Watcher) StopAll() {
 	}
 }
 
-func (w *Watcher) tailFile(ctx context.Context, sessionID, filePath string, seen map[string]struct{}) {
+func (w *Watcher) tailFile(ctx context.Context, sessionID, filePath string, seen map[string]struct{}, usage map[string]msgUsage) {
 	// Mark as stopped on exit — preserves seen map so Watch() can retry without re-inserting.
 	defer func() {
 		w.mu.Lock()
@@ -221,7 +221,7 @@ func (w *Watcher) tailFile(ctx context.Context, sessionID, filePath string, seen
 				trimmed := strings.TrimSpace(buf.String())
 				buf.Reset()
 				if trimmed != "" {
-					w.processLine(sessionID, trimmed, seen)
+					w.processLine(sessionID, trimmed, seen, usage)
 				}
 			}
 			continue
@@ -246,6 +246,7 @@ func (w *Watcher) tailFile(ctx context.Context, sessionID, filePath string, seen
 // transcriptEntry matches the JSONL format written by Claude Code.
 type transcriptEntry struct {
 	SessionID string         `json:"sessionId"`
+	Timestamp string         `json:"timestamp"`
 	Type      string         `json:"type"` // "user", "assistant", "progress"
 	UUID      string         `json:"uuid"`
 	Message   *transcriptMsg `json:"message"`
@@ -253,6 +254,7 @@ type transcriptEntry struct {
 }
 
 type transcriptMsg struct {
+	ID      string          `json:"id"`
 	Role    string          `json:"role"`
 	Model   string          `json:"model"`
 	Content json.RawMessage `json:"content"` // string or []contentBlock
@@ -278,7 +280,7 @@ type contentBlock struct {
 	Content   json.RawMessage `json:"content"`     // tool_result (string or array)
 }
 
-func (w *Watcher) processLine(sessionID, line string, seen map[string]struct{}) {
+func (w *Watcher) processLine(sessionID, line string, seen map[string]struct{}, usageByResponse map[string]msgUsage) {
 	var entry transcriptEntry
 	if err := json.Unmarshal([]byte(line), &entry); err != nil {
 		return // skip unparseable
@@ -338,10 +340,29 @@ func (w *Watcher) processLine(sessionID, line string, seen map[string]struct{}) 
 		emitType = "assistant"
 	}
 
-	// Get usage from assistant messages (nil for user messages).
+	// Streaming entries repeat response-level counters; persist only their increases.
 	var usage *msgUsage
 	if entry.Type == "assistant" && entry.Message.Usage != nil {
 		usage = entry.Message.Usage
+		if id := entry.Message.ID; id != "" {
+			previous, recorded := usageByResponse[id]
+			current := *usage
+			current.InputTokens = max(current.InputTokens, previous.InputTokens)
+			current.OutputTokens = max(current.OutputTokens, previous.OutputTokens)
+			current.CacheReadTokens = max(current.CacheReadTokens, previous.CacheReadTokens)
+			current.CacheCreationTokens = max(current.CacheCreationTokens, previous.CacheCreationTokens)
+			delta := msgUsage{current.InputTokens - previous.InputTokens, current.OutputTokens - previous.OutputTokens, current.CacheReadTokens - previous.CacheReadTokens, current.CacheCreationTokens - previous.CacheCreationTokens}
+			usageByResponse[id] = current
+			usage = &delta
+			if recorded && delta == (msgUsage{}) {
+				usage = nil
+			}
+		}
+	}
+
+	ts, err := time.Parse(time.RFC3339Nano, entry.Timestamp)
+	if err != nil {
+		ts = time.Now()
 	}
 
 	// Try as string first.
@@ -349,7 +370,11 @@ func (w *Watcher) processLine(sessionID, line string, seen map[string]struct{}) 
 	if err := json.Unmarshal(content, &strContent); err == nil {
 		strContent = strings.TrimSpace(strContent)
 		if strContent != "" && !isDup(emitType, strContent) {
-			w.insertMessage(sessionID, emitType, role, truncate(strContent, maxContentLen), model, "", "", usage)
+			w.insertMessage(ts, sessionID, emitType, role, truncate(strContent, maxContentLen), model, "", "", usage)
+			usage = nil
+		}
+		if usage != nil {
+			w.insertMessage(ts, sessionID, "usage", "assistant", "", model, "", "", usage)
 		}
 		return
 	}
@@ -370,13 +395,13 @@ func (w *Watcher) processLine(sessionID, line string, seen map[string]struct{}) 
 		case "text":
 			text := strings.TrimSpace(b.Text)
 			if text != "" && !isDup(emitRole, text) {
-				w.insertMessage(sessionID, emitRole, role, truncate(text, maxContentLen), model, "", "", usage)
+				w.insertMessage(ts, sessionID, emitRole, role, truncate(text, maxContentLen), model, "", "", usage)
 				usage = nil // attach usage to first emitted message only
 			}
 		case "thinking":
 			thinking := strings.TrimSpace(b.Thinking)
 			if thinking != "" && !isDup("thinking", thinking) {
-				w.insertMessage(sessionID, "thinking", role, truncate(thinking, maxContentLen), model, "", "", nil)
+				w.insertMessage(ts, sessionID, "thinking", role, truncate(thinking, maxContentLen), model, "", "", nil)
 			}
 		case "tool_use":
 			// tool_use dedup by ID, not content.
@@ -385,7 +410,7 @@ func (w *Watcher) processLine(sessionID, line string, seen map[string]struct{}) 
 			}
 			seen["tooluse:"+b.ID] = struct{}{}
 			inputStr := truncate(string(b.Input), maxToolInput)
-			w.insertMessage(sessionID, "tool_use", emitRole, inputStr, model, b.Name, b.ID, usage)
+			w.insertMessage(ts, sessionID, "tool_use", emitRole, inputStr, model, b.Name, b.ID, usage)
 			usage = nil
 		case "tool_result":
 			if _, ok := seen["toolresult:"+b.ToolUseID]; ok {
@@ -393,11 +418,11 @@ func (w *Watcher) processLine(sessionID, line string, seen map[string]struct{}) 
 			}
 			seen["toolresult:"+b.ToolUseID] = struct{}{}
 			resultStr := extractToolResultContent(b.Content)
-			w.insertMessage(sessionID, "tool_result", role, truncate(resultStr, maxToolContent), model, "", b.ToolUseID, nil)
+			w.insertMessage(ts, sessionID, "tool_result", role, truncate(resultStr, maxToolContent), model, "", b.ToolUseID, nil)
 		}
 	}
 	if usage != nil {
-		w.insertMessage(sessionID, "usage", "assistant", "", model, "", "", usage)
+		w.insertMessage(ts, sessionID, "usage", "assistant", "", model, "", "", usage)
 	}
 }
 
@@ -426,21 +451,8 @@ func extractToolResultContent(raw json.RawMessage) string {
 	return string(raw)
 }
 
-func (w *Watcher) insertMessage(sessionID, messageType, role, content, model, toolName, toolUseID string, usage *msgUsage) {
-	// Use a monotonically increasing timestamp so batch-processed lines get distinct,
-	// ordered timestamps instead of all sharing the same time.Now().
-	now := time.Now().UnixMilli()
-	for {
-		prev := lastInsertTS.Load()
-		next := now
-		if next <= prev {
-			next = prev + 1
-		}
-		if lastInsertTS.CompareAndSwap(prev, next) {
-			now = next
-			break
-		}
-	}
+func (w *Watcher) insertMessage(ts time.Time, sessionID, messageType, role, content, model, toolName, toolUseID string, usage *msgUsage) {
+	now := ts.UnixMilli()
 
 	var sql string
 	if usage != nil {
@@ -541,7 +553,7 @@ func (w *Watcher) broadcastHookEvent(sessionID, eventType, toolName, toolInput, 
 }
 
 // insertCCSessionStart writes a SessionStart event to tma1_hook_events for Claude Code sessions.
-// This aligns the CC watcher with Codex/OpenClaw parsers, ensuring the source filter works
+// This aligns the CC watcher with Codex parsers, ensuring the source filter works
 // even if CC HTTP hooks are not configured.
 // Runs synchronously so the caller can retry on failure.
 // Acquires insertSem to respect the concurrency limit shared with other inserts.
@@ -550,17 +562,6 @@ func (w *Watcher) insertCCSessionStart(sessionID, cwd string) error {
 	defer func() { <-insertSem }()
 
 	msTs := time.Now().UnixMilli()
-	for {
-		prev := lastInsertTS.Load()
-		next := msTs
-		if next <= prev {
-			next = prev + 1
-		}
-		if lastInsertTS.CompareAndSwap(prev, next) {
-			msTs = next
-			break
-		}
-	}
 
 	stmt := fmt.Sprintf(
 		"INSERT INTO tma1_hook_events "+

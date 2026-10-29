@@ -33,7 +33,7 @@ async function sess_loadCards() {
   // Filter out "ghost" sessions that only fired infrastructure events
   // (e.g., SessionEnd from plugin-install subprocesses). A real session
   // must have at least one UserPromptSubmit or PreToolUse.
-  var realSessionWindow = "ts > NOW() - INTERVAL '" + iv + "'";
+  var realSessionWindow = supportedAgentWhere() + " AND ts > NOW() - INTERVAL '" + iv + "'";
   var realSessionGroupHaving =
     "GROUP BY session_id " +
     "HAVING SUM(CASE WHEN event_type IN ('UserPromptSubmit','PreToolUse') THEN 1 ELSE 0 END) > 0";
@@ -95,7 +95,7 @@ async function sess_loadList() {
 
   // Step 1: fetch active session IDs in the window. Two-step (instead of an IN-subquery)
   // avoids GreptimeDB planner memory issues — same approach as prompts.js pr_sourceSessionIDs.
-  var activeWhere = "ts > NOW() - INTERVAL '" + iv + "'";
+  var activeWhere = supportedAgentWhere() + " AND ts > NOW() - INTERVAL '" + iv + "'";
   if (source) activeWhere += " AND agent_source = '" + escapeSQLString(source) + "'";
   if (keyword) {
     activeWhere += " AND (tool_name LIKE '%" + escapeSQLString(keyword) + "%'" +
@@ -136,27 +136,15 @@ async function sess_loadList() {
   sessHasNext = data.length > sessPageSize;
   if (sessHasNext) data = data.slice(0, sessPageSize);
 
-  // Secondary query: cost estimates from messages.
-  var costMap = {};
+  var usageMap = {};
   if (data.length > 0) {
-    try {
-      await loadPricing();
-      var sids = data.map(function(d) { return "'" + escapeSQLString(d.session_id) + "'"; }).join(',');
-      var costRes = await query(
-        "SELECT session_id, " +
-        "SUM(CASE WHEN message_type IN ('user','tool_result','tool_use') THEN LENGTH(COALESCE(content,''))/4 ELSE 0 END) AS input_tok, " +
-        "SUM(CASE WHEN message_type IN ('assistant','thinking') THEN LENGTH(COALESCE(content,''))/4 ELSE 0 END) AS output_tok, " +
-        "MAX(model) AS model " +
-        "FROM tma1_messages WHERE session_id IN (" + sids + ") GROUP BY session_id"
-      );
-      var costRows = rowsToObjects(costRes);
-      for (var ci = 0; ci < costRows.length; ci++) {
-        var cr = costRows[ci];
-        var price = sess_lookupPrice(cr.model);
-        var cost = (Number(cr.input_tok) || 0) * price.input / 1000000 + (Number(cr.output_tok) || 0) * price.output / 1000000;
-        costMap[cr.session_id] = cost;
-      }
-    } catch (e) { /* tma1_messages may not exist */ }
+    var sids = data.map(function(d) { return "'" + escapeSQLString(d.session_id) + "'"; }).join(',');
+    var usageRes = await query(
+      "SELECT session_id, SUM(input_tokens) AS input_tokens, SUM(output_tokens) AS output_tokens, " +
+      "SUM(cache_read_tokens) AS cache_read_tokens, SUM(cache_creation_tokens) AS cache_creation_tokens " +
+      "FROM tma1_messages WHERE session_id IN (" + sids + ") GROUP BY session_id"
+    );
+    rowsToObjects(usageRes).forEach(function(row) { usageMap[row.session_id] = row; });
   }
 
   if (!data.length) {
@@ -177,10 +165,10 @@ async function sess_loadList() {
     var agentSrc = d.agent_source || '';
     var sourceBadge;
     if (agentSrc === 'codex') sourceBadge = '<span class="badge badge-codex">Codex</span>';
-    else if (agentSrc === 'openclaw') sourceBadge = '<span class="badge badge-oc">OC</span>';
     else if (agentSrc === 'copilot_cli') sourceBadge = '<span class="badge badge-copilot">GH</span>';
     else sourceBadge = '<span class="badge badge-cc">CC</span>';
-    var costStr = costMap[sid] != null ? fmtCost(costMap[sid]) : '\u2014';
+    var usage = sessionUsage(usageMap[sid] ? [usageMap[sid]] : [], agentSrc);
+    var tokenStr = usage.known ? fmtTokens(usage.input + usage.output) : '\u2014';
 
     var shortSid = sid.length > 8 ? sid.slice(0, 8) : sid;
     html += '<tr class="sess-row clickable" onclick="sess_openDetail(\x27' + escapeJSString(sid) + '\x27,\x27' + escapeJSString(agentSrc) + '\x27)">';
@@ -192,7 +180,7 @@ async function sess_loadList() {
     html += '<td>' + fmtDurSec(durSec) + '</td>';
     html += '<td>' + fmtNum(Number(d.tool_calls) || 0) + '</td>';
     html += '<td>' + fmtNum(Number(d.subagents) || 0) + '</td>';
-    html += '<td class="cost">' + costStr + '</td>';
+    html += '<td class="mono">' + tokenStr + '</td>';
     html += '<td title="' + escapeHTML(cwd) + '">' + escapeHTML(shortCwd) + '</td>';
     html += '</tr>';
   }
@@ -260,7 +248,7 @@ async function sess_loadDetail(sessionId, agentSource) {
   var phase1 = await Promise.all([
     query(
       "SELECT ts, session_id, event_type, agent_source, tool_name, tool_input, tool_result, " +
-      "tool_use_id, agent_id, agent_type, notification_type, \"message\", cwd, permission_mode, metadata, conversation_id " +
+      "tool_use_id, agent_id, agent_type, notification_type, \"message\", cwd, permission_mode, metadata, conversation_id, tool_success " +
       "FROM tma1_hook_events WHERE session_id = '" + sid + "' ORDER BY ts ASC LIMIT 50000"
     ).catch(function() { return null; }),
     query(
@@ -301,7 +289,7 @@ async function sess_loadDetail(sessionId, agentSource) {
         tool_name: pre.tool_name || ev.tool_name, tool_input: pre.tool_input || '',
         tool_result: ev.tool_result || '', tool_use_id: pre.tool_use_id,
         start_ts: pre.ts_ms, end_ts: ev.ts_ms, agent_id: pre.agent_id || '',
-        failed: ev.event_type === 'PostToolUseFailure',
+        failed: ev.event_type === 'PostToolUseFailure' || ev.tool_success === false,
       });
       delete pending[ev.tool_use_id];
     }
@@ -384,44 +372,24 @@ async function sess_loadDetail(sessionId, agentSource) {
         var cReasoning = Number(cm.reasoning_tokens) || 0;
         if (cIn === 0 && cOut === 0 && cReasoning === 0) continue;
         var cCache = Number(cm.cache_read_tokens) || 0;
+        var cWrite = Number(cm.cache_creation_tokens) || 0;
         var cPrice = sess_lookupPrice(cm.model);
         apiCalls.push({
           ts: tsToMs(cm.ts), model: cm.model || '',
           inputTokens: cIn, outputTokens: cOut,
           reasoningTokens: cReasoning,
-          cacheTokens: cCache, cacheCreationTokens: 0,
-          // OpenAI o-series bills reasoning at the output rate, so
-          // mirror the cost shape sess_parseCodexOTel uses.
-          cost: cIn * cPrice.input / 1000000 + (cOut + cReasoning) * cPrice.output / 1000000,
+          cacheTokens: cCache, cacheCreationTokens: cWrite,
+          cost: sess_usageCost(cPrice, cIn, cOut, cCache, cWrite),
+          inputIncludesCache: true, usageRecord: true,
           durationMs: Number(cm.duration_ms) || 0, toolUseIds: [],
         });
       }
     }
-  } else if (agentSource === 'openclaw') {
-    // OpenClaw: usage + duration data is already in tma1_messages (parsed from JSONL transcript).
-    // OpenClaw fronts Anthropic models, which fold thinking tokens
-    // into output_tokens — reasoning is not surfaced here.
-    for (var oi = 0; oi < messages.length; oi++) {
-      var om = messages[oi];
-      if (om.message_type !== 'assistant') continue;
-      var oIn = Number(om.input_tokens) || 0;
-      var oOut = Number(om.output_tokens) || 0;
-      if (oIn === 0 && oOut === 0) continue;
-      var oCacheR = Number(om.cache_read_tokens) || 0;
-      var oCacheW = Number(om.cache_creation_tokens) || 0;
-      var oPrice = sess_lookupPrice(om.model);
-      apiCalls.push({
-        ts: tsToMs(om.ts), model: om.model || '',
-        inputTokens: oIn, outputTokens: oOut,
-        cacheTokens: oCacheR, cacheCreationTokens: oCacheW,
-        cost: oIn * oPrice.input / 1000000 + oOut * oPrice.output / 1000000,
-        durationMs: Number(om.duration_ms) || 0, toolUseIds: [],
-      });
-    }
+
   } else {
     // CC: prefer message-level usage data, fallback to OTel logs.
     var hasUsageInMessages = messages.some(function(m) {
-      return m.message_type === 'assistant' && (Number(m.input_tokens) > 0 || Number(m.output_tokens) > 0);
+      return m.input_tokens != null || m.output_tokens != null;
     });
 
     if (hasUsageInMessages) {
@@ -430,10 +398,9 @@ async function sess_loadDetail(sessionId, agentSource) {
       // column on the dashboard.
       for (var ui = 0; ui < messages.length; ui++) {
         var um = messages[ui];
-        if (um.message_type !== 'assistant') continue;
+        if (um.input_tokens == null && um.output_tokens == null) continue;
         var inTok = Number(um.input_tokens) || 0;
         var outTok = Number(um.output_tokens) || 0;
-        if (inTok === 0 && outTok === 0) continue;
         var cacheRead = Number(um.cache_read_tokens) || 0;
         var cacheCreate = Number(um.cache_creation_tokens) || 0;
         var mPrice = sess_lookupPrice(um.model);
@@ -441,8 +408,8 @@ async function sess_loadDetail(sessionId, agentSource) {
           ts: tsToMs(um.ts), model: um.model || '',
           inputTokens: inTok, outputTokens: outTok,
           cacheTokens: cacheRead, cacheCreationTokens: cacheCreate,
-          cost: inTok * mPrice.input / 1000000 + outTok * mPrice.output / 1000000,
-          durationMs: 0, toolUseIds: [],
+          cost: sess_usageCost(mPrice, inTok, outTok, cacheRead, cacheCreate),
+          durationMs: 0, toolUseIds: [], usageRecord: true,
         });
       }
     } else if (timeline.length > 0) {
@@ -534,7 +501,7 @@ async function sess_search() {
     if (content.length > 200) content = content.slice(0, 200) + '\u2026';
     var label = d.tool_name || d.msg_type || '';
     var sSrc = d.agent_source || '';
-    var sBadgeCls = sSrc === 'codex' ? 'badge-codex' : sSrc === 'openclaw' ? 'badge-oc' : sSrc === 'copilot_cli' ? 'badge-copilot' : 'badge-cc';
+    var sBadgeCls = sSrc === 'codex' ? 'badge-codex' : sSrc === 'copilot_cli' ? 'badge-copilot' : 'badge-cc';
     html += '<div class="search-result-item clickable" onclick="sess_openDetail(\x27' + escapeJSString(d.session_id) + '\x27,\x27' + escapeJSString(sSrc) + '\x27,' + (ms || 0) + ')">';
     html += '<div class="search-result-meta"><span class="badge ' + sBadgeCls + '">' + escapeHTML((d.session_id || '').slice(0, 8)) + '</span> ';
     if (label) html += '<span class="tl-tool-name" style="font-size:12px">' + escapeHTML(label) + '</span> ';

@@ -1,5 +1,5 @@
 ---
-description: List recent sessions on this project by agent — peers (Codex, OpenClaw, Copilot CLI) or your own.
+description: List recent sessions on this project by agent — peers (Codex, Copilot CLI) or your own.
 argument-hint: "[agent] [--full|--summary] [--limit N] [--since 2h]"
 allowed-tools: ["mcp__tma1__get_peer_sessions", "mcp__tma1__get_session_transcript"]
 ---
@@ -12,9 +12,9 @@ rules for the explicit-invocation path.
 ## Parse `$ARGUMENTS`
 
 - First token, if it isn't a flag → agent name:
-  `codex` · `openclaw` · `copilot` → `copilot_cli` · `claude` / `cc` → `claude_code` ·
+  `codex` · `copilot` → `copilot_cli` · `claude` / `cc` → `claude_code` ·
   `self` / `me` → yourself · `all` / `*` / absent → `""` (every peer but you).
-  Anything else → reply `unknown agent "<X>"; available: codex, openclaw, copilot, claude, self, all` and **STOP**.
+  Anything else → reply `unknown agent "<X>"; available: codex, copilot, claude, self, all` and **STOP**.
 - `--summary` → `detail: "summary"` · `--full` → `detail: "full"` · neither → omit (server defaults to preview).
 - `--limit N` → `limit` (1-5, default 1; per agent when no agent is named).
 - `--since 2h` / `--since 90m` / `--since 30` → `since_min` in minutes (default 1440).

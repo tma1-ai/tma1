@@ -565,7 +565,7 @@ func TestProcessCodexTokenCountWritesUsageRow(t *testing.T) {
 	fctx := &codexFileContext{model: "gpt-5.5", conversationID: "conv-usage"}
 
 	w.processCodexLine("rollout-2026-05-20T15-51-00",
-		`{"timestamp":"2026-05-20T22:51:41.859Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":37347,"cached_input_tokens":34688,"output_tokens":1549,"reasoning_output_tokens":516,"total_tokens":39412}}}}`,
+		`{"timestamp":"2026-05-20T22:51:41.859Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":37347,"cached_input_tokens":34688,"cache_write_input_tokens":128,"output_tokens":1549,"reasoning_output_tokens":516,"total_tokens":39412}}}}`,
 		seen, fctx)
 
 	sql := waitForSQL(t, sqlCh)
@@ -576,7 +576,7 @@ func TestProcessCodexTokenCountWritesUsageRow(t *testing.T) {
 		// of an empty-content heuristic.
 		"'usage', 'assistant'",
 		"'gpt-5.5'",
-		"37347", "1549", "34688", "516",
+		"37347", "1549", "34688", "128", "516", "cache_creation_tokens",
 	} {
 		if !strings.Contains(sql, want) {
 			t.Fatalf("expected SQL to contain %q, got %s", want, sql)

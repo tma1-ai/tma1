@@ -1,6 +1,6 @@
 ---
 name: tma1-peer
-description: "List recent sessions on this project by agent — peers (Claude Code, OpenClaw, Copilot CLI) or your own past sessions. Invoke this skill when the user asks you to read another agent's review feedback, see what someone else tried, act on cross-agent context, or recall your own earlier work here. Trigger phrases: \"what did claude do\", \"what did openclaw do\", \"what did copilot do\", \"peer sessions\", \"cross-agent context\", \"what did I do earlier\", \"/tma1-peer\"."
+description: "List recent sessions on this project by agent — peers (Claude Code, Copilot CLI) or your own past sessions. Invoke this skill when the user asks you to read another agent's review feedback, see what someone else tried, act on cross-agent context, or recall your own earlier work here. Trigger phrases: \"what did claude do\", \"what did copilot do\", \"peer sessions\", \"cross-agent context\", \"what did I do earlier\", \"/tma1-peer\"."
 ---
 
 # TMA1 Peer-Agent Lens (Codex)
@@ -31,13 +31,12 @@ this project, or typed explicitly:
 | ----------------- | ---------------------------------- |
 | `claude`, `cc`    | `claude_code`                      |
 | `claude_code`     | `claude_code`                      |
-| `openclaw`        | `openclaw`                         |
 | `copilot`         | `copilot_cli`                      |
 | `self`, `me`      | `self` (the server resolves it)    |
 | `all`, `*`, empty | `""` (every peer except you)       |
 
 Any other value: reply
-`unknown agent "<X>"; available: claude, openclaw, copilot, self, all`
+`unknown agent "<X>"; available: claude, copilot, self, all`
 and STOP — do not call the tool with an unrecognised name.
 
 ## Flags

@@ -153,7 +153,7 @@ async function cdx_loadCards() {
       query("SELECT COUNT(*) AS v " + base),
       // Reasoning tokens — OpenAI o-series reports this as a separate
       // bucket from output_token_count. Codex-specific so it lives
-      // in this view only; CC / OpenClaw don't surface it.
+      // in this view only; CC don't surface it.
       query("SELECT SUM(COALESCE(json_get_int(log_attributes, 'reasoning_token_count'), 0)) AS v " +
         base + " AND " + reqPred),
     ]);
