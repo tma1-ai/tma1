@@ -8,6 +8,7 @@
   <script src="/vendor/uPlot.iife.min.js"></script>
   <link rel="stylesheet" href="/vendor/uPlot.min.css" />
   <link rel="stylesheet" href="/css/style.css" />
+  <link rel="stylesheet" href="/css/observatory.css" />
   <script>
     var s=localStorage.getItem('tma1-theme');
     var t=(s==='light'||s==='dark')?s:
@@ -16,10 +17,16 @@
   </script>
 </head>
 <body>
+  <aside class="app-sidebar">
+    <a class="app-brand" href="#overview"><svg width="27" height="34" viewBox="0 0 27 34" aria-hidden="true"><path d="M5 5 20 1 23 29 8 33Z" fill="currentColor"/><path d="m8 33 15-4-3-28" fill="none" stroke="var(--bg)" stroke-width="1.5"/></svg><span>TMA1<small>AGENT OBSERVATORY</small></span></a>
+    <div class="nav-caption" data-i18n="overview.workspace">Workspace</div>
+    <nav class="view-tabs" id="view-tabs" aria-label="Main navigation"></nav>
+    <div class="sidebar-bottom"><span class="local-indicator"></span><div><strong data-i18n="overview.local">Local workspace</strong><span data-i18n="overview.private">Data stays on this machine</span></div></div>
+  </aside>
   <header>
     <div class="status-dot" id="status-dot"></div>
     <div>
-      <h1>TMA1</h1>
+      <div class="header-breadcrumb">Workspace <span>/</span> <strong id="active-view-label">Overview</strong></div>
       <div class="tagline">
         <span data-i18n="header.tagline">Your agent runs. TMA1 remembers.</span>
         <span id="data-freshness" class="data-freshness"></span>
@@ -27,7 +34,7 @@
     </div>
     <div class="header-right">
       <button class="settings-gear" onclick="openSettings()" title="Settings" data-i18n-title="settings.title">&#9881;</button>
-      <div class="view-tabs" id="view-tabs" style="display:none"></div>
+
       <select class="time-select" id="time-range" onchange="onTimeRangeChange()">
         <option value="15m" data-i18n="time.15m">Last 15m</option>
         <option value="30m" data-i18n="time.30m">Last 30m</option>
@@ -48,6 +55,10 @@
     </div>
   </header>
 
+  <section id="view-overview" style="display:none">
+    <div class="page-heading"><div><span class="eyebrow" data-i18n="overview.eyebrow">WORKSPACE / OVERVIEW</span><h1 data-i18n="overview.title">Agent activity</h1><p data-i18n="overview.subtitle">Sessions, tools, and the signals worth investigating.</p></div><button class="live-button" onclick="AgentCanvas.open('live',{})"><span class="local-indicator"></span><span data-i18n="overview.live">Live canvas</span> ↗</button></div>
+    <div id="overview-content" aria-live="polite"></div>
+  </section>
   <div id="error-banner"></div>
 
   <!-- ========================= SETUP NOTICE ========================= -->
@@ -1547,6 +1558,7 @@
   <script src="/js/agent-canvas.js"></script>
   <script src="/js/prompts.js"></script>
   <script src="/js/anomalies.js"></script>
+  <script src="/js/overview.js"></script>
   <script src="/js/views.js"></script>
 </body>
 </html>

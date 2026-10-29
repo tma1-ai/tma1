@@ -168,6 +168,7 @@ function parseHash() {
 }
 
 async function switchView(viewId, skipHash) {
+  document.getElementById('view-overview').style.display = 'none';
   document.getElementById('view-claude-code').style.display = 'none';
   document.getElementById('view-codex').style.display = 'none';
   document.getElementById('view-openclaw').style.display = 'none';
@@ -180,6 +181,8 @@ async function switchView(viewId, skipHash) {
   document.getElementById('setup-notice').style.display = 'none';
 
   currentView = viewId;
+  var activeNav = document.querySelector('[data-view="' + viewId + '"]');
+  document.getElementById('active-view-label').textContent = activeNav ? activeNav.textContent : viewId;
 
   // Highlight active view tab.
   document.querySelectorAll('#view-tabs .view-tab').forEach(function(btn) {
@@ -189,7 +192,9 @@ async function switchView(viewId, skipHash) {
   var viewEl = document.getElementById('view-' + viewId);
   if (viewEl) {
     var hasData = true;
-    if (viewId === 'claude-code') {
+    if (viewId === 'overview') {
+      await overviewLoad();
+    } else if (viewId === 'claude-code') {
       hasData = await cc_loadCards();
       cc_loadTraceCardsExistence();
       if (hasData) cc_loadOverview();
@@ -246,13 +251,13 @@ async function initViews() {
   var viewTabsEl = document.getElementById('view-tabs');
 
   viewTabsEl.innerHTML = '';
-  var views = [];
+  var views = [{ id: 'overview', label: t('overview.nav') }];
+  if (dataSources.hasHookEvents) views.push({ id: 'sessions', label: t('view.sessions') });
   if (hasCCView) views.push({ id: 'claude-code', label: t('view.claude_code') });
   if (dataSources.hasCodex) views.push({ id: 'codex', label: t('view.codex') });
   if (dataSources.hasOpenClaw) views.push({ id: 'openclaw', label: t('view.openclaw') });
   if (dataSources.hasCopilotCLI) views.push({ id: 'copilot-cli', label: t('view.copilot_cli') });
   if (dataSources.hasGenAITraces) views.push({ id: 'traces', label: t('view.otel_genai') });
-  if (dataSources.hasHookEvents) views.push({ id: 'sessions', label: t('view.sessions') });
   if (dataSources.hasMessages) views.push({ id: 'prompts', label: t('view.prompts') });
   // Anomalies tab shows whenever there's hook event data — the anomaly
   // engine derives from tma1_hook_events.
@@ -273,7 +278,7 @@ async function initViews() {
     viewTabsEl.appendChild(btn);
   });
 
-  viewTabsEl.style.display = views.length > 1 ? '' : 'none';
+  viewTabsEl.style.display = '';
 
   // Restore view + tab + time range from URL hash
   var hash = parseHash();
@@ -465,6 +470,8 @@ async function refreshCurrentView() {
       var activeTab3 = document.querySelector('#oc-tabs .tab.active');
       if (activeTab3) oc_onTabChange(activeTab3.dataset.octab);
     }
+  } else if (currentView === 'overview') {
+    await overviewLoad();
   } else if (currentView === 'claude-code') {
     hasData = await cc_loadCards();
     cc_loadTraceCardsExistence();
