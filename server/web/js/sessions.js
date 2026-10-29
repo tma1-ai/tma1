@@ -112,7 +112,7 @@ async function sess_loadList() {
 
   var tbody = document.getElementById('sess-table-body');
   if (!idRows.length) {
-    tbody.innerHTML = '<tr><td colspan="9" class="loading">' + t('empty.no_data') + '</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="10" class="loading">' + t('empty.no_data') + '</td></tr>';
     sessHasNext = false;
     renderSessPagination();
     return;
@@ -160,7 +160,7 @@ async function sess_loadList() {
   }
 
   if (!data.length) {
-    tbody.innerHTML = '<tr><td colspan="9" class="loading">' + t('empty.no_data') + '</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="10" class="loading">' + t('empty.no_data') + '</td></tr>';
     renderSessPagination();
     return;
   }
@@ -184,6 +184,7 @@ async function sess_loadList() {
 
     var shortSid = sid.length > 8 ? sid.slice(0, 8) : sid;
     html += '<tr class="sess-row clickable" onclick="sess_openDetail(\x27' + escapeJSString(sid) + '\x27,\x27' + escapeJSString(agentSrc) + '\x27)">';
+    html += '<td class="comparison-cell"><input type="checkbox" class="compare-select" aria-label="' + t('compare.select') + ' ' + escapeHTML(shortSid) + '" data-session="' + escapeHTML(sid) + '" data-source="' + escapeHTML(agentSrc) + '"></td>';
     html += '<td><code title="' + escapeHTML(sid) + '" style="font-size:11px;color:var(--text-dim)">' + escapeHTML(shortSid) + '</code></td>';
     html += '<td>' + (startMs ? new Date(startMs).toLocaleString() : '\u2014') + '</td>';
     html += '<td>' + (endMs ? new Date(endMs).toLocaleString() : '\u2014') + '</td>';
@@ -196,6 +197,11 @@ async function sess_loadList() {
     html += '</tr>';
   }
   tbody.innerHTML = html;
+  tbody.querySelectorAll('.compare-select').forEach(function(input) {
+    input.addEventListener('click', function(event) { event.stopPropagation(); });
+    input.addEventListener('change', function() { comparisonToggle(input.dataset.session, input.dataset.source, input.checked); });
+  });
+  comparisonSync();
   renderSessPagination();
 }
 

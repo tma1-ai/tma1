@@ -1341,3 +1341,16 @@ tr.active-trace td { background: var(--bg-hover); }
   font-size: 12px;
 }
 #view-anomalies .filter-row .filter-btn:hover { background: var(--bg-hover); border-color: var(--blue); cursor: pointer; }
+
+.comparison-dialog { width: min(900px, 94vw); max-height: 88vh; margin: auto; padding: 28px; background: var(--bg-card); color: var(--text); border: 1px solid var(--border-strong); border-radius: 16px; }
+.comparison-dialog::backdrop { background: #050914b8; backdrop-filter: blur(6px); }
+.comparison-heading { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-bottom: 24px; }
+.comparison-heading h2 { margin-top: 6px; font-size: 26px; }
+.eyebrow { font-size: 10px; letter-spacing: .12em; color: var(--text-muted); text-transform: uppercase; }
+.comparison-table { width: 100%; table-layout: fixed; }
+.comparison-table td { font-size: 20px; font-variant-numeric: tabular-nums; }
+.comparison-table th { white-space: normal; }
+.compare-project { font-size: 11px; overflow-wrap: anywhere; margin-top: 8px; color: var(--text-muted); }
+.comparison-note { margin-top: 20px; font-size: 12px; line-height: 1.7; color: var(--text-muted); }
+.compare-select { width: 16px; height: 16px; accent-color: var(--blue); cursor: pointer; }
+button:disabled { opacity: .45; cursor: default; }

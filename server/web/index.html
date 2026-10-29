@@ -1252,12 +1252,14 @@
                placeholder="Filter by tool or keyword..."
                data-i18n-placeholder="sessions.filter_keyword"
                oninput="sess_debouncedFilter()" style="max-width:240px" />
+        <button class="filter-btn" id="compare-button" onclick="comparisonOpen()" disabled data-i18n="compare.action">Compare</button>
         <button class="filter-btn" onclick="AgentCanvas.open('live',{})" style="margin-left:auto" data-i18n="sessions.btn_live_canvas">&#x25B6; Live</button>
       </div>
       <div class="table-wrap">
         <table>
           <thead>
             <tr>
+              <th><span data-i18n="compare.select">Compare</span></th>
               <th data-i18n="sessions.col_session">Session</th>
               <th data-i18n="sessions.col_time">Started</th>
               <th data-i18n="sessions.col_last_activity">Last Activity</th>
@@ -1540,6 +1542,10 @@
     </div>
   </div>
 
+  <dialog id="comparison-dialog" class="comparison-dialog">
+    <div class="comparison-heading"><div><span class="eyebrow" data-i18n="compare.eyebrow">SESSION WORKBENCH</span><h2 data-i18n="compare.title">Side by side</h2></div><form method="dialog"><button class="filter-btn" data-i18n="ui.close">Close</button></form></div>
+    <div id="comparison-content" aria-live="polite"></div>
+  </dialog>
   <script src="/js/i18n.js"></script>
   <script src="/js/core.js"></script>
   <script src="/js/chart.js"></script>
@@ -1554,6 +1560,7 @@
   <script src="/js/sessions-insights.js"></script>
   <script src="/js/sessions-waterfall.js"></script>
   <script src="/js/sessions-detail.js"></script>
+  <script src="/js/session-compare.js"></script>
   <script src="/js/sessions.js"></script>
   <script src="/js/agent-canvas.js"></script>
   <script src="/js/prompts.js"></script>
