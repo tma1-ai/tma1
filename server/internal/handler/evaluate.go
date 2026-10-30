@@ -29,7 +29,7 @@ func (c LLMConfig) resolvedModel() string {
 	if c.Provider == "openai" {
 		return "gpt-4o-mini"
 	}
-	return "claude-sonnet-5-5"
+	return "claude-sonnet-5"
 }
 
 // evalSemaphore limits concurrent LLM evaluation requests.

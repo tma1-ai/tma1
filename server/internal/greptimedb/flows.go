@@ -301,7 +301,7 @@ const pricingTableDDL = `CREATE TABLE IF NOT EXISTS tma1_model_pricing (
 );`
 
 // PricingVersion identifies the built-in catalog independently of the binary version.
-const PricingVersion = "2026-10-30"
+const PricingVersion = "2026-10-30.1"
 
 // Standard, short-context API rates in USD per million tokens. These are
 // estimates, not invoices; cache writes, service tiers and regional premiums
@@ -312,7 +312,6 @@ const PricingVersion = "2026-10-30"
 var defaultPricing = []modelPrice{
 	{"claude-fable-5-1", 0, 10, 50},
 	{"claude-opus-5-5", 1, 4, 20},
-	{"claude-sonnet-5-5", 2, 2, 10},
 	{"claude-mythos-5-1", 3, 10, 50},
 	{"claude-fable-5", 4, 10, 50},
 	{"claude-mythos-5", 5, 10, 50},
