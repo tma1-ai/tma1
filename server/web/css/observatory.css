@@ -182,6 +182,14 @@ code {
   color: var(--text-muted);
   margin-top: 6px;
 }
+.powered-by a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.powered-by a:hover {
+  color: var(--green);
+}
 .local-indicator {
   display: inline-block;
   width: 6px;
