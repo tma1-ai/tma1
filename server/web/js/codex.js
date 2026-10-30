@@ -41,12 +41,9 @@ function cdx_estimatedCostExpr() {
   var written = "COALESCE(json_get_int(log_attributes, 'cache_write_token_count'), 0)";
   // input_token_count includes cache reads and writes. Codex omits
   // service_tier for the default tier and does not report write durations.
-  var tier = "CASE COALESCE(lower(json_get_string(log_attributes, 'service_tier')), 'default') " +
-    "WHEN 'default' THEN 'standard' WHEN 'auto' THEN 'standard' WHEN 'standard' THEN 'standard' " +
-    "WHEN 'priority' THEN 'priority' WHEN 'fast' THEN 'priority' END";
   return usageCostSQL({
     model: "COALESCE(json_get_string(log_attributes, 'model'), 'unknown')",
-    tier: tier,
+    tier: serviceTierSQL("COALESCE(json_get_string(log_attributes, 'service_tier'), 'default')"),
     fresh: "GREATEST(" + input + " - " + cached + " - " + written + ", 0)",
     output: "COALESCE(json_get_int(log_attributes, 'output_token_count'), 0)",
     cacheRead: cached,

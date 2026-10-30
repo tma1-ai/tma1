@@ -451,7 +451,7 @@ func main() {
 	}
 
 	// Step 4.5: post-upgrade — write version file + best-effort cost flow recreate.
-	// Catalog version gates on truncate+seed only; cost flow creation is best-effort
+	// Catalog version gates on reset+seed only; cost flow creation is best-effort
 	// because it requires opentelemetry_traces which may not exist yet.
 	// initFlowsWithRetry (Step 5) handles deferred cost flow creation.
 	if upgraded && upgradeErr == nil && seedErr == nil {

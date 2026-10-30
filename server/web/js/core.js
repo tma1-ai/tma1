@@ -227,9 +227,16 @@ function modelPricePattern(model) {
 function normalizeServiceTier(tier) {
   if (tier == null || tier === '') return null;
   tier = String(tier).toLowerCase();
-  if (tier === 'default' || tier === 'auto' || tier === 'standard') return 'standard';
-  if (tier === 'priority' || tier === 'fast') return 'priority';
-  return null;
+  return Object.prototype.hasOwnProperty.call(SERVICE_TIER_ALIASES, tier) ? SERVICE_TIER_ALIASES[tier] : null;
+}
+
+var SERVICE_TIER_ALIASES = { default: 'standard', standard: 'standard', priority: 'priority', fast: 'priority' };
+
+// SQL form of normalizeServiceTier; NULL for missing or unrecognized tiers.
+function serviceTierSQL(expr) {
+  return "CASE lower(" + expr + ")" + Object.keys(SERVICE_TIER_ALIASES).map(function(k) {
+    return " WHEN '" + k + "' THEN '" + SERVICE_TIER_ALIASES[k] + "'";
+  }).join('') + " END";
 }
 
 // Standard-tier list price for input and output only. Used where usage has no

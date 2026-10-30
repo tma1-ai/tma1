@@ -15,9 +15,9 @@ test('pricing matches model IDs and dated snapshots without family collisions',(
  assert.equal(c.costCaseSQL('m','i','o'),'CAST(NULL AS DOUBLE)');
 });
 test('service tiers map onto catalog tiers or stay unknown',()=>{
- for(const t of ['default','auto','standard','STANDARD']) assert.equal(c.normalizeServiceTier(t),'standard');
+ for(const t of ['default','standard','STANDARD']) assert.equal(c.normalizeServiceTier(t),'standard');
  for(const t of ['priority','fast']) assert.equal(c.normalizeServiceTier(t),'priority');
- for(const t of [null,undefined,'','flex','scale']) assert.equal(c.normalizeServiceTier(t),null);
+ for(const t of [null,undefined,'','auto','flex','scale','constructor']) assert.equal(c.normalizeServiceTier(t),null);
 });
 test('database errors in HTTP 200 responses do not become empty observations',async()=>{
  c.fetch=async()=>({ok:true,json:async()=>({code:1004,error:'invalid SQL'})});

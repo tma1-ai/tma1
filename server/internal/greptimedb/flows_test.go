@@ -96,10 +96,10 @@ func TestSplitSQLFlowsFile(t *testing.T) {
 	// Verify that the embedded flows.sql parses correctly.
 	stmts := splitSQL(flowsSQL)
 
-	// We expect 8 statements: 5 CREATE TABLE (4 sink + 1 pricing) + 3 CREATE FLOW
-	// Session tables (tma1_hook_events, tma1_messages) are in InitSessionTables, not flows.sql.
-	if len(stmts) != 8 {
-		t.Errorf("flows.sql: got %d statements, want 8", len(stmts))
+	// We expect 7 statements: 4 sink CREATE TABLE + 3 CREATE FLOW.
+	// Session tables are in InitSessionTables and the pricing table in SeedPricing.
+	if len(stmts) != 7 {
+		t.Errorf("flows.sql: got %d statements, want 7", len(stmts))
 		for i, s := range stmts {
 			t.Logf("  [%d]: %s", i, strings.TrimSpace(s)[:min(80, len(strings.TrimSpace(s)))])
 		}
