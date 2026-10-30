@@ -12,7 +12,7 @@ import (
 
 // PeerSession is one peer-agent session, returned by GetPeerSessions
 // for cross-agent lookup. "Peer" is relative to the caller: when CC
-// invokes the MCP tool, Codex / OpenClaw / Copilot CLI are peers;
+// invokes the MCP tool, Codex / Copilot CLI are peers;
 // when Codex invokes, CC is also a peer. The Bundler's Caller field
 // drives that exclusion when `agent_source` is left empty.
 type PeerSession struct {
@@ -53,7 +53,7 @@ type PeerMessage struct {
 }
 
 // validPeerAgents are the allowed agent_source values for cross-agent
-// lookup. All four supported agents are accepted as explicit inputs;
+// lookup. All supported agents are accepted as explicit inputs;
 // the "exclude the caller from the empty-string fan-out" semantics
 // live in GetPeerSessions, driven by the Bundler's Caller field.
 //
@@ -65,7 +65,7 @@ type PeerMessage struct {
 var validPeerAgents = map[string]bool{
 	"claude_code": true,
 	"codex":       true,
-	"openclaw":    true,
+	"opencode":    true,
 	"copilot_cli": true,
 }
 
@@ -535,7 +535,7 @@ func (b *Bundler) enrichPeerSession(ctx context.Context, ps *PeerSession, messag
 	}()
 
 	// Files touched — drop the CC-specific tool_name filter so we also
-	// pick up Codex (apply_patch, write_stdin), OpenClaw (custom tools),
+	// pick up Codex (apply_patch, write_stdin) and other tool names,
 	// etc. Anything whose tool_input carries a file_path counts.
 	go func() {
 		defer wg.Done()
@@ -581,7 +581,7 @@ func (b *Bundler) resolveAgentAlias(agentSource string) (string, error) {
 		return b.Caller, nil
 	}
 	if agent != "" && !validPeerAgents[agent] {
-		return "", fmt.Errorf("invalid agent_source %q (valid: claude_code, codex, openclaw, copilot_cli, self, or empty for all peers)", agentSource)
+		return "", fmt.Errorf("invalid agent_source %q (valid: claude_code, codex, copilot_cli, opencode, self, or empty for all peers)", agentSource)
 	}
 	return agent, nil
 }

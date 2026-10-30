@@ -142,7 +142,7 @@ func (t SessionStateTool) Call(ctx context.Context, args map[string]any) (CallTo
 // PeerSessionsTool returns recent session content from peer coding
 // agents that worked on the same project as the caller. "Peer" is
 // relative to whichever agent invoked the MCP tool: CC sees Codex /
-// OpenClaw / Copilot CLI, Codex sees CC / OpenClaw / Copilot CLI, and
+// Copilot CLI, Codex sees CC / Copilot CLI, and
 // so on (the Bundler's Caller field excludes self). Lets one agent
 // act on review feedback or work left by another without manual copy-
 // paste between terminals.
@@ -154,7 +154,7 @@ func (t PeerSessionsTool) Definition() Tool {
 	return Tool{
 		Name: "get_peer_sessions",
 		Description: "List recent sessions on this project by agent: peers by " +
-			"default (Claude Code, Codex, OpenClaw, Copilot CLI), or your own " +
+			"default (Claude Code, Codex, Copilot CLI), or your own " +
 			"past sessions with agent_source=\"self\". Use it to act on work or " +
 			"review feedback another agent left, or to recall what you did here " +
 			"earlier. To find sessions by keyword instead, use search_sessions; " +
@@ -164,7 +164,7 @@ func (t PeerSessionsTool) Definition() Tool {
 			Properties: map[string]Property{
 				"agent_source": {
 					Type:        "string",
-					Description: "Agent to list: claude_code / codex / openclaw / copilot_cli, or \"self\" for your own sessions. Aliases: cc | claude → claude_code, copilot → copilot_cli, me | mine → self. Empty = all peers except you (top N per agent).",
+					Description: "Agent to list: claude_code / codex / copilot_cli / opencode, or \"self\" for your own sessions. Aliases: cc | claude → claude_code, copilot → copilot_cli, me | mine → self. Empty = all peers except you (top N per agent).",
 				},
 				"detail": {
 					Type:        "string",
@@ -282,7 +282,7 @@ func (t SearchSessionsTool) Definition() Tool {
 				},
 				"agent_source": {
 					Type:        "string",
-					Description: "Restrict to one agent: claude_code / codex / openclaw / copilot_cli, or \"self\". Empty = every agent, including you.",
+					Description: "Restrict to one agent: claude_code / codex / copilot_cli / opencode, or \"self\". Empty = every agent, including you.",
 				},
 				"project": {
 					Type:        "string",

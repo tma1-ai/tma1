@@ -115,6 +115,13 @@ var schemaMigrations = []Migration{
 		},
 		IgnoreErr: isIgnorableSchemaUpgradeError,
 	},
+	{Version: 5, Description: "OpenCode import source identities", SQL: []string{
+		`ALTER TABLE tma1_messages ADD COLUMN source_record_id STRING NULL`,
+		`ALTER TABLE tma1_hook_events ADD COLUMN source_record_id STRING NULL`,
+	}, IgnoreErr: isIgnorableSchemaUpgradeError},
+	{Version: 6, Description: "prompt insight rubric identity", SQL: []string{
+		`ALTER TABLE tma1_prompt_insights ADD COLUMN rubric_version STRING NULL`,
+	}, IgnoreErr: isIgnorableSchemaUpgradeError},
 }
 
 // schemaVersionDDL creates the migration ledger. Append-only so the

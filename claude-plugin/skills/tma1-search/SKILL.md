@@ -23,14 +23,14 @@ read it.
 
 `--session` takes a full id or a prefix of 6+ characters — the abbreviated
 id in the `<tma1-context>` block works. Do **not** infer a session id from
-a bare token: commit hashes look the same, and `oc:` / `cp:` ids don't look
+a bare token: commit hashes look the same, and `cp:` ids don't look
 like hex at all. Anything that isn't behind `--session` is search text.
 
 ## Workflow
 
 1. **Search** — `mcp__tma1__search_sessions` with:
    - `query`: the keyword text (everything that isn't a flag)
-   - `agent_source`: `--agent` value if given (`codex` / `openclaw` /
+   - `agent_source`: `--agent` value if given (`codex` /
      `copilot` / `claude` / `self`); omit for every agent
    - `since_min`: `--days N` × 1440, default omitted (7 days)
    - `project`: `"*"` when `--all-projects` is given; otherwise omit

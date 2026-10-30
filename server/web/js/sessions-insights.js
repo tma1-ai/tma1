@@ -8,7 +8,7 @@ function sess_renderAPICalls(stats) {
   if (!calls.length) return '';
 
   var html = '<details class="sess-section">';
-  html += '<summary>' + t('sessions.api_calls') + ' (' + calls.length + ') \u00B7 ' + fmtCost(stats.cost) + '</summary>';
+  html += '<summary>' + t(calls.some(function(call) { return call.usageRecord; }) ? 'sessions.usage_records' : 'sessions.api_calls') + ' (' + calls.length + ') \u00B7 ' + fmtCost(stats.cost) + '</summary>';
   html += '<table class="sess-api-table"><thead><tr>';
   html += '<th>' + t('sessions.api_col_model') + '</th><th>' + t('sessions.api_col_in') + '</th><th>' + t('sessions.api_col_out') + '</th><th>' + t('sessions.api_col_reasoning') + '</th><th>' + t('sessions.api_col_cache') + '</th><th>' + t('sessions.api_col_cost') + '</th><th>' + t('sessions.api_col_dur') + '</th>';
   html += '</tr></thead><tbody>';
@@ -23,7 +23,7 @@ function sess_renderAPICalls(stats) {
       : 'sess_scrollToEvent(document.getElementById(\x27sess-timeline-scroll\x27),' + (c.ts || 0) + ')';
     html += '<tr class="clickable" data-ts="' + (c.ts || 0) + '" data-fp="' + escapeHTML(apiKey) + '" data-tool-use-ids="' + escapeHTML(tuids) + '" onclick="' + escapeHTML(clickAction) + '">';
     html += '<td style="text-align:left;max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + escapeHTML(c.model || '') + '">' + escapeHTML(modelShort) + '</td>';
-    html += '<td>' + fmtTokens(c.inputTokens) + '</td>';
+    html += '<td>' + fmtTokens(c.inputTokens + (c.inputIncludesCache ? 0 : (c.cacheTokens || 0) + (c.cacheCreationTokens || 0))) + '</td>';
     html += '<td>' + fmtTokens(c.outputTokens) + '</td>';
     html += '<td>' + (c.reasoningTokens > 0 ? fmtTokens(c.reasoningTokens) : '\u2014') + '</td>';
     html += '<td>' + (c.cacheTokens > 0 ? fmtTokens(c.cacheTokens) : '\u2014') + '</td>';

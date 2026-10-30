@@ -123,19 +123,19 @@ command, and where the test files live.
 ## get_peer_sessions
 
 Recent sessions on the same project from peer coding agents (Claude
-Code, Codex, OpenClaw, Copilot CLI).
+Code, Codex, Copilot CLI).
 
 **Caller-aware defaults.** The calling agent is identified by the
 `TMA1_MCP_CALLER` env var (set by each adapter's installer:
 `claude_code`, `codex`, etc.). An empty `agent_source` fans out over
-every agent *except* the caller — Codex sees the other three, Claude
-Code sees the other three. Naming an agent explicitly overrides that,
+every agent *except* the caller — Codex sees the other two, Claude
+Code sees the other two. Naming an agent explicitly overrides that,
 including naming yourself: `agent_source: "self"` (or your own
 canonical name) returns your own past sessions on this project.
 
 | Arg | Type | Default | Description |
 |-----|------|---------|-------------|
-| `agent_source` | string | "" (all peers except caller) | `claude_code` / `codex` / `openclaw` / `copilot_cli` / `self`. Aliases: `cc` / `claude` → `claude_code`, `copilot` → `copilot_cli`, `me` / `mine` → `self` |
+| `agent_source` | string | "" (all peers except caller) | `claude_code` / `codex` / `copilot_cli` / `opencode` / `self`. Aliases: `cc` / `claude` → `claude_code`, `copilot` → `copilot_cli`, `me` / `mine` → `self` |
 | `detail` | string | `preview` | `summary` = no messages; `preview` = 3 recent messages at 240 chars; `full` = 40 recent messages at 1200 chars |
 | `limit` | integer | 1 | Sessions per agent, clamped to `[1, 5]`. With empty `agent_source`, applied per peer agent, not globally |
 | `since_min` | integer | 1440 | Lookback window in minutes (default 24h) |

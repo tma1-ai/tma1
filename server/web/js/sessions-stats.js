@@ -14,7 +14,7 @@ function sess_computeStats(hookEvents, messages, timeline, apiCalls, apiErrors) 
   var stats = {
     duration: 0, toolCount: 0, primaryModel: '', cost: 0,
     files: {},
-    context: { system: 5000, user: 0, tools: 0, reasoning: 0, subagent: 0 },
+    context: { system: 0, user: 0, tools: 0, reasoning: 0, subagent: 0 },
     agents: [],
     // OTel enrichment.
     apiCalls: apiCalls || [],
@@ -155,9 +155,7 @@ function sess_computeStats(hookEvents, messages, timeline, apiCalls, apiErrors) 
   stats.sessionStart = sessionStartTs === Infinity ? 0 : sessionStartTs;
   stats.sessionEnd = sessionEndTs || stats.sessionStart;
 
-  // Messages → context breakdown + model + cost estimate.
-  var estInputTokens = 0;
-  var estOutputTokens = 0;
+  // Transcript text sizes only drive the approximate context breakdown.
   for (var m = 0; m < messages.length; m++) {
     var msg = messages[m];
     var contentLen = (msg.content || '').length;
@@ -166,48 +164,40 @@ function sess_computeStats(hookEvents, messages, timeline, apiCalls, apiErrors) 
 
     if (msg.message_type === 'user') {
       stats.context.user += tokens;
-      estInputTokens += tokens;
     } else if (msg.message_type === 'system' || msg.message_type === 'developer') {
       stats.context.system += tokens;
-      estInputTokens += tokens;
-    } else if (msg.message_type === 'tool_result') {
-      estInputTokens += Math.round(tokens * 0.3);
-    } else if (msg.message_type === 'tool_use') {
-      estInputTokens += tokens;
     } else if (msg.message_type === 'assistant' || msg.message_type === 'thinking') {
       stats.context.reasoning += tokens;
-      estOutputTokens += tokens;
     }
   }
 
   // OTel enrichment: prefer precise data over estimates.
   if (stats.apiCalls.length > 0) {
     stats.hasOTel = true;
-    var totalIn = 0, totalOut = 0, totalReasoning = 0, totalCache = 0, totalCost = 0;
+    var totalIn = 0, totalOut = 0, totalReasoning = 0, totalCache = 0, totalCost = 0, costKnown = true;
     for (var ac = 0; ac < stats.apiCalls.length; ac++) {
       var call = stats.apiCalls[ac];
-      totalIn += call.inputTokens;
+      totalIn += call.inputTokens + (call.inputIncludesCache ? 0 : (call.cacheTokens || 0) + (call.cacheCreationTokens || 0));
       totalOut += call.outputTokens;
       totalReasoning += call.reasoningTokens || 0;
       totalCache += call.cacheTokens;
-      totalCost += call.cost;
+      if (call.cost == null) costKnown = false;
+      else totalCost += call.cost;
       if (!stats.primaryModel && call.model) stats.primaryModel = call.model;
     }
     stats.totalInputTokens = totalIn;
     stats.totalOutputTokens = totalOut;
     stats.totalReasoningTokens = totalReasoning;
     stats.totalCacheTokens = totalCache;
-    stats.cost = totalCost;
-    stats.costSource = 'otel';
-    if (totalIn + totalCache > 0) {
-      stats.cacheHitRatio = totalCache / (totalIn + totalCache);
+    stats.cost = costKnown ? totalCost : null;
+    stats.costSource = stats.apiCalls.every(function(call) { return call.reportedCost; }) ? 'otel' : 'estimate';
+    if (totalIn > 0) {
+      stats.cacheHitRatio = totalCache / totalIn;
     }
   } else {
-    // Fallback to estimates.
-    stats.totalInputTokens = estInputTokens;
-    stats.totalOutputTokens = estOutputTokens;
-    var price = sess_lookupPrice(stats.primaryModel);
-    stats.cost = estInputTokens * price.input / 1000000 + estOutputTokens * price.output / 1000000;
+    stats.totalInputTokens = null;
+    stats.totalOutputTokens = null;
+    stats.cost = null;
   }
 
   return stats;
@@ -245,13 +235,19 @@ function extractAllFilePaths(toolName, inputStr) {
 // ── Pricing / formatting helpers ──────────────────────────────────────
 
 function sess_lookupPrice(model) {
-  if (!model || !modelPricing || !modelPricing.length) return { input: 3, output: 15 };
+  if (!model || !modelPricing || !modelPricing.length) return { input: null, output: null };
   for (var i = 0; i < modelPricing.length; i++) {
-    if (model.indexOf(modelPricing[i].p) !== -1) {
+    if (new RegExp(modelPricePattern(modelPricing[i].p)).test(model)) {
       return { input: modelPricing[i].i, output: modelPricing[i].o };
     }
   }
-  return { input: 3, output: 15 };
+  return { input: null, output: null };
+}
+
+function sess_usageCost(price, input, output, cached, written) {
+  // The catalog has no cache rates. Do not price cached tokens as fresh input.
+  if (price.input == null || price.output == null || cached > 0 || written > 0) return null;
+  return (input * price.input + output * price.output) / 1000000;
 }
 
 function fmtDurSec(sec) {
@@ -261,6 +257,7 @@ function fmtDurSec(sec) {
 }
 
 function fmtTokens(n) {
+  if (n == null) return '—';
   if (n < 1000) return n + '';
   if (n < 1000000) return (n / 1000).toFixed(1) + 'k';
   return (n / 1000000).toFixed(1) + 'M';
@@ -284,7 +281,8 @@ function sess_parseCCOTel(rows, sessionId) {
       outputTokens: Number(a.output_tokens) || 0,
       cacheTokens: Number(a.cache_read_tokens) || 0,
       cacheCreationTokens: Number(a.cache_creation_tokens) || 0,
-      cost: parseFloat(a.cost_usd) || 0,
+      cost: a.cost_usd == null ? null : parseFloat(a.cost_usd),
+      reportedCost: a.cost_usd != null,
       durationMs: parseFloat(a.duration_ms) || 0,
       toolUseIds: [],
       eventSeq: seq != null ? seq : null,
@@ -312,9 +310,7 @@ function sess_parseCodexOTel(rows, conversationIds) {
     }
     var inputTok = Number(a.input_token_count) || 0;
     var outputTok = Number(a.output_token_count) || 0;
-    // OpenAI's o-series reports reasoning_token_count as a SEPARATE
-    // bucket from output_token_count, and bills it at the output
-    // rate. Include it in cost so the dashboard matches the bill.
+    // Reasoning is a subset of output tokens.
     var reasoningTok = Number(a.reasoning_token_count) || 0;
     var model = a.model || '';
     var price = sess_lookupPrice(model);
@@ -326,7 +322,8 @@ function sess_parseCodexOTel(rows, conversationIds) {
       reasoningTokens: reasoningTok,
       cacheTokens: Number(a.cached_token_count) || 0,
       cacheCreationTokens: 0,
-      cost: inputTok * price.input / 1000000 + (outputTok + reasoningTok) * price.output / 1000000,
+      cost: sess_usageCost(price, inputTok, outputTok, Number(a.cached_token_count) || 0, 0),
+      inputIncludesCache: true,
       durationMs: parseFloat(a.duration_ms) || 0,
     });
   }

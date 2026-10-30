@@ -456,7 +456,7 @@ type copilotCLIContext struct {
 	model         string // current model (updated by session.start and session.model_change)
 	cwd           string
 	live          bool  // true after initial backfill completes
-	lastTsMs      int64 // per-session monotonic timestamp (avoids global lastInsertTS collision)
+	lastTsMs      int64 // per-session monotonic timestamp
 	skipUntilTsMs int64 // events with raw ts <= this are skipped (re-watch dedup after server restart)
 }
 

@@ -25,17 +25,9 @@ function renderSessionDetail(timeline, stats) {
   html += '<div class="sess-kpi"><span class="sess-kpi-label">' + t('sessions.kpi_tools') + '</span><span class="sess-kpi-value">' + stats.toolCount + '</span></div>';
 
   var costLabel = stats.costSource === 'otel' ? t('sessions.kpi_cost') : t('sessions.kpi_cost') + ' ~';
-  html += '<div class="sess-kpi"><span class="sess-kpi-label">' + costLabel + '</span><span class="sess-kpi-value cost">' + (stats.cost > 0 ? fmtCost(stats.cost) : '\u2014') + '</span></div>';
+  html += '<div class="sess-kpi"><span class="sess-kpi-label">' + costLabel + '</span><span class="sess-kpi-value cost">' + (stats.cost != null ? fmtCost(stats.cost) : '\u2014') + '</span></div>';
 
-  // Tokens KPI. The reasoning slot only renders for Codex sessions
-  // — Codex / OpenAI o-series report reasoning_token_count as a
-  // separate bucket from output_tokens and bill it at the output
-  // rate (cost calc in sess_parseCodexOTel and the JSONL fallback
-  // both include it). CC + OpenClaw use Anthropic models where
-  // thinking is already inside output_tokens, so reasoning isn't
-  // surfaced separately; totalReasoningTokens stays 0 and the slot
-  // hides naturally via the > 0 guard below.
-  var tokLabel = stats.hasOTel ? t('sessions.kpi_tokens') : t('sessions.kpi_tokens') + ' ~';
+  var tokLabel = t('sessions.kpi_tokens');
   var tokText = fmtTokens(stats.totalInputTokens) + ' ' + t('sessions.token_in') + ' / ' + fmtTokens(stats.totalOutputTokens) + ' ' + t('sessions.token_out');
   if (stats.totalReasoningTokens > 0) tokText += ' / ' + fmtTokens(stats.totalReasoningTokens) + ' ' + t('sessions.token_reasoning');
   html += '<div class="sess-kpi"><span class="sess-kpi-label">' + tokLabel + '</span><span class="sess-kpi-value" style="font-size:14px">' + tokText + '</span></div>';
@@ -51,7 +43,7 @@ function renderSessionDetail(timeline, stats) {
     (lastEvent.data.event_type === 'SessionEnd' || lastEvent.data.event_type === 'Stop');
   var isRecent = lastEvent && (Date.now() - lastEvent.ts) < 10 * 60 * 1000;
   var isActive = isRecent && !lastIsEnd;
-  html += '<div class="sess-kpi" style="margin-left:auto;display:flex;gap:6px;align-items:flex-end">';
+  html += '<div class="sess-detail-actions">';
   if (isActive) {
     html += '<button class="filter-btn" onclick="AgentCanvas.open(\x27live\x27,{sessionId:\x27' + escapeJSString(sessExpandedId) + '\x27})">' + t('sessions.btn_live_canvas') + '</button>';
   }

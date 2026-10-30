@@ -28,7 +28,7 @@ async function gcp_loadCards() {
       query(
         "SELECT model, " +
         "SUM(COALESCE(output_tokens, 0)) AS out_tok, " +
-        "SUM(CASE WHEN message_type IN ('user','tool_result','tool_use') THEN LENGTH(COALESCE(content,''))/4 ELSE 0 END) AS est_in_tok " +
+        "SUM(input_tokens) AS est_in_tok, SUM(cache_read_tokens) AS cached, SUM(cache_creation_tokens) AS written " +
         gcp_msgWhere() + " AND model != '' GROUP BY model"
       ),
       // Per-session timestamp bounds (duration computed in JS via tsToMs).
@@ -59,14 +59,16 @@ async function gcp_loadCards() {
     }
 
     // Calculate cost from model pricing
-    var totalCost = 0;
+    var totalCost = null;
     var costRows = rowsToObjects(results[3]);
+    if (costRows.length) totalCost = 0;
     for (var i = 0; i < costRows.length; i++) {
       var cr = costRows[i];
       var price = sess_lookupPrice(cr.model);
       var estIn = Number(cr.est_in_tok) || 0;
       var out = Number(cr.out_tok) || 0;
-      totalCost += estIn * price.input / 1000000 + out * price.output / 1000000;
+      var cost = cr.est_in_tok == null ? null : sess_usageCost(price, estIn, out, Number(cr.cached) || 0, Number(cr.written) || 0);
+      totalCost = totalCost == null || cost == null ? null : totalCost + cost;
     }
 
     document.getElementById('gcp-val-cost').textContent = fmtCost(totalCost);
@@ -120,7 +122,7 @@ async function gcp_loadCostChart() {
       "SELECT date_bin('" + chartBucket() + "'::INTERVAL, ts) AS t, " +
       "model, " +
       "SUM(COALESCE(output_tokens, 0)) AS out_tok, " +
-      "SUM(CASE WHEN message_type IN ('user','tool_result','tool_use') THEN LENGTH(COALESCE(content,''))/4 ELSE 0 END) AS est_in_tok " +
+      "SUM(input_tokens) AS est_in_tok, SUM(cache_read_tokens) AS cached, SUM(cache_creation_tokens) AS written " +
       gcp_msgWhere() + " AND model != '' GROUP BY t, model ORDER BY t"
     );
     var rawData = rowsToObjects(res);
@@ -133,8 +135,8 @@ async function gcp_loadCostChart() {
       var key = String(d.t);
       if (!buckets[key]) buckets[key] = { t: d.t, cost: 0 };
       var price = sess_lookupPrice(d.model);
-      buckets[key].cost += (Number(d.est_in_tok) || 0) * price.input / 1000000 +
-                           (Number(d.out_tok) || 0) * price.output / 1000000;
+      var cost = d.est_in_tok == null ? null : sess_usageCost(price, Number(d.est_in_tok), Number(d.out_tok) || 0, Number(d.cached) || 0, Number(d.written) || 0);
+      buckets[key].cost = buckets[key].cost == null || cost == null ? null : buckets[key].cost + cost;
     }
     var data = Object.values(buckets).sort(function(a, b) { return String(a.t) < String(b.t) ? -1 : 1; });
     renderChart('gcp-chart-cost', data, [
@@ -217,7 +219,7 @@ async function gcp_loadCostByModel() {
       "SELECT model, " +
       "SUM(COALESCE(output_tokens, 0)) AS out_tok, " +
       "COUNT(*) AS msgs, " +
-      "SUM(CASE WHEN message_type IN ('user','tool_result','tool_use') THEN LENGTH(COALESCE(content,''))/4 ELSE 0 END) AS est_in_tok " +
+      "SUM(input_tokens) AS est_in_tok, SUM(cache_read_tokens) AS cached, SUM(cache_creation_tokens) AS written " +
       gcp_msgWhere() + " AND model != '' GROUP BY model ORDER BY out_tok DESC"
     );
     var data = rowsToObjects(res);
@@ -226,7 +228,7 @@ async function gcp_loadCostByModel() {
       var price = sess_lookupPrice(d.model);
       var estIn = Number(d.est_in_tok) || 0;
       var out = Number(d.out_tok) || 0;
-      var cost = estIn * price.input / 1000000 + out * price.output / 1000000;
+      var cost = d.est_in_tok == null ? null : sess_usageCost(price, estIn, out, Number(d.cached) || 0, Number(d.written) || 0);
       return '<tr><td>' + escapeHTML(d.model) + '</td>' +
         '<td>' + fmtNum(out) + '</td>' +
         '<td>' + fmtNum(Number(d.msgs) || 0) + '</td>' +

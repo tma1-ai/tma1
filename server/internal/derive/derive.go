@@ -2,7 +2,7 @@
 // extracts `tool_file_path`, `tool_command_prefix`, `tool_success`,
 // and `tool_error_summary` from a tool event payload. Both the CC
 // hook handler (server/internal/handler/hooks.go) and the transcript
-// parsers (server/internal/transcript/{codex,copilot_cli,openclaw}.go)
+// parsers (server/internal/transcript/{codex,copilot_cli}.go)
 // call this so the four derived columns get populated regardless of
 // the agent source.
 //
@@ -47,7 +47,7 @@ func Fields(eventName, toolName, toolInput, toolResult, message string) (filePat
 	}
 
 	// Command prefix: leading 200 chars of Bash / shell-tool commands.
-	// `Bash` is CC; `exec_command` is Codex; OpenClaw / Copilot may
+	// `Bash` is CC; `exec_command` is Codex; Copilot may
 	// use either name — match by lowercase substring so the helper
 	// is tolerant.
 	if isShellTool(toolName) {

@@ -1,14 +1,14 @@
 // views.js — view management, theme, tab navigation, init
-// Depends on: core.js, chart.js, i18n.js, traces.js, claude-code.js, codex.js, openclaw.js, sessions.js, agent-canvas.js
+// Depends on: core.js, chart.js, i18n.js, traces.js, claude-code.js, codex.js, sessions.js, agent-canvas.js
 // Must be loaded LAST. Calls initViews() at the bottom.
 
-var currentView = null; // 'claude-code', 'codex', 'openclaw', 'traces', 'sessions', or 'prompts'
+var viewVersion = 0;
+var currentView = null; // 'claude-code', 'codex', 'traces', 'sessions', or 'prompts'
 var autoRefreshTimer = null;
 var refreshInFlight = false;
 var dataSources = {
   hasLogs: false,
   hasTraces: false,
-  hasOpenClaw: false,
   hasGenAITraces: false,
   hasClaudeLogs: false,
   hasCodex: false,
@@ -27,19 +27,16 @@ async function detectDataSources() {
     var result = {
       hasLogs: tables.includes('opentelemetry_logs'),
       hasTraces: tables.includes('opentelemetry_traces'),
-      hasOpenClaw: false,
       hasGenAITraces: false,
       hasClaudeLogs: false,
       hasCodex: false,
       ccMetrics: tables.filter(function(t) { return t.startsWith('claude_code_'); }),
       codexMetrics: tables.filter(function(t) { return t.startsWith('codex_'); }),
-      ocMetrics: tables.filter(function(t) { return t.startsWith('openclaw_'); }),
       hasHookEvents: tables.includes('tma1_hook_events'),
       hasMessages: tables.includes('tma1_messages'),
       hasCopilotCLI: false,
     };
     result.hasCodex = result.codexMetrics.length > 0;
-    result.hasOpenClaw = result.ocMetrics.length > 0;
     if (result.hasLogs) {
       // Existence probes, not aggregates: an unbounded SUM/COUNT over
       // opentelemetry_logs (>1M rows) blows GreptimeDB's 512MiB per-query
@@ -63,7 +60,6 @@ async function detectDataSources() {
           "WHERE table_name = 'opentelemetry_traces' AND table_schema = 'public'"
         );
         var columns = rowsToObjects(colRes).map(function(r) { return r.column_name; });
-        result.hasOpenClaw = result.hasOpenClaw || columns.some(function(c) { return c.indexOf('span_attributes.openclaw.') === 0; });
         result.hasGenAITraces = result.hasGenAITraces || columns.some(function(c) { return c.indexOf('span_attributes.gen_ai.') === 0; });
       } catch { /* column detection failed, fall back to showing traces view */ }
       if (!result.hasCodex) {
@@ -74,17 +70,8 @@ async function detectDataSources() {
           result.hasCodex = (rows(codexTraceRes) || []).length > 0;
         } catch { /* ignore */ }
       }
-      // Detect OpenClaw via span_name when columns are not yet registered.
-      if (!result.hasOpenClaw) {
-        try {
-          var ocSpanRes = await query(
-            "SELECT 1 FROM opentelemetry_traces WHERE span_name LIKE 'openclaw.%' LIMIT 1"
-          );
-          result.hasOpenClaw = (rows(ocSpanRes) || []).length > 0;
-        } catch { /* ignore */ }
-      }
       // Fallback: if no recognized schema found, default to GenAI.
-      if (!result.hasOpenClaw && !result.hasGenAITraces) {
+      if (!result.hasGenAITraces) {
         result.hasGenAITraces = true;
       }
     }
@@ -102,7 +89,6 @@ async function detectDataSources() {
     return {
       hasLogs: false,
       hasTraces: false,
-      hasOpenClaw: false,
       hasGenAITraces: false,
       hasClaudeLogs: false,
       hasCodex: false,
@@ -113,7 +99,10 @@ async function detectDataSources() {
   }
 }
 
+var restoringRoute = false;
+
 function updateHash() {
+  if (restoringRoute) return;
   var hash = currentView || '';
   if (currentView === 'claude-code') {
     var tab = document.querySelector('#cc-tabs .tab.active');
@@ -123,10 +112,7 @@ function updateHash() {
     var cdxTab = document.querySelector('#cdx-tabs .tab.active');
     var cdxTabName = cdxTab ? cdxTab.dataset.cdxtab : null;
     if (cdxTabName && cdxTabName !== 'cdx-overview') hash += '/' + cdxTabName;
-  } else if (currentView === 'openclaw') {
-    var tab3 = document.querySelector('#oc-tabs .tab.active');
-    var tabName3 = tab3 ? tab3.dataset.octab : null;
-    if (tabName3 && tabName3 !== 'oc-overview') hash += '/' + tabName3;
+
   } else if (currentView === 'copilot-cli') {
     var gcpTab = document.querySelector('#gcp-tabs .tab.active');
     var gcpTabName = gcpTab ? gcpTab.dataset.gcptab : null;
@@ -152,6 +138,7 @@ function updateHash() {
   var newHash = '#' + hash;
   if (newHash !== location.hash) {
     history.pushState(null, '', newHash);
+    routedHash = newHash;
   }
 }
 
@@ -168,9 +155,11 @@ function parseHash() {
 }
 
 async function switchView(viewId, skipHash) {
+  var version = ++viewVersion;
+  if (sessExpandedId) sess_closeDetail(true);
+  document.getElementById('view-overview').style.display = 'none';
   document.getElementById('view-claude-code').style.display = 'none';
   document.getElementById('view-codex').style.display = 'none';
-  document.getElementById('view-openclaw').style.display = 'none';
   document.getElementById('view-copilot-cli').style.display = 'none';
   document.getElementById('view-traces').style.display = 'none';
   document.getElementById('view-sessions').style.display = 'none';
@@ -180,6 +169,8 @@ async function switchView(viewId, skipHash) {
   document.getElementById('setup-notice').style.display = 'none';
 
   currentView = viewId;
+  var activeNav = document.querySelector('[data-view="' + viewId + '"]');
+  document.getElementById('active-view-label').textContent = activeNav ? activeNav.textContent : viewId;
 
   // Highlight active view tab.
   document.querySelectorAll('#view-tabs .view-tab').forEach(function(btn) {
@@ -189,16 +180,16 @@ async function switchView(viewId, skipHash) {
   var viewEl = document.getElementById('view-' + viewId);
   if (viewEl) {
     var hasData = true;
-    if (viewId === 'claude-code') {
+    if (viewId === 'overview') {
+      await overviewLoad();
+    } else if (viewId === 'claude-code') {
       hasData = await cc_loadCards();
       cc_loadTraceCardsExistence();
       if (hasData) cc_loadOverview();
     } else if (viewId === 'codex') {
       hasData = await cdx_loadCards();
       if (hasData) cdx_loadOverview();
-    } else if (viewId === 'openclaw') {
-      hasData = await oc_loadCards();
-      if (hasData) oc_loadOverview();
+
     } else if (viewId === 'copilot-cli') {
       hasData = await gcp_loadCards();
       if (hasData) gcp_loadOverview();
@@ -220,6 +211,7 @@ async function switchView(viewId, skipHash) {
       hasData = await loadMetrics();
       if (hasData) loadOverviewCharts();
     }
+    if (version !== viewVersion) return;
     if (hasData) {
       viewEl.style.display = 'block';
     } else {
@@ -246,13 +238,12 @@ async function initViews() {
   var viewTabsEl = document.getElementById('view-tabs');
 
   viewTabsEl.innerHTML = '';
-  var views = [];
+  var views = [{ id: 'overview', label: t('overview.nav') }];
+  if (dataSources.hasHookEvents) views.push({ id: 'sessions', label: t('view.sessions') });
   if (hasCCView) views.push({ id: 'claude-code', label: t('view.claude_code') });
   if (dataSources.hasCodex) views.push({ id: 'codex', label: t('view.codex') });
-  if (dataSources.hasOpenClaw) views.push({ id: 'openclaw', label: t('view.openclaw') });
   if (dataSources.hasCopilotCLI) views.push({ id: 'copilot-cli', label: t('view.copilot_cli') });
   if (dataSources.hasGenAITraces) views.push({ id: 'traces', label: t('view.otel_genai') });
-  if (dataSources.hasHookEvents) views.push({ id: 'sessions', label: t('view.sessions') });
   if (dataSources.hasMessages) views.push({ id: 'prompts', label: t('view.prompts') });
   // Anomalies tab shows whenever there's hook event data — the anomaly
   // engine derives from tma1_hook_events.
@@ -273,46 +264,9 @@ async function initViews() {
     viewTabsEl.appendChild(btn);
   });
 
-  viewTabsEl.style.display = views.length > 1 ? '' : 'none';
+  viewTabsEl.style.display = '';
 
-  // Restore view + tab + time range from URL hash
-  var hash = parseHash();
-  if (hash.range) {
-    currentTimeRange = hash.range;
-    document.getElementById('time-range').value = hash.range;
-  }
-  var viewIds = views.map(function(v) { return v.id; });
-  var targetView = hash.view && viewIds.includes(hash.view) ? hash.view : views[0].id;
-  switchView(targetView, true);
-
-  // Restore tab within view
-  if (hash.tab) {
-    if (targetView === 'claude-code') {
-      var tabBtn = document.querySelector('#cc-tabs .tab[data-cctab="' + hash.tab + '"]');
-      if (tabBtn) tabBtn.click();
-    } else if (targetView === 'codex') {
-      var tabBtnCodex = document.querySelector('#cdx-tabs .tab[data-cdxtab="' + hash.tab + '"]');
-      if (tabBtnCodex) tabBtnCodex.click();
-    } else if (targetView === 'openclaw') {
-      var tabBtn3 = document.querySelector('#oc-tabs .tab[data-octab="' + hash.tab + '"]');
-      if (tabBtn3) tabBtn3.click();
-    } else if (targetView === 'copilot-cli') {
-      var tabBtnGcp = document.querySelector('#gcp-tabs .tab[data-gcptab="' + hash.tab + '"]');
-      if (tabBtnGcp) tabBtnGcp.click();
-    } else if (targetView === 'sessions') {
-      var tabBtnSess = document.querySelector('#sess-tabs .tab[data-sesstab="' + hash.tab + '"]');
-      if (tabBtnSess) tabBtnSess.click();
-      if (hash.sessionId) {
-        sess_openDetail(decodeURIComponent(hash.sessionId), '', 0, '', true);
-      }
-    } else if (targetView === 'prompts') {
-      var tabBtnPr = document.querySelector('#pr-tabs .tab[data-prtab="' + hash.tab + '"]');
-      if (tabBtnPr) tabBtnPr.click();
-    } else if (targetView === 'traces') {
-      var tabBtn2 = document.querySelector('#view-traces .tab[data-tab="' + hash.tab + '"]');
-      if (tabBtn2) tabBtn2.click();
-    }
-  }
+  await restoreRoute();
   updateHash();
   onAutoRefreshChange();
 }
@@ -338,19 +292,6 @@ async function onTabChange(tab) {
   else if (tab === 'search') loadAnomalies();
   else if (tab === 'overview') { await loadPricing(); loadOverviewCharts(); }
 }
-
-// Tab navigation (OpenClaw view)
-document.querySelectorAll('#oc-tabs .tab').forEach(function(btn) {
-  if (btn.dataset.link) return; // skip link-style tabs (handled by onclick)
-  btn.addEventListener('click', function() {
-    document.querySelectorAll('#oc-tabs .tab').forEach(function(t) { t.classList.remove('active'); });
-    document.querySelectorAll('#view-openclaw .tab-content').forEach(function(t) { t.classList.remove('active'); });
-    btn.classList.add('active');
-    document.getElementById('tab-' + btn.dataset.octab).classList.add('active');
-    oc_onTabChange(btn.dataset.octab);
-    updateHash();
-  });
-});
 
 // Tab navigation (Claude Code view)
 document.querySelectorAll('#cc-tabs .tab').forEach(function(btn) {
@@ -459,12 +400,9 @@ async function refreshCurrentView() {
       var activeTab = document.querySelector('#view-traces .tab.active');
       if (activeTab) onTabChange(activeTab.dataset.tab);
     }
-  } else if (currentView === 'openclaw') {
-    hasData = await oc_loadCards();
-    if (hasData) {
-      var activeTab3 = document.querySelector('#oc-tabs .tab.active');
-      if (activeTab3) oc_onTabChange(activeTab3.dataset.octab);
-    }
+
+  } else if (currentView === 'overview') {
+    await overviewLoad();
   } else if (currentView === 'claude-code') {
     hasData = await cc_loadCards();
     cc_loadTraceCardsExistence();
@@ -569,8 +507,7 @@ async function checkDataFreshness() {
       renderFreshness(el, cLastTs);
     } catch { el.textContent = ''; el.className = 'data-freshness'; }
     return;
-  } else if (currentView === 'openclaw') {
-    sql = "SELECT MAX(timestamp) AS last_ts FROM opentelemetry_traces WHERE span_name LIKE 'openclaw.%' AND timestamp >= now() - INTERVAL '1 day'";
+
   } else if (currentView === 'sessions') {
     sql = "SELECT MAX(ts) AS last_ts FROM tma1_hook_events WHERE ts >= now() - INTERVAL '1 day'";
   } else if (currentView === 'prompts') {
@@ -654,8 +591,7 @@ function setTheme(mode) {
     cc_loadOverview();
   } else if (currentView === 'codex') {
     cdx_loadOverview();
-  } else if (currentView === 'openclaw') {
-    oc_loadOverview();
+
   } else if (currentView === 'prompts') {
     pr_loadOverview();
   } else if (currentView === 'traces') {
@@ -842,25 +778,39 @@ checkStatus();
 initViews();
 setInterval(checkStatus, 10000);
 
-// Handle browser back/forward buttons.
-window.addEventListener('popstate', function() {
-  var hash = parseHash();
-  if (hash.view) {
-    if (hash.range) {
-      currentTimeRange = hash.range;
-      document.getElementById('time-range').value = hash.range;
-    }
-    switchView(hash.view, true);
-    if (hash.tab) {
-      // Restore sub-tab if present.
-      var tabBtn = document.querySelector('[data-cctab="' + hash.tab + '"],[data-cdxtab="' + hash.tab + '"],[data-octab="' + hash.tab + '"],[data-sesstab="' + hash.tab + '"],[data-prtab="' + hash.tab + '"]');
-      if (tabBtn) tabBtn.click();
-    }
-    // Restore or close session detail overlay.
-    if (hash.view === 'sessions' && hash.sessionId) {
-      sess_openDetail(decodeURIComponent(hash.sessionId), '', 0, '', true);
-    } else if (hash.view === 'sessions' && sessExpandedId) {
-      sess_closeDetail(true);
-    }
+var routedHash = null;
+async function restoreRoute() {
+  if (routedHash === location.hash) return;
+  routedHash = location.hash;
+  var route = parseHash();
+  var buttons = Array.from(document.querySelectorAll('#view-tabs .view-tab'));
+  var target = buttons.find(function(button) { return button.dataset.view === route.view; });
+  if (!target) target = buttons[0];
+  if (!target) return;
+  route.view = target.dataset.view;
+  if (route.range) {
+    currentTimeRange = route.range;
+    document.getElementById('time-range').value = route.range;
   }
-});
+  var routeHash = location.hash;
+  await switchView(route.view, true);
+  if (currentView !== route.view || location.hash !== routeHash) return;
+  if (route.tab) {
+    var tabs = document.querySelectorAll('#view-' + route.view + ' .tab');
+    Array.from(tabs).some(function(tab) {
+      if (Object.values(tab.dataset).includes(route.tab)) {
+        restoringRoute = true;
+        try { tab.click(); } finally { restoringRoute = false; }
+        return true;
+      }
+      return false;
+    });
+  }
+  if (route.view === 'sessions' && route.sessionId) {
+    var id;
+    try { id = decodeURIComponent(route.sessionId); } catch { return; }
+    sess_openDetail(id, '', 0, '', true);
+  }
+}
+window.addEventListener('popstate', restoreRoute);
+window.addEventListener('hashchange', restoreRoute);

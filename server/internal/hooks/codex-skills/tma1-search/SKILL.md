@@ -21,7 +21,7 @@ read it.
 
 `--session` takes a full id or a prefix of 6+ characters. Do **not**
 infer a session id from a bare token: commit hashes look identical, and
-`oc:` / `cp:` ids don't look like hex at all. Anything not behind
+`cp:` ids don't look like hex at all. Anything not behind
 `--session` is search text.
 
 ## Workflow
@@ -29,7 +29,7 @@ infer a session id from a bare token: commit hashes look identical, and
 1. **Search** — call the `tma1` MCP server's `search_sessions` tool:
    - `query`: everything that isn't a flag
    - `agent_source`: `--agent` value (`claude` → `claude_code`,
-     `openclaw`, `copilot` → `copilot_cli`, `self`); omit for every agent
+     `copilot` → `copilot_cli`, `self`); omit for every agent
    - `since_min`: `--days N` × 1440; omit for the 7-day default
    - `project`: `"*"` with `--all-projects`; otherwise omit
 2. **Report** the matches with their snippets so the user can pick. One

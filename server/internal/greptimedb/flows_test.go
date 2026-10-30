@@ -115,23 +115,16 @@ func TestSplitSQLFlowsFile(t *testing.T) {
 }
 
 func TestBuildCostCaseSQL(t *testing.T) {
-	t.Run("empty prices uses default only", func(t *testing.T) {
-		result := buildCostCaseSQL(nil, "model", "inp", "outp")
-		if !strings.HasPrefix(result, "CASE ELSE") {
-			t.Errorf("expected CASE ELSE for empty prices, got: %s", result[:min(60, len(result))])
-		}
-		if !strings.Contains(result, "3.000000/1000000.0") {
-			t.Error("expected default input price 3.0")
-		}
-		if !strings.Contains(result, "15.000000/1000000.0") {
-			t.Error("expected default output price 15.0")
+	t.Run("empty prices stay unknown", func(t *testing.T) {
+		if result := buildCostCaseSQL(nil, "model", "inp", "outp"); result != "CAST(NULL AS DOUBLE)" {
+			t.Fatal(result)
 		}
 	})
 
 	t.Run("single price generates WHEN clause", func(t *testing.T) {
 		prices := []modelPrice{{Pattern: "claude-opus", InputPrice: 5.0, OutputPrice: 25.0}}
 		result := buildCostCaseSQL(prices, "m", "i", "o")
-		if !strings.Contains(result, "WHEN m LIKE '%claude-opus%'") {
+		if !strings.Contains(result, "WHEN regexp_like(m, '^claude-opus") {
 			t.Errorf("expected LIKE clause, got: %s", result)
 		}
 		if !strings.Contains(result, "5.000000/1000000.0") {

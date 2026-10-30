@@ -16,8 +16,8 @@ file index. Read this when you need to know *where* something is or
 | `server/internal/greptimedb/` | Start, stop, health-check GreptimeDB process + Flow init + versioned schema migrations + per-table DDL (`flows.go` / `anomaly_emits.go` / `build.go` / `external.go` / `project.go`) |
 | `server/internal/handler/` | HTTP handlers: /health, /status, /api/query, /api/evaluate, /api/settings, /api/hooks (returns injection content), /api/hooks/stream (SSE), /api/anomalies{,/budget,/follow-rate}, /v1/otlp/*, dashboard UI |
 | `server/internal/hooks/` | Hook script installer + per-adapter wiring. `install_cc.go` (Claude Code: `~/.claude/settings.json` hooks + `~/.claude.json` MCP + `~/.claude/{skills,commands}/`). `install_codex.go` (Codex: `~/.codex/hooks.json` + `~/.codex/config.toml` `[mcp_servers.tma1]` + `~/.agents/skills/tma1-*/`, TOML merge via `BurntSushi/toml`). `install_shared.go` carries the helpers both use (atomic writes, JSON-strict reads, owner-prefix-scoped stale sweep, instructions/.gitignore). |
-| `server/internal/transcript/` | JSONL transcript watcher (Claude Code) + Codex / OpenClaw / Copilot CLI session log parsers |
-| `server/internal/perception/` | v2 perception layer: bundler, anomaly detector (6 rules + channel routing + 10-min suppression + resolvers), incremental injection cache, session readers (peer / search / transcript), read-only query executor, file writer for `.tma1-context.md` |
+| `server/internal/transcript/` | JSONL transcript watcher (Claude Code) + Codex / Copilot CLI session log parsers |
+| `server/internal/perception/` | v2 perception layer: bundler, anomaly detector (4 rules + channel routing + 10-min suppression + resolvers), incremental injection cache, session readers (peer / search / transcript), read-only query executor, file writer for `.tma1-context.md` |
 | `server/internal/sensor/build/` | `tma1-server build [--watch] -- <cmd>` subprocess capture: stdout/stderr tee + batched writes into `tma1_build_events`, force-colour env injection |
 | `server/internal/sensor/git/` | fsnotify file watcher + 30 s git poll + agent-write attribution honoring `.gitignore` + static ignore list; writes `tma1_external_changes` |
 | `server/internal/sensor/project/` | Lazy project-state indexer (language / build / test / key files / top-level dirs) with 24 h TTL gate; writes `tma1_project_state` |
@@ -26,17 +26,16 @@ file index. Read this when you need to know *where* something is or
 | `server/internal/sqlutil/` | Single-source SQL helpers (`Escape`, `EscapeLike`, `Quote`) shared by perception, handler, sensors; plus `ValidateSelect` / `LimitedSelect`, the read-only gate behind the `exec_query` MCP tool |
 | `server/internal/strutil/` | UTF-8-safe truncation (`SafeTruncate`) used wherever we cap a string before INSERT |
 | `server/internal/pathutil/` | Cross-platform path basename / split (handles POSIX + Windows separators for agent-supplied paths) |
-| `server/web/` | Embedded dashboard (HTML + JS + CSS via embed.FS), 8 views: Claude Code, Codex, Copilot CLI, OpenClaw, OTel GenAI, Sessions, Prompts, Anomalies + Agent Canvas |
+| `server/web/` | Embedded dashboard (HTML + JS + CSS via embed.FS), 8 views: Overview, Claude Code, Codex, Copilot CLI, OTel GenAI, Sessions, Prompts, Anomalies + Agent Canvas |
 | `site/` | Astro landing page → GitHub Pages → tma1.ai |
 | `.claude-plugin/` | Claude Code Marketplace registration |
 | `claude-plugin/` | Claude Code plugin: `tma1` / `tma1-peer` / `tma1-search` / `tma1-setup` skills + slash commands (source synced into `server/internal/hooks/{skills,commands,codex-skills}/` via `make sync-plugin`, embedded in the binary, dropped to `~/.claude/{skills,commands}/` and `~/.agents/skills/` at install time) |
-| `clawhub-skill/tma1/` | SKILL.md + REFERENCE.md — ClawHub-format setup skill (OpenClaw integration), also published to tma1.ai via `site/package.json:prebuild` |
 | `docs/` | Long-form references: this file, `hooks.md`, `mcp-tools.md`, `anomalies.md` |
 
 ## Data flow
 
 ```
-Agent (Claude Code / Codex / Copilot CLI / OpenClaw / any GenAI app)
+Agent (Claude Code / Codex / Copilot CLI / any GenAI app)
     │  OTLP/HTTP → http://localhost:14318/v1/otlp
     │  Hook events → http://localhost:14318/api/hooks    [request–response.
     │                                                    CC posts raw; Codex posts
@@ -60,7 +59,7 @@ Agent (Claude Code / Codex / Copilot CLI / OpenClaw / any GenAI app)
     │                                                    get_session_transcript,
     │                                                    exec_query]
     │  JSONL transcripts → ~/.claude/projects/ (CC) / ~/.codex/sessions/ (Codex) /
-    │                      ~/.copilot/session-state/ (Copilot CLI) / ~/.openclaw/agents/ (OpenClaw)
+    │                      ~/.copilot/session-state/ (Copilot CLI)
     ▼
 tma1-server  port 14318
     │  reverse-proxies OTLP to GreptimeDB
@@ -83,17 +82,16 @@ Browser dashboard (served by tma1-server)
     ├── Claude Code view: Overview, Tools, Cost, Anomalies, Traces, Sessions→ (from OTel metrics + logs + traces)
     ├── Codex view: Overview, Tools, Cost, Anomalies, Sessions→ (from OTel logs with scope_name codex_*)
     ├── Copilot CLI view: Overview, Tools, Cost, Sessions→ (from ~/.copilot/session-state/*/events.jsonl)
-    ├── OpenClaw view: Overview, Traces, Cost, Search (from openclaw.* trace attrs)
     ├── OTel GenAI view: Overview, Traces, Cost, Security, Search (from gen_ai.* trace attrs)
     ├── Sessions view: Session list, full-screen detail overlay (two-column: Insights + Timeline), file heatmap, agent hierarchy, waterfall, canvas animation
     │   ├── CC/Codex/Copilot CLI "Sessions→" is a link that jumps to Sessions view with agent_source filter
     │   ├── Anomalies panel inside session detail (reads /api/anomalies?session_id=…)
     │   ├── Replay mode: replay past sessions as agent orchestration animation
     │   └── Live mode: real-time SSE streaming of hook events → canvas visualization
-    ├── Prompts view: Prompt evaluation & improvement (heuristic scoring + optional LLM-as-judge)
-    │   ├── Overview: score distribution, trend, top suggestions, dimension breakdown
-    │   ├── Prompts: card-based list with per-prompt scoring, suggestions, optional LLM deep eval
-    │   └── Patterns: verb-based grouping (fix/add/implement/debug/...) with avg score/cost/turns
+    ├── Prompts view: Request history and optional contextual model review
+    │   ├── Overview: request/session counts and text-only sampled AI Insights
+    │   ├── Prompts: request cards with optional review of bounded conversation excerpts
+    │   └── Patterns: verb-based grouping (fix/add/implement/debug/...) with counts
     └── Anomalies view: cross-session anomaly list, severity filter, 10 s auto-refresh; budget +
         follow-rate validation endpoints back the Phase 1.7 quality gates
 ```
@@ -158,27 +156,16 @@ Additionally, Codex session logs at `~/.codex/sessions/YYYY/MM/DD/rollout-*.json
 
 Copilot CLI session logs at `~/.copilot/session-state/<sessionId>/events.jsonl` are auto-discovered and parsed by tma1-server. Session IDs are stored as `cp:<sessionId>`; when a JSONL file contains multiple logical sessions (Copilot CLI appends across restarts), each `session.start` rolls over the in-memory session ID so they're persisted as distinct DB rows. Parses 11 event types: `session.start`, `session.shutdown`, `session.model_change`, `session.task_complete`, `user.message`, `assistant.message` (content + reasoningText → thinking), `tool.execution_start`, `tool.execution_complete` (success=false → `PostToolUseFailure`), `subagent.started`, `subagent.completed`, `skill.invoked`. Timestamps handle both RFC3339 and Copilot CLI's `MM/DD/YYYY HH:mm:ss` UTC format. No hook configuration needed.
 
-### OpenClaw → OTel traces + metrics
+### OpenCode → official v1 snapshots
 
-| Table | Type | Content |
-|-------|------|---------|
-| `opentelemetry_traces` | Traces | 5 span types (see below) |
-| `openclaw_tokens_total` | Metric (counter) | Token counts by model/channel/provider/token type |
-| `openclaw_message_processed_total` | Metric (counter) | Messages processed by channel/outcome |
-| `openclaw_message_queued_total` | Metric (counter) | Messages queued by channel/source |
-| `openclaw_session_state_total` | Metric (counter) | Session state transitions by state/reason |
-| `openclaw_context_tokens_{sum,count,bucket}` | Metric (histogram) | Context window tokens by channel/model (used/limit) |
-| `openclaw_run_duration_ms_milliseconds_{sum,count,bucket}` | Metric (histogram) | Run duration by channel |
-| `openclaw_queue_depth_{sum,count,bucket}` | Metric (histogram) | Queue depth |
-| `openclaw_queue_wait_ms_milliseconds_{sum,count,bucket}` | Metric (histogram) | Queue wait time |
-| `openclaw_queue_lane_enqueue_total` | Metric (counter) | Queue lane enqueue events |
-| `openclaw_queue_lane_dequeue_total` | Metric (counter) | Queue lane dequeue events |
-
-OpenClaw span types: `openclaw.model.usage` (LLM calls), `openclaw.message.processed` (message handling), `openclaw.webhook.processed` (webhook OK), `openclaw.webhook.error` (webhook error, STATUS_CODE_ERROR), `openclaw.session.stuck` (stuck session, STATUS_CODE_ERROR).
-
-Key trace columns: `span_attributes.openclaw.{model,channel,provider,sessionKey,sessionId,outcome,messageId,tokens.input,tokens.output,tokens.cache_read,tokens.cache_write,tokens.total}`
-
-Additionally, OpenClaw JSONL session transcripts at `~/.openclaw/agents/<agentId>/sessions/<timestamp>_<sessionId>.jsonl` are auto-discovered and parsed by tma1-server (`OPENCLAW_STATE_DIR` env var overrides the base path; legacy `~/.clawdbot/` is also scanned). The JSONL format (pi-coding-agent v3) contains a session header, then tree-structured entries (message, compaction, model_change, etc.). Messages carry full `usage` data (input/output/cacheRead/cacheWrite tokens + cost breakdown). Parsed data is stored in `tma1_hook_events` and `tma1_messages` (agent_source = 'openclaw', session_id prefixed `oc:<agentId>:<sessionId>`). Archive files (`.reset.*`, `.deleted.*`, `.bak.*`) are skipped. No configuration needed.
+`POST /api/import/opencode` accepts the official `{info, messages}` export.
+The idle-event plugin and manual export commands are documented in
+[OpenCode integration](opencode.md). Sessions use `oc:<session-id>` and
+`agent_source = 'opencode'`. Migration 5 adds source record IDs to messages
+and hook events. The importer serializes snapshots and checks persisted IDs
+before appending records. Completed assistant messages own token usage;
+step-finish counters are not added again. OpenCode reasoning is added to
+output once; input excludes separately stored cache reads and writes.
 
 ### Other agents (GenAI SDK) → OTel traces
 
@@ -209,7 +196,7 @@ so they exist before any trace data arrives). All append-only. The
 
 | Table | Content |
 |-------|---------|
-| `tma1_hook_events` | All 27 CC hook event types (tool calls, subagent lifecycle, session start/end, compaction, permissions, file changes, tasks, etc.) + Codex / Copilot CLI / OpenClaw JSONL parsing. Base DDL in `flows.go`; v1 migration adds `conversation_id` / `permission_mode` / `metadata` (JSON blob); v2 migration adds ingest-side derived columns `tool_file_path` / `tool_command_prefix` / `tool_success` / `tool_error_summary` so anomaly rules can WHERE without re-parsing JSON. 21 columns total. SKIPPING INDEX on `session_id`, INVERTED INDEX on `event_type` / `agent_source`. |
+| `tma1_hook_events` | All 27 CC hook event types (tool calls, subagent lifecycle, session start/end, compaction, permissions, file changes, tasks, etc.) + Codex / Copilot CLI JSONL parsing. Base DDL in `flows.go`; v1 migration adds `conversation_id` / `permission_mode` / `metadata` (JSON blob); v2 migration adds ingest-side derived columns `tool_file_path` / `tool_command_prefix` / `tool_success` / `tool_error_summary` so anomaly rules can WHERE without re-parsing JSON. 21 columns total. SKIPPING INDEX on `session_id`, INVERTED INDEX on `event_type` / `agent_source`. |
 | `tma1_messages` | Conversation content: user/assistant/thinking messages, tool_use/tool_result. Base DDL in `flows.go`; v1 migration adds `input_tokens` / `output_tokens` / `cache_read_tokens` / `cache_creation_tokens` / `duration_ms`. 13 columns total. FULLTEXT INDEX on `content` (bloom backend, English analyzer) for keyword search via `matches_term()`. |
 | `tma1_anomaly_emits` | One row per anomaly the Detector emitted to an injection channel — the ground-truth feed for the Anomalies dashboard view and the `/api/anomalies/{budget,follow-rate}` validation gates. Created by `InitAnomalyEmitsTable`. DDL in `anomaly_emits.go`. 9 columns: `ts`, `session_id`, `kind`, `severity`, `"channel"`, `evidence`, `suggestion`, `related_files` (JSON array), `first_emitted_at`. |
 | `tma1_build_events` | stdout/stderr/completion events captured by `tma1-server build [--watch] -- <cmd>`. Created by `InitBuildTable`. DDL in `build.go`. 13 columns including FULLTEXT-indexed `"message"`, `exit_code`, `duration_ms`, `"tag"`. |
@@ -217,8 +204,7 @@ so they exist before any trace data arrives). All append-only. The
 | `tma1_project_state` | Latest project structure snapshot (language, build/test system, key files, top-level dirs). Created by `InitProjectStateTable`. DDL in `project.go`. 9 columns including reserved-keyword-quoted `"root"` / `"language"`. Lazy refresh, 24 h TTL gate. |
 | `tma1_schema_version` | Migration ledger: one row per applied `Migration` (version, description, ts). Created on demand by `RunSchemaMigrations`. Internal — not for agent queries. |
 
-REFERENCE.md (`clawhub-skill/tma1/REFERENCE.md`) carries the formal
-column lists + sample queries that get published with the skill.
+The published REFERENCE.md mirrors `claude-plugin/skills/tma1/SKILL.md`.
 
 ## Config (env vars)
 
@@ -227,7 +213,7 @@ column lists + sample queries that get published with the skill.
 | `TMA1_HOST` | `127.0.0.1` | Address tma1-server binds to |
 | `TMA1_PORT` | `14318` | HTTP port for tma1-server |
 | `TMA1_DATA_DIR` | `~/.tma1` | Directory for GreptimeDB data + binaries |
-| `TMA1_GREPTIMEDB_VERSION` | `v1.2.1` | GreptimeDB version to download. Pinned to an exact tag; set to `latest` to track stable releases instead |
+| `TMA1_GREPTIMEDB_VERSION` | `v1.3.0` | GreptimeDB version to download. Pinned to an exact tag; set to `latest` to track stable releases instead |
 | `TMA1_GREPTIMEDB_HTTP_PORT` | `14000` | GreptimeDB HTTP API + OTLP port |
 | `TMA1_GREPTIMEDB_GRPC_PORT` | `14001` | GreptimeDB gRPC port |
 | `TMA1_GREPTIMEDB_MYSQL_PORT` | `14002` | GreptimeDB MySQL protocol port |
@@ -243,7 +229,6 @@ column lists + sample queries that get published with the skill.
 | `TMA1_ENABLE_FILE_CALLBACK` | (unset) | Set to `1` to refresh `<project_root>/.tma1-context.md` after each hook event. Off by default — MCP / hook injection covers MCP-capable agents; the file is for Aider / Cursor and adds IO + git-sensor self-noise. |
 | `TMA1_DEBUG_POSTTOOLUSE` | (unset) | Set to `1` to emit a debug marker on every PostToolUse hook regardless of anomalies. Plumbing aid. |
 | `TMA1_CONTEXT_PRESSURE_THRESHOLD` | `100000` | Input-token threshold (whole-session sum) for the R-context-pressure anomaly. ≈ 50 % of CC Sonnet 4's 200 k context. |
-| `OPENCLAW_STATE_DIR` | `~/.openclaw` (with `~/.clawdbot` legacy fallback) | Override the OpenClaw session base directory the transcript scanner watches. |
 
 ## Where to look
 
@@ -262,7 +247,7 @@ column lists + sample queries that get published with the skill.
 | Hook telemetry | `server/internal/handler/hook_telemetry.go` — periodic per-event call + inject counter, flushed via slog |
 | SSE streaming + broadcast | `server/internal/handler/sse.go`, `broadcast.go` |
 | Perception bundler | `server/internal/perception/bundle.go` — Bundle + Digest + RenderSummaryDelta; `client.go` is the local SQL HTTP client. `Bundler.Caller` (set from `TMA1_MCP_CALLER`) drives peer-session self-exclusion. |
-| Anomaly engine | `server/internal/perception/anomaly.go` — 6 rules, channel routing, 10-min suppression, per-rule resolvers, age-evicted history cache. Two public entry points: `Detect` (push-channel — mutates `sessHistory`, INSERTs to `tma1_anomaly_emits`, advances `LastEmittedAt`) and `DetectPreview` (pull-channel — runs the same rules + resolvers but reads suppression state without writing; used by MCP `get_anomalies`) |
+| Anomaly engine | `server/internal/perception/anomaly.go` — 4 rules, channel routing, 10-min suppression, per-rule resolvers, age-evicted history cache. Two public entry points: `Detect` (push-channel — mutates `sessHistory`, INSERTs to `tma1_anomaly_emits`, advances `LastEmittedAt`) and `DetectPreview` (pull-channel — runs the same rules + resolvers but reads suppression state without writing; used by MCP `get_anomalies`) |
 | Anomaly emit log | `server/internal/perception/anomaly_emits.go` — fire-and-forget INSERTs routed through the handler's `writeq.Sem` |
 | Peer-session reader | `server/internal/perception/peer.go` — backs `get_peer_sessions` MCP tool + `/tma1-peer` skill. Caller-aware exclusion applies to the all-peers fan-out only (via `peerAgentList()`); naming an agent explicitly — including `self`, resolved through `resolveAgentAlias` — returns that agent's sessions. `Detail` (summary/preview/full) sets the message + per-message byte budget; the deprecated `message_limit` still overrides it for skill files installed before `detail` existed. `peerCwdFilter` handles POSIX absolute, Windows absolute (drive-letter + UNC, both separator styles), and bare-name fallback. All-peers fan-out captures per-agent SQL failures and surfaces them via a `partial_failures` map in the MCP payload so callers can distinguish "no sessions" from "1-of-N queries failed". `limit` clamps to `[1, 5]` |
 | Session search / transcript | `server/internal/perception/search.go` — backs `search_sessions` + `get_session_transcript`. Scope (project + agent) is resolved against `tma1_hook_events` BEFORE the keyword search runs against `tma1_messages`, and the term→substring widening is decided inside that scope; filtering after the fact would let another project's hits fill the candidate limit. `matches_term` is case-sensitive on the pinned GreptimeDB, so the substring pass folds case (`lower(content) LIKE`) and rescues a wrong-case query. `fetchSessionMessages` is shared with the peer reader so both drop empty-content `usage` rows, apply the same rune-based truncation, and drop the pagination probe row before dedup |
@@ -291,25 +276,24 @@ column lists + sample queries that get published with the skill.
 | Hook script templates | `server/internal/hooks/tma1-hook.sh.tmpl` (CC, curl -m 0.5) / `tma1-hook.ps1.tmpl` (CC, Invoke-WebRequest -TimeoutSec 1) / `tma1-hook-codex.sh.tmpl` + `tma1-hook-codex.ps1.tmpl` (Codex variants — POST with `?source=codex&envelope=codex`) |
 | Transcript watcher (CC JSONL) | `server/internal/transcript/watcher.go` — includes `codexParentSession` map so subagent rollout files attribute to the parent run's conversation UUID, not the filename prefix |
 | Codex session parser | `server/internal/transcript/codex.go` — `peekCodexMainUUID` pre-scan + `codexFileContext.effectiveSessionID` resolve to the conversation UUID once `session_meta` is parsed |
-| OpenClaw session parser | `server/internal/transcript/openclaw.go` |
 | Copilot CLI session parser | `server/internal/transcript/copilot_cli.go` — `~/.copilot/session-state/`, session rollover on repeated `session.start`, restart-dedup via DB query |
+| Overview and tool diagnostics | `server/web/js/overview.js` |
+| Session comparison | `server/web/js/session-compare.js` |
 | Dashboard UI | `server/web/index.html` |
 | Anomalies view JS | `server/web/js/anomalies.js` — list, severity filter, 10 s auto-refresh, click-to-expand row primitive shared with session detail |
 | Sessions view JS | `server/web/js/sessions.js` — orchestrator (KPI cards, session list, detail loading, search) |
 | Sessions sub-modules | `server/web/js/sessions-{stats,detail,insights,waterfall,timeline}.js` — stats computation, detail overlay, insight panels, waterfall chart, timeline rendering |
 | Agent Canvas animation | `server/web/js/agent-canvas.js` — canvas animation + tool fade-out + subagent lifecycle + compaction/permission events |
-| Prompts view JS | `server/web/js/prompts.js` — heuristic scoring engine, data loading, rendering, LLM eval integration |
+| Prompts view JS | `server/web/js/prompts.js` — data loading, bounded transcript excerpts, rendering, LLM review integration |
 | LLM evaluation endpoint | `server/internal/handler/evaluate.go` — `/api/evaluate` (Anthropic/OpenAI proxy for prompt evaluation) |
 | Settings endpoint | `server/internal/handler/settings.go` — `GET/POST /api/settings` (read/write server config, hot-reload LLM) |
 | Settings persistence | `server/internal/config/settings.go` — Load/save `~/.tma1/settings.json`, env var override logic |
 | Codex view JS | `server/web/js/codex.js` |
 | Copilot CLI view JS | `server/web/js/copilot-cli.js` (`gcp_*` functions) |
-| OpenClaw view JS | `server/web/js/openclaw.js` |
 | Embedded FS declaration | `server/web/web.go` |
 | Landing page | `site/src/pages/index.astro` |
 | Install script (Unix) | `site/public/install.sh` |
 | Install script (Windows) | `site/public/install.ps1` |
-| ClawHub skill | `clawhub-skill/tma1/SKILL.md` (+ `REFERENCE.md`) — auto-synced to `site/public/` via `site/package.json:prebuild` |
 | v2 long-form docs | `docs/hooks.md`, `docs/mcp-tools.md`, `docs/anomalies.md` |
 | Dev-mode log prettifier | `scripts/tma1-prettylog` — jq pipeline for `make dev` JSON output |
 | CI workflow | `.github/workflows/ci.yml` |
@@ -330,7 +314,7 @@ make build   # → server/bin/tma1-server
 # 3. Dashboard renders (open in browser, check empty states + Anomalies tab)
 open server/web/index.html
 
-# 4. Site: Astro builds (prebuild also syncs clawhub-skill/tma1/{SKILL,REFERENCE}.md into site/public/)
+# 4. Site: Astro builds (prebuild syncs setup and query skills into site/public/)
 cd site && npm ci && npm run build   # → site/dist/index.html
 
 # 5. Install scripts: lint clean

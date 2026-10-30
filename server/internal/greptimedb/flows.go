@@ -151,8 +151,7 @@ func InitSessionTables(httpPort int, logger *slog.Logger) error {
 // InitFlows runs the flows.sql DDL against the GreptimeDB HTTP SQL API.
 // It is idempotent (all statements use IF NOT EXISTS).
 // Flow creation (CREATE FLOW) failures are non-fatal — they are logged as warnings
-// and skipped, since the source table may have a different schema (e.g. openclaw.*
-// columns instead of gen_ai.*).
+// and skipped, since the source table may have a different schema without gen_ai.* columns.
 func InitFlows(httpPort int, logger *slog.Logger) error {
 	sqlURL := fmt.Sprintf("http://localhost:%d/v1/sql", httpPort)
 
@@ -301,98 +300,53 @@ const pricingTableDDL = `CREATE TABLE IF NOT EXISTS tma1_model_pricing (
     ts            TIMESTAMP TIME INDEX DEFAULT '2024-01-01T00:00:00Z'
 );`
 
-// defaultPricing is the seed data inserted on first start.
-// Prices are USD per 1M tokens (input / output), reflecting public list
-// pricing as of 2026-05.
-//
-// To roll new prices out to existing installs, ship a new binary Version
-// string: main.go compares it against ~/.tma1/.tma1-version and triggers
-// TruncatePricing + SeedPricing on mismatch.
+// PricingVersion identifies the built-in catalog independently of the binary version.
+const PricingVersion = "2026-10-30"
+
+// Standard, short-context API rates in USD per million tokens. These are
+// estimates, not invoices; cache writes, service tiers and regional premiums
+// require billing metadata that transcripts do not consistently supply.
+// Sources: https://developers.openai.com/api/docs/pricing
+// https://platform.claude.com/docs/en/about-claude/pricing
+// Unverified models and context-tiered Haiku 5.5 are deliberately absent.
 var defaultPricing = []modelPrice{
-	{"claude-opus-4-7", 9, 5.0, 25.0},
-	{"claude-opus-4-6", 10, 5.0, 25.0},
-	{"claude-opus-4-5", 11, 5.0, 25.0},
-	{"claude-opus-4-1", 12, 15.0, 75.0},
-	{"claude-opus-4-0", 13, 15.0, 75.0},
-	{"claude-3-opus", 14, 15.0, 75.0},
-	{"claude-sonnet", 20, 3.0, 15.0},
-	{"claude-haiku-4-5", 30, 1.0, 5.0},
-	{"claude-3-5-haiku", 31, 0.8, 4.0},
-	{"claude-3-haiku", 32, 0.25, 1.25},
-	{"claude", 99, 3.0, 15.0},
-	{"o1-pro", 100, 150.0, 600.0},
-	{"o1-mini", 101, 0.55, 2.2},
-	{"o1", 109, 15.0, 60.0},
-	{"o4-mini", 110, 1.1, 4.4},
-	{"o3-mini", 111, 1.1, 4.4},
-	{"o3", 119, 2.0, 8.0},
-	{"gpt-4o-mini", 120, 0.15, 0.6},
-	{"gpt-4o", 129, 2.5, 10.0},
-	{"gpt-4.1-nano", 130, 0.1, 0.4},
-	{"gpt-4.1-mini", 131, 0.4, 1.6},
-	{"gpt-4-turbo", 135, 10.0, 30.0},
-	{"gpt-4", 138, 30.0, 60.0},
-	{"gpt-4.1", 139, 2.0, 8.0},
-	{"gpt-5-nano", 140, 0.05, 0.4},
-	{"gpt-5-mini", 141, 0.25, 2.0},
-	{"gpt-5.5", 148, 5.0, 30.0},
-	{"gpt-5", 149, 1.25, 10.0},
-	{"gpt-3.5", 150, 0.5, 1.5},
-	{"gemini-2.5-pro", 200, 1.25, 10.0},
-	{"gemini-2.5-flash", 201, 0.3, 2.5},
-	{"gemini-2.0-flash", 202, 0.1, 0.4},
-	{"gemini", 299, 0.3, 2.5},
-	// deepseek-chat / deepseek-reasoner are billed at the V3.2 list price
-	// (per api-docs.deepseek.com/quick_start/pricing-details-usd) until the
-	// legacy endpoints are retired on 2026-07-24. After that, both alias to
-	// V4-Flash ($0.14/$0.28) — update these two entries then.
-	{"deepseek-v4", 298, 0.14, 0.28},
-	{"deepseek-r1", 300, 0.55, 2.19},
-	{"deepseek-chat", 301, 0.27, 1.10},
-	{"deepseek-coder", 302, 0.14, 0.28},
-	{"deepseek", 399, 0.27, 1.10},
-	// Alibaba Qwen
-	{"qwen3-max", 400, 0.26, 2.08},
-	{"qwen-plus", 401, 0.4, 2.4},
-	{"qwen-turbo", 402, 0.04, 0.08},
-	{"qwen-long", 403, 0.07, 0.28},
-	{"qwen-max", 404, 1.04, 4.16},
-	{"qwen", 499, 0.4, 2.4},
-	// Zhipu AI GLM
-	{"glm-4-plus", 500, 0.6, 2.2},
-	{"glm-4-flash", 501, 0.01, 0.01},
-	{"glm-4-long", 502, 0.14, 0.14},
-	{"glm-4", 509, 0.14, 0.14},
-	{"glm", 599, 0.14, 0.14},
-	// Moonshot / Kimi
-	{"kimi-k2", 600, 0.6, 2.5},
-	{"moonshot-v1-128k", 601, 2.0, 5.0},
-	{"moonshot-v1-32k", 602, 1.0, 3.0},
-	{"moonshot-v1-8k", 603, 0.2, 2.0},
-	{"moonshot", 699, 0.6, 2.5},
-	// ByteDance Doubao
-	{"doubao-pro", 700, 0.47, 2.37},
-	{"doubao-lite", 701, 0.13, 0.76},
-	{"doubao", 799, 0.47, 2.37},
-	// Tencent Hunyuan
-	{"hunyuan-pro", 800, 0.63, 1.55},
-	{"hunyuan-turbo", 801, 0.11, 0.28},
-	{"hunyuan-standard", 802, 0.63, 0.69},
-	{"hunyuan", 899, 0.11, 0.28},
-	// Baidu ERNIE
-	{"ernie-4", 900, 4.2, 8.4},
-	{"ernie-3.5", 901, 0.11, 0.28},
-	{"ernie", 999, 0.11, 0.28},
-	// iFlytek Spark
-	{"spark", 1000, 1.39, 1.39},
-	// MiniMax
-	{"minimax", 1100, 0.30, 1.20},
-	{"abab", 1101, 0.14, 0.14},
-	// Baichuan
-	{"baichuan", 1200, 0.14, 0.14},
-	// 01.AI Yi
-	{"yi-large", 1300, 2.78, 2.78},
-	{"yi", 1399, 0.14, 0.14},
+	{"claude-fable-5-1", 0, 10, 50},
+	{"claude-opus-5-5", 1, 4, 20},
+	{"claude-sonnet-5-5", 2, 2, 10},
+	{"claude-mythos-5-1", 3, 10, 50},
+	{"claude-fable-5", 4, 10, 50},
+	{"claude-mythos-5", 5, 10, 50},
+	{"claude-opus-5", 6, 5, 25},
+	{"claude-opus-4-8", 7, 5, 25},
+	{"claude-opus-4-7", 8, 5, 25},
+	{"claude-opus-4-6", 9, 5, 25},
+	{"claude-opus-4-5", 10, 5, 25},
+	{"claude-opus-4-1", 11, 15, 75},
+	{"claude-opus-4", 12, 15, 75},
+	{"claude-opus-4-0", 13, 15, 75},
+	{"claude-sonnet-5", 14, 2, 10},
+	{"claude-sonnet-4-6", 15, 3, 15},
+	{"claude-sonnet-4-5", 16, 3, 15},
+	{"claude-sonnet-4", 17, 3, 15},
+	{"claude-sonnet-4-0", 18, 3, 15},
+	{"claude-haiku-4-5", 19, 1, 5},
+	{"claude-3-5-haiku", 20, 0.8, 4},
+	{"gpt-6-astra", 21, 10, 50},
+	{"gpt-6.1-sol", 22, 2, 10},
+	{"gpt-6.1-terra", 23, 1, 5},
+	{"gpt-6-sol", 24, 2, 10},
+	{"gpt-6-luna", 25, 0.1, 0.5},
+	{"gpt-5.6-sol", 26, 4, 20},
+	{"gpt-5.6-cyber", 27, 12.5, 75},
+	{"gpt-5.5", 28, 5, 30},
+	{"gpt-5.3-codex", 29, 1.75, 14},
+	{"gpt-4.1", 30, 2, 8},
+	{"gpt-5.4", 31, 2.5, 15},
+	{"gpt-5.2", 32, 1.75, 14},
+	{"gpt-5.4-mini", 33, .75, 4.5},
+	{"gpt-5-mini", 34, .25, 2},
+	{"gpt-4o-mini", 35, .15, .6},
+	{"gpt-4o", 36, 2.5, 10},
 }
 
 // SeedPricing inserts default model pricing if the table is empty.
@@ -465,7 +419,7 @@ COMMENT 'Estimated cost per model per minute (pricing from tma1_model_pricing)'
 AS
 SELECT
     "span_attributes.gen_ai.request.model" AS model,
-    SUM(%s) AS cost_usd,
+    CASE WHEN COUNT(*) = COUNT(%[1]s) THEN SUM(%[1]s) ELSE NULL END AS cost_usd,
     date_bin('1 minute'::INTERVAL, "timestamp") AS time_window
 FROM opentelemetry_traces
 WHERE "span_attributes.gen_ai.request.model" IS NOT NULL
@@ -478,19 +432,22 @@ GROUP BY "span_attributes.gen_ai.request.model", time_window;`, costExpr)
 	return nil
 }
 
-// buildCostCaseSQL generates a SQL CASE expression that computes cost
-// based on model pattern matching via LIKE.
+// modelPricePattern accepts an exact ID or a provider's dated snapshot suffix.
+func modelPricePattern(model string) string {
+	return "^" + regexp.QuoteMeta(model) + "(-[0-9]{8}|-[0-9]{4}-[0-9]{2}-[0-9]{2})?$"
+}
+
 func buildCostCaseSQL(prices []modelPrice, modelExpr, inputExpr, outputExpr string) string {
+	if len(prices) == 0 {
+		return "CAST(NULL AS DOUBLE)"
+	}
 	var sb strings.Builder
 	sb.WriteString("CASE")
 	for _, p := range prices {
-		safe := strings.ReplaceAll(p.Pattern, "'", "''")
-		fmt.Fprintf(&sb, " WHEN %s LIKE '%%%s%%' THEN CAST(%s AS DOUBLE)*%.6f/1000000.0+CAST(%s AS DOUBLE)*%.6f/1000000.0",
-			modelExpr, safe, inputExpr, p.InputPrice, outputExpr, p.OutputPrice)
+		safe := strings.ReplaceAll(modelPricePattern(p.Pattern), "'", "''")
+		fmt.Fprintf(&sb, " WHEN regexp_like(%s, '%s') THEN CAST(%s AS DOUBLE)*%.6f/1000000.0+CAST(%s AS DOUBLE)*%.6f/1000000.0", modelExpr, safe, inputExpr, p.InputPrice, outputExpr, p.OutputPrice)
 	}
-	// Default: Sonnet-tier ($3/$15)
-	fmt.Fprintf(&sb, " ELSE CAST(%s AS DOUBLE)*3.000000/1000000.0+CAST(%s AS DOUBLE)*15.000000/1000000.0 END",
-		inputExpr, outputExpr)
+	sb.WriteString(" ELSE CAST(NULL AS DOUBLE) END")
 	return sb.String()
 }
 

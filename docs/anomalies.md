@@ -1,123 +1,81 @@
 # Anomaly engine
 
-Six rules run on every `Detector.Detect`, with a 10-minute per-session
-suppression layer and per-rule resolution checks. Each anomaly carries
-a `Channel` that decides where it lands in the agent's prompt stream.
+Four rules run on `Detector.Detect`. Findings are advisory and use the
+`user_prompt_submit` channel. None of the current rules blocks the Stop hook.
+Historical findings retain their original kind and severity in the emit log.
 
-## Channels
+## Rules
 
-| Channel | Where it shows up | Use when |
-|---------|-------------------|----------|
-| `user_prompt_submit` | Next turn's prepended `<tma1-context>` digest | The agent can read it before its next reasoning step. Default for everything that isn't blocking. |
-| `stop_block` | `Stop` hook returns `{"decision":"block","reason":"…"}` | Unresolved issue would cause concrete harm if the agent stopped now (broken build, repeated identical failure). HIGH severity only. |
-| `post_tool_use` | Appended to the offending tool result | No rule currently uses this. PostToolUse(Read) of an externally-modified file is handled via R-stale-view → next UserPromptSubmit instead. Reserved for rules that genuinely need a same-turn signal. |
+| Kind | Severity | Evidence |
+|------|----------|----------|
+| `stale_file_view` | high | An observed Edit follows an external file change without an intervening successful Read of that file. |
+| `repeated_failed_build` | medium | A recognized build/test command has at least three observed failures after its most recent observed success, within 30 minutes. |
+| `external_modified_during_session` | medium | Files in the session project changed outside observed agent writes within the session window and the last 30 minutes. |
+| `context_pressure` | medium | The latest nonzero input-usage sample in the last 30 minutes reaches `TMA1_CONTEXT_PRESSURE_THRESHOLD` (default 700,000). |
 
-Bundle filtering (`bundle.Anomalies`) only carries
-`user_prompt_submit`-channel anomalies. Stop-block findings stay out
-of the bundle so the same issue never shows up twice (once in the
-digest, once in the block reason).
+Repeated build failures are grouped by the full command and working directory.
+A successful unrelated command does not clear them. Detection inspects the
+latest 1,000 completed Bash events in the window. Commands with missing or
+invalid command JSON or working directory are excluded. Known direct build
+and test invocations are recognized; arbitrary shell wrappers are not parsed.
+Failures do not establish an identical error, a retry loop, or a cause.
+The former `build_broken_after_my_edit` and `test_stuck` rules no longer emit.
 
-## The six rules
+Claude Code and OpenCode input usage includes input, cache-read, and
+cache-creation counters. Codex input already includes cache tokens, which are
+not added again. Other or unknown sources are not evaluated by this rule. Usage rows
+may contain streaming deltas; the sample is not an exact context-window
+measurement. Output-only samples do not replace the last nonzero input sample.
+The configured threshold is absolute, not a percentage of an inferred model
+limit. Context-pressure advice asks the agent to check its own context indicator.
+It does not require a commit or a new session.
 
-| Kind | Severity | Channel | Triggers when |
-|------|----------|---------|---------------|
-| `stale_file_view` | high | user_prompt_submit | Agent Edited file F where the latest Read of F was before an external change of F. See [Plan scenario](#r-stale-view) below. |
-| `build_broken_after_my_edit` | high if ≥3 failures, else medium | stop_block (HIGH) / user_prompt_submit (MEDIUM) | Agent edited file F in the last 30 min, then a Bash PostToolUseFailure within ±10 min mentioned F's basename in input or output. |
-| `repeated_failed_build` | high | stop_block | Same Bash command prefix (first 60 chars) failed 3+ times in the last 30 min. |
-| `test_stuck` | medium | user_prompt_submit | Same test identifier (regex-extracted from "FAIL …") appeared in Bash PostToolUseFailure output 3+ times in the last 30 min. |
-| `external_modified_during_session` | medium | user_prompt_submit | At least one file changed outside observed agent writes on this project within the session window, and the change is no older than 30 min. |
-| `context_pressure` | medium | user_prompt_submit | `SUM(input_tokens) >= TMA1_CONTEXT_PRESSURE_THRESHOLD` (default 100,000 ≈ 50% of Claude Sonnet's 200k window). One-shot per session. |
+### Stale file views
 
-### R-stale-view
+For each observed Edit, the detector finds the latest Read before it and checks
+for an external change between that Read and the Edit. File events and external
+changes are queried separately and matched by path. Reads require a successful
+PostToolUse event; edits use PreToolUse observations. A successful reread after
+the external change clears the stale-view finding.
 
-Plan scenario:
+## Suppression
 
-```
-T1 — agent Reads foo.go
-T2 — foo.go changes externally          (T2 > T1)
-T3 — agent Edits foo.go with no Re-Read in (T2, T3)
-```
+The candidate cache lasts 30 seconds. Channel selection precedes suppression;
+a Stop or PostToolUse request does not consume a next-prompt finding. Findings with the same kind, severity, files,
+and command identity are suppressed for 10 minutes per session. Build failures
+stop qualifying after a successful run of that same command in the same working
+directory. They must accumulate three new failures to qualify again.
 
-The Edit is based on a stale in-memory view. The rule pulls Read /
-Edit / Write events and external changes separately, then merges in
-Go: for each Edit at T_edit, find the most recent Read strictly
-before T_edit; if any external change falls in `(lastRead, T_edit)`,
-the Edit was stale.
+The stale-view rule retains its existing resolution check: a later successful
+Read resets its suppression history. External-change findings expire with the
+30-minute observation window. Context-pressure findings stop qualifying when a
+new nonzero input sample falls below the threshold or the observation expires.
 
-The merge logic is factored into a pure helper, `detectStaleEdit`,
-covered by six unit cases in `anomaly_test.go`.
+`DetectPreview` reads suppression state without advancing emission history.
+Hook injection uses `Detect`; MCP queries use the read-only preview path.
 
-## Suppression and resolution
+## Emit log and dashboard
 
-`anomalyCache.suppressWithResolution` is the full decision step. Per
-candidate:
+Emitted findings are appended to `tma1_anomaly_emits` with the session ID,
+kind, severity, channel, evidence, suggestion, related files, and first-emission
+time. The dashboard polls emission history every 10 seconds. Historical rows
+are not a live list of unresolved conditions.
 
-- **Fresh key** → emit. Stamps `FirstEmittedAt`.
-- **Same key, within 10 min of last emit, resolution NOT observed** → silent.
-- **Same key, resolution observed since last emit** → reset emit state, emit again with refreshed `FirstEmittedAt`.
-- **Same key, after the 10-min silence window** → emit. Keeps `FirstEmittedAt` from the original.
+The following endpoints report emission volume and subsequent actions:
 
-Resolution checks run outside the cache lock so SQL latency doesn't
-serialise concurrent `Detect` calls.
+- `GET /api/anomalies/budget?days=7&budget=5`
+- `GET /api/anomalies/follow-rate?days=7&window=5`
 
-| Rule | Resolution check |
-|------|------------------|
-| `stale_file_view` | Agent did a PreToolUse Read on the related file after the last emit. |
-| `build_broken_after_my_edit` | Any PostToolUse Bash (non-failure) after the last emit. |
-| `repeated_failed_build` | Same as above. |
-| `test_stuck` | Same as above. |
-| `external_modified_during_session` | None — time-based decay (30 min). |
-| `context_pressure` | None — one-shot per session. |
+Following a suggestion does not establish that the finding was correct or
+that the underlying problem was resolved. Precision requires reviewing the
+finding alongside its source events.
 
-## Emit log
+## Configuration
 
-Every kept anomaly is asynchronously logged into `tma1_anomaly_emits`
-(append-only). One row per emission, columns:
+| Environment variable | Default | Effect |
+|----------------------|---------|--------|
+| `TMA1_CONTEXT_PRESSURE_THRESHOLD` | `700000` | Absolute input-usage threshold |
+| `TMA1_DISABLE_INJECTION` | unset | `1` disables hook injection |
 
-```
-ts, session_id, kind, severity, channel,
-evidence, suggestion, related_files (json),
-first_emitted_at
-```
-
-This is the source data for the three validation gates.
-
-## Validation gates
-
-| Gate | Target | How to check |
-|------|--------|--------------|
-| Precision | ≥ 70% TP on a sampled set | `SELECT * FROM tma1_anomaly_emits ORDER BY ts DESC LIMIT 50` — label TP/FP manually |
-| Daily emit budget | ≤ 5 emits / Kind / day | `GET /api/anomalies/budget?days=7&budget=5` |
-| Action follow-rate | ≥ 30% within 5 tool calls | `GET /api/anomalies/follow-rate?days=7&window=5` |
-
-A rule that fails its gate is a candidate for severity adjustment,
-suppression-window tightening, or removal. The bar for adding new
-rules is gate compliance first; precision second; volume third.
-
-## Dashboard delivery: polling, not SSE
-
-The plan originally called for SSE broadcast of anomaly toasts. The
-implementation polls `/api/anomalies` every 10 s from both the
-Anomalies dashboard tab and the Agent Canvas overlay. The Detector
-caches its result for 30 s per session (`anomalyCache.ttl`), so the
-client-side poll cadence amortises against the cache: most polls
-short-circuit on the cached set, and the worst-case staleness is
-~10 s — well under the human review threshold.
-
-Why polling won: the SSE path required a second broadcast channel
-parallel to `/api/hooks/stream` (which is reserved for tool events),
-with its own subscriber lifecycle and reconnect logic. Anomalies fire
-at < 5 / kind / day per the validation budget — a steady-state poll is
-cheaper than maintaining the push channel.
-
-## Tuning knobs
-
-| Env var | Default | Effect |
-|---------|---------|--------|
-| `TMA1_CONTEXT_PRESSURE_THRESHOLD` | `100000` | Tokens before `context_pressure` fires |
-| `TMA1_DISABLE_INJECTION` | unset | When `1`, hooks return empty bodies (no injection) |
-
-The suppression window (10 min) and per-rule SQL windows (mostly 30
-min) are constants in `server/internal/perception/anomaly.go`. Change
-them in code, not env, so a misconfiguration can't make a rule never
-silence.
+SQL observation windows and the suppression interval are constants in
+`server/internal/perception/anomaly.go`.

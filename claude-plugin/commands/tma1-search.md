@@ -12,10 +12,10 @@ Full reference lives in `skills/tma1-search/SKILL.md`.
 
 - `--session <id>` → skip search, call `mcp__tma1__get_session_transcript`
   with that id (full id or 6+ character prefix). Never guess an id from a
-  bare token — commit hashes and `oc:` / `cp:` ids are indistinguishable
+  bare token — commit hashes and `cp:` ids are indistinguishable
   from one.
 - Everything that isn't a flag → `query`.
-- `--agent X` → `agent_source` (`codex` · `openclaw` · `copilot` → `copilot_cli` ·
+- `--agent X` → `agent_source` (`codex` · `copilot` → `copilot_cli` ·
   `claude` / `cc` → `claude_code` · `self`). Omit for every agent.
 - `--days N` → `since_min = N × 1440`. Omit for the 7-day default.
 - `--all-projects` → `project: "*"`. Omit to stay in the current project.

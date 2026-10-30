@@ -4,6 +4,10 @@
 var API = '/api/query';
 var currentTimeRange = '24h';
 
+function supportedAgentWhere() {
+  return "agent_source IN ('claude_code','codex','copilot_cli','opencode')";
+}
+
 function intervalSQL() {
   var m = { '15m': '15 minutes', '30m': '30 minutes', '1h': '1 hour', '6h': '6 hours', '24h': '1 day', '7d': '7 days', '30d': '30 days', '60d': '60 days' };
   return m[currentTimeRange] || '1 day';
@@ -64,7 +68,9 @@ async function query(sql) {
       } catch { /* keep status-only message */ }
       throw new Error(msg);
     }
-    return await r.json();
+    var result = await r.json();
+    if (result.error || result.code) throw new Error(result.error || ("Database error " + result.code));
+    return result;
   } finally {
     queryRelease();
   }
@@ -173,7 +179,6 @@ function escapeSQLString(s) {
 // Dynamic model pricing (loaded from tma1_model_pricing table)
 // ===================================================================
 var modelPricing = [];
-var defaultPrice = { i: 3, o: 15 };
 var pricingLoaded = false;
 
 async function loadPricing() {
@@ -191,25 +196,26 @@ async function loadPricing() {
       pricingLoaded = true;
     }
   } catch (e) {
-    // Table may not exist yet; costCaseSQL will fall back to default pricing.
+    // Missing pricing remains unknown; a later refresh retries the query.
   }
+}
+
+function modelPricePattern(model) {
+  return '^' + model.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(-[0-9]{8}|-[0-9]{4}-[0-9]{2}-[0-9]{2})?$';
 }
 
 function costCaseSQL(modelExpr, inputExpr, outputExpr) {
   var parts = modelPricing.map(function(m) {
-    return "WHEN " + modelExpr + " LIKE '%" + m.p.replace(/'/g, "''") + "%' THEN " +
+    return "WHEN regexp_like(" + modelExpr + ", '" + modelPricePattern(m.p).replace(/'/g, "''") + "') THEN " +
       "CAST(" + inputExpr + " AS DOUBLE)*" + m.i + "/1000000.0+" +
       "CAST(" + outputExpr + " AS DOUBLE)*" + m.o + "/1000000.0";
   });
-  if (!parts.length) {
-    return "(" +
-      "CAST(" + inputExpr + " AS DOUBLE)*" + defaultPrice.i + "/1000000.0+" +
-      "CAST(" + outputExpr + " AS DOUBLE)*" + defaultPrice.o + "/1000000.0" +
-      ")";
-  }
-  return "(CASE " + parts.join(" ") +
-    " ELSE CAST(" + inputExpr + " AS DOUBLE)*" + defaultPrice.i + "/1000000.0+" +
-    "CAST(" + outputExpr + " AS DOUBLE)*" + defaultPrice.o + "/1000000.0 END)";
+  if (!parts.length) return "CAST(NULL AS DOUBLE)";
+  return "(CASE " + parts.join(" ") + " ELSE CAST(NULL AS DOUBLE) END)";
+}
+
+function sumKnownCostSQL(expression) {
+  return "CASE WHEN COUNT(*) = COUNT(" + expression + ") THEN SUM(" + expression + ") ELSE NULL END";
 }
 
 function setHealthFromData(el, data, thresholds) {

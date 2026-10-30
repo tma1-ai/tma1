@@ -1,6 +1,6 @@
 ---
 name: tma1-peer
-description: "List recent sessions on this project by agent — peer agents (Codex, OpenClaw, Copilot CLI) or your own past sessions. Invoke when the user wants you to read another agent's review feedback, see what someone else tried, act on cross-agent context, or recall your own earlier work here. Trigger phrases: \"what did codex do\", \"what did openclaw do\", \"what did copilot do\", \"peer sessions\", \"cross-agent context\", \"what did I do earlier\", \"我之前在这个项目做了什么\", \"/tma1-peer\"."
+description: "List recent sessions on this project by agent — peer agents (Codex, Copilot CLI) or your own past sessions. Invoke when the user wants you to read another agent's review feedback, see what someone else tried, act on cross-agent context, or recall your own earlier work here. Trigger phrases: \"what did codex do\", \"what did copilot do\", \"peer sessions\", \"cross-agent context\", \"what did I do earlier\", \"我之前在这个项目做了什么\", \"/tma1-peer\"."
 argument-hint: "[agent] [--full|--summary] [--limit N] [--since 2h]"
 allowed-tools: ["mcp__tma1__get_peer_sessions", "mcp__tma1__get_session_transcript"]
 ---
@@ -24,9 +24,9 @@ copy-pasting between terminals". Naming yourself is also allowed.
 /tma1-peer codex --since 6h         # widen the time window
 ```
 
-Agent names: `codex`, `openclaw`, `copilot` (= `copilot_cli`), `claude`
+Agent names: `opencode`, `codex`, `copilot` (= `copilot_cli`), `claude`
 (= `claude_code`), `self` (= you), `all` / omitted (= every peer but you).
-Anything else: reply `unknown agent "<X>"; available: codex, openclaw, copilot, claude, self, all`
+Anything else: reply `unknown agent "<X>"; available: codex, copilot, opencode, claude, self, all`
 and STOP — do not call the tool with an unrecognised name.
 
 ## Flags

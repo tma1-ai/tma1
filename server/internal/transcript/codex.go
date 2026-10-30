@@ -391,8 +391,9 @@ type codexFileContext struct {
 	// can stamp model into tma1_messages alongside the assistant payload
 	// — without it, the dashboard's per-call cost lookup can't price
 	// rollout-derived inference rows.
-	model string
-	live  bool // true after initial backfill completes (first EOF)
+	model          string
+	lastTotalUsage string
+	live           bool // true after initial backfill completes (first EOF)
 }
 
 // effectiveSessionID returns the conversation UUID once session_meta
@@ -450,7 +451,9 @@ func (w *Watcher) processCodexLine(sessionID, line string, seen map[string]struc
 			// NOT the filename prefix, which would create a
 			// "rollout-..." pseudo-session_id that mismatches
 			// every hook-derived row and confuses the UI.
-			if parentUUID := w.lookupCodexParentSession(sessionID); parentUUID != "" {
+			if meta.parentID != "" {
+				fctx.sessionID = meta.parentID
+			} else if parentUUID := w.lookupCodexParentSession(sessionID); parentUUID != "" {
 				fctx.sessionID = parentUUID
 			} else if meta.id != "" {
 				fctx.sessionID = meta.id
@@ -477,6 +480,9 @@ func (w *Watcher) processCodexLine(sessionID, line string, seen map[string]struc
 		if fctx.live {
 			w.broadcastHookEvent(sid, "SessionStart", "", "", "", "", "", "")
 		}
+
+	case "compacted":
+		w.insertCodexHookEvent(fctx.effectiveSessionID(sessionID), ts, "ContextCompaction", "", "", "", "", fctx)
 
 	case "turn_context":
 		// Stash the model on the file context so subsequent
@@ -545,23 +551,31 @@ func (w *Watcher) processCodexLine(sessionID, line string, seen map[string]struc
 			// OTel logs aren't present).
 			var tc struct {
 				Info struct {
-					LastTokenUsage struct {
+					TotalTokenUsage json.RawMessage `json:"total_token_usage"`
+					LastTokenUsage  struct {
 						InputTokens           int64 `json:"input_tokens"`
 						CachedInputTokens     int64 `json:"cached_input_tokens"`
+						CacheWriteInputTokens int64 `json:"cache_write_input_tokens"`
 						OutputTokens          int64 `json:"output_tokens"`
 						ReasoningOutputTokens int64 `json:"reasoning_output_tokens"`
 					} `json:"last_token_usage"`
 				} `json:"info"`
 			}
 			if json.Unmarshal(ev.Payload, &tc) == nil {
+				// Quota updates can repeat the previous response's usage at a new timestamp.
+				total := string(tc.Info.TotalTokenUsage)
+				if total != "" && total != "null" {
+					if total == fctx.lastTotalUsage {
+						break
+					}
+					fctx.lastTotalUsage = total
+				}
 				usage := tc.Info.LastTokenUsage
-				// Skip zero-usage events (handshake / no-op turns).
-				// Output OR reasoning > 0 is the marker that the
-				// API actually answered.
-				if usage.OutputTokens > 0 || usage.ReasoningOutputTokens > 0 {
+				// Input-only responses still consume tokens.
+				if usage.InputTokens > 0 || usage.OutputTokens > 0 || usage.ReasoningOutputTokens > 0 {
 					w.insertCodexUsageMessage(sid, ts, fctx.model,
 						usage.InputTokens, usage.OutputTokens,
-						usage.CachedInputTokens, usage.ReasoningOutputTokens, seen)
+						usage.CachedInputTokens, usage.CacheWriteInputTokens, usage.ReasoningOutputTokens, seen)
 				}
 			}
 		case "user_message":
@@ -589,6 +603,7 @@ type codexSessionMeta struct {
 	id       string
 	cwd      string
 	subagent string
+	parentID string
 }
 
 // parseCodexSessionMeta normalises the {id, cwd, source} shape Codex
@@ -604,7 +619,17 @@ func parseCodexSessionMeta(raw json.RawMessage) codexSessionMeta {
 	if err := json.Unmarshal(raw, &meta); err != nil {
 		return codexSessionMeta{}
 	}
+	var source struct {
+		Subagent struct {
+			ThreadSpawn struct {
+				ParentID string `json:"parent_thread_id"`
+			} `json:"thread_spawn"`
+		} `json:"subagent"`
+	}
+	// Legacy sources are strings, so only the structured form has a parent.
+	_ = json.Unmarshal(meta.Source, &source)
 	return codexSessionMeta{
+		parentID: source.Subagent.ThreadSpawn.ParentID,
 		id:       meta.ID,
 		cwd:      meta.CWD,
 		subagent: parseCodexSubagentSource(meta.Source),
@@ -639,6 +664,21 @@ func parseCodexSubagentSource(raw json.RawMessage) string {
 	var subagent string
 	if json.Unmarshal(source.Subagent, &subagent) == nil {
 		return strings.TrimSpace(subagent)
+	}
+	var spawn struct {
+		ThreadSpawn *struct {
+			AgentPath string `json:"agent_path"`
+			AgentRole string `json:"agent_role"`
+		} `json:"thread_spawn"`
+	}
+	if json.Unmarshal(source.Subagent, &spawn) == nil && spawn.ThreadSpawn != nil {
+		if spawn.ThreadSpawn.AgentRole != "" {
+			return spawn.ThreadSpawn.AgentRole
+		}
+		if spawn.ThreadSpawn.AgentPath != "" {
+			return spawn.ThreadSpawn.AgentPath
+		}
+		return "thread_spawn"
 	}
 	// {"subagent":{"other":"guardian"}} — Codex 0.131.0 auto-review.
 	var subagentObj map[string]string
@@ -799,17 +839,6 @@ func (w *Watcher) insertCodexModelMessage(sessionID string, ts time.Time, model 
 	seen[key] = struct{}{}
 
 	msTs := ts.UnixMilli()
-	for {
-		prev := lastInsertTS.Load()
-		next := msTs
-		if next <= prev {
-			next = prev + 1
-		}
-		if lastInsertTS.CompareAndSwap(prev, next) {
-			msTs = next
-			break
-		}
-	}
 
 	sql := fmt.Sprintf(
 		"INSERT INTO tma1_messages (ts, session_id, message_type, \"role\", content, model, tool_name, tool_use_id) "+
@@ -848,17 +877,6 @@ func (w *Watcher) insertCodexMessage(sessionID string, ts time.Time, role, conte
 	}
 
 	msTs := ts.UnixMilli()
-	for {
-		prev := lastInsertTS.Load()
-		next := msTs
-		if next <= prev {
-			next = prev + 1
-		}
-		if lastInsertTS.CompareAndSwap(prev, next) {
-			msTs = next
-			break
-		}
-	}
 
 	sql := fmt.Sprintf(
 		"INSERT INTO tma1_messages (ts, session_id, message_type, \"role\", content, model, tool_name, tool_use_id) "+
@@ -899,17 +917,6 @@ func (w *Watcher) insertCodexTypedMessage(sessionID string, ts time.Time, messag
 	}
 
 	msTs := ts.UnixMilli()
-	for {
-		prev := lastInsertTS.Load()
-		next := msTs
-		if next <= prev {
-			next = prev + 1
-		}
-		if lastInsertTS.CompareAndSwap(prev, next) {
-			msTs = next
-			break
-		}
-	}
 
 	sql := fmt.Sprintf(
 		"INSERT INTO tma1_messages (ts, session_id, message_type, \"role\", content, model, tool_name, tool_use_id) "+
@@ -945,8 +952,8 @@ func (w *Watcher) insertCodexTypedMessage(sessionID string, ts time.Time, messag
 //
 // NOT gated by codexLiveGate — tma1_messages is never written by
 // the live hook handler, so there's no double-write to suppress.
-func (w *Watcher) insertCodexUsageMessage(sessionID string, ts time.Time, model string, input, output, cachedInput, reasoning int64, seen map[string]struct{}) {
-	key := fmt.Sprintf("usage:%d:%d:%d:%d:%d", ts.UnixMilli(), input, output, cachedInput, reasoning)
+func (w *Watcher) insertCodexUsageMessage(sessionID string, ts time.Time, model string, input, output, cachedInput, cacheWrite, reasoning int64, seen map[string]struct{}) {
+	key := fmt.Sprintf("usage:%d:%d:%d:%d:%d:%d", ts.UnixMilli(), input, output, cachedInput, cacheWrite, reasoning)
 	if seen != nil {
 		if _, ok := seen[key]; ok {
 			return
@@ -955,28 +962,18 @@ func (w *Watcher) insertCodexUsageMessage(sessionID string, ts time.Time, model 
 	}
 
 	msTs := ts.UnixMilli()
-	for {
-		prev := lastInsertTS.Load()
-		next := msTs
-		if next <= prev {
-			next = prev + 1
-		}
-		if lastInsertTS.CompareAndSwap(prev, next) {
-			msTs = next
-			break
-		}
-	}
 
 	sql := fmt.Sprintf(
 		"INSERT INTO tma1_messages (ts, session_id, message_type, \"role\", content, model, tool_name, tool_use_id, "+
-			"input_tokens, output_tokens, cache_read_tokens, reasoning_tokens) "+
-			"VALUES (%d, '%s', 'usage', 'assistant', '', '%s', '', '', %d, %d, %d, %d)",
+			"input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, reasoning_tokens) "+
+			"VALUES (%d, '%s', 'usage', 'assistant', '', '%s', '', '', %d, %d, %d, %d, %d)",
 		msTs,
 		escapeSQLString(sessionID),
 		escapeSQLString(model),
 		input,
 		output,
 		cachedInput,
+		cacheWrite,
 		reasoning,
 	)
 	go func() {
@@ -1039,17 +1036,6 @@ func (w *Watcher) insertCodexSessionStart(sessionID string, ts time.Time, cwd, c
 		return
 	}
 	msTs := ts.UnixMilli()
-	for {
-		prev := lastInsertTS.Load()
-		next := msTs
-		if next <= prev {
-			next = prev + 1
-		}
-		if lastInsertTS.CompareAndSwap(prev, next) {
-			msTs = next
-			break
-		}
-	}
 
 	sql := fmt.Sprintf(
 		"INSERT INTO tma1_hook_events "+
@@ -1080,17 +1066,6 @@ func (w *Watcher) insertCodexSubagentEvent(sessionID string, ts time.Time, agent
 		return
 	}
 	msTs := ts.UnixMilli()
-	for {
-		prev := lastInsertTS.Load()
-		next := msTs
-		if next <= prev {
-			next = prev + 1
-		}
-		if lastInsertTS.CompareAndSwap(prev, next) {
-			msTs = next
-			break
-		}
-	}
 
 	// Write cwd from the subagent's own session_meta so orphan
 	// subagent rollouts (Codex 0.131.0 `code review`, no parent)
@@ -1121,17 +1096,6 @@ func (w *Watcher) insertCodexHookEvent(sessionID string, ts time.Time, eventType
 		return
 	}
 	msTs := ts.UnixMilli()
-	for {
-		prev := lastInsertTS.Load()
-		next := msTs
-		if next <= prev {
-			next = prev + 1
-		}
-		if lastInsertTS.CompareAndSwap(prev, next) {
-			msTs = next
-			break
-		}
-	}
 
 	agentID := ""
 	agentType := ""

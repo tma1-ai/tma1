@@ -93,13 +93,13 @@ export const en: T = {
     kicker: 'Features', title: 'Observability that does something with what it sees',
     desc: 'Closed-loop perception and cross-agent collaboration come first. The dashboards back them up. One Go binary, one local time-series store, no Grafana, no YAML.',
     cards: [
-      { num: '01', title: 'Closes the agent loop', desc: 'TMA1 watches for repeated failures, stale views, broken builds. When a rule fires, it writes a concrete fix path into the agent’s next prompt — not into a dashboard for someone to read tomorrow. <strong>Five hooks</strong> deliver it. <strong>Six rules</strong>, each with an actionable suggestion. <strong>HIGH</strong> severity can block <code>Stop</code> so a broken build doesn’t silently ship.' },
+      { num: '01', title: 'Closes the agent loop', desc: 'Four advisory rules detect repeated build/test failures, stale file views, external file changes, and large input-usage samples. Findings include observed evidence and a next step in the agent context. Current rules do not block Stop.' },
       { num: '02', title: 'Cross-agent peer sessions', desc: 'Claude Code reads what Codex left on the same file, <em>verbatim</em>. Codex reads what Claude did. The <code>/tma1-peer</code> skill pulls the peer’s last session on this project — messages, tools used, files touched. By default an agent doesn’t see its own sessions in the peer list, so no echo chambers; ask for <code>self</code> and it reads its own history back.' },
       { num: '03', title: 'Anomaly detection', desc: 'An agent stuck in a retry loop can burn hundreds of dollars. Each agent view has an Anomalies tab. Click any flagged request to jump straight into the session and see what went wrong.' },
       { num: '04', title: 'Sessions', desc: 'Your agent ran for 25 minutes across 4 turns. What happened? Open the session overlay: left side shows file activity, context breakdown, and API calls. Right side is the full event timeline. Or watch the live canvas while your agent works.' },
       { num: '05', title: 'Tool analytics', desc: 'When your agent feels slow, is it the model or the tool calls? p50 and p95 latency per tool, call counts, success rates, and trend lines.' },
       { num: '06', title: 'Cost breakdown', desc: 'Which model costs the most? Which conversation burned through your budget? Token counts and estimated cost per model, plus burn-rate over time and cache hit ratios.' },
-      { num: '07', title: 'Security monitoring', desc: 'Your agent can run shell commands, fetch URLs, and be fed injected prompts. TMA1 flags all of it. For OpenClaw it also tracks webhook errors and stuck sessions.' },
+      { num: '07', title: 'Security monitoring', desc: 'Your agent can run shell commands, fetch URLs, and be fed injected prompts. TMA1 flags all of it.' },
       { num: '08', title: 'Session search — for you and for the agent', desc: 'Type a keyword in the Sessions tab to find matching conversations, tool calls, and results across every session, then click through to that exact event. The agent queries the same data through <code>search_sessions</code> and reads any session back with <code>get_session_transcript</code>.' },
     ],
   },
@@ -108,10 +108,10 @@ export const en: T = {
     items: [
       {
         kind: 'repeated_failed_build',
-        severity: 'HIGH',
-        narrative: 'Wrapped with `tma1 build -- npm test`. Agent retried three times, same error each time.',
+        severity: 'MEDIUM',
+        narrative: 'Bash hooks record three failed `npm test` runs in the same directory without an intervening successful run.',
         // verbatim — do not translate (anomaly.go::repeated_failed_build, substituted with realistic values)
-        suggestion: 'Stop retrying `npm test` and address this error first: TypeError: Cannot read prop ‘user’ of undefined',
+        suggestion: 'Latest diagnostic: TypeError: Cannot read prop ‘user’ of undefined. Compare the latest diagnostic with the changes since the previous run before retrying. Repeated failures alone do not establish a loop or its cause.',
         footer: 'injected into next user_prompt_submit',
       },
       {
@@ -160,7 +160,7 @@ export const en: T = {
     desc: 'Paste the onboarding instruction into your agent and it handles the rest, or install manually:',
     steps: [
       { num: '[1]', title: 'Install', desc: 'One command. Downloads everything into <code>~/.tma1/</code>. No Docker, no system packages.' },
-      { num: '[2]', title: 'Configure your agent', desc: 'Point the OTel endpoint to <code>http://localhost:14318/v1/otlp</code>. Works with Claude Code, Codex, OpenClaw, or any OTel SDK. GitHub Copilot CLI needs no config — TMA1 auto-discovers its session logs.' },
+      { num: '[2]', title: 'Configure your agent', desc: 'Point the OTel endpoint to <code>http://localhost:14318/v1/otlp</code>. Works with Claude Code, Codex, or any OTel SDK. GitHub Copilot CLI needs no config — TMA1 auto-discovers its session logs.' },
       { num: '[3]', title: 'Watch the loop close', desc: 'Browse to <code>localhost:14318</code> for the dashboard. The agent begins receiving <code>&lt;tma1-context&gt;</code> blocks and acting on them. Optionally wrap dev / test commands with <code>tma1 build -- &lt;command&gt;</code> so build failures feed the loop too (flags: <code>--watch</code>, <code>--tag</code>, <code>--filter-regex</code>). The dashboard is for the human postmortem; the loop is for the agent. For raw SQL, GreptimeDB&rsquo;s own dashboard is at <code>localhost:14000/dashboard</code>.' },
     ],
   },
@@ -179,7 +179,7 @@ export const en: T = {
   faq: {
     kicker: 'FAQ', title: 'Common questions',
     items: [
-      { q: 'Which agents are supported?', a: 'Any agent that emits OpenTelemetry data, plus a few via JSONL auto-discovery. Claude Code sends metrics and logs. Codex sends logs and metrics, and session JSONL is auto-parsed for conversation replay. GitHub Copilot CLI is zero-config: its session JSONL at <code>~/.copilot/session-state/</code> is auto-discovered. OpenClaw sends traces and metrics, and session JSONL is auto-parsed for conversation replay. Any OTel SDK app with GenAI semantic conventions works out of the box. The dashboard auto-detects the data source and shows the right view.' },
+      { q: 'Which agents are supported?', a: 'Any agent that emits OpenTelemetry data, plus a few via JSONL auto-discovery. Claude Code sends metrics and logs. Codex sends logs and metrics, and session JSONL is auto-parsed for conversation replay. GitHub Copilot CLI is zero-config: its session JSONL at <code>~/.copilot/session-state/</code> is auto-discovered. Any OTel SDK app with GenAI semantic conventions works out of the box. The dashboard auto-detects the data source and shows the right view.' },
       { q: 'Can I query the data with SQL?', a: 'Yes. Run <code>mysql -h 127.0.0.1 -P 14002</code> to connect to the local SQL endpoint, or open <code><a href="http://localhost:14000/dashboard/">localhost:14000/dashboard/</a></code> for the built-in query UI. Your agent can query it too, through the <code>exec_query</code> MCP tool — one read-only SELECT per call. Traces are in <code>opentelemetry_traces</code>, logs in <code>opentelemetry_logs</code>, session data in <code>tma1_hook_events</code> and <code>tma1_messages</code>, and OTel metrics get auto-created tables.' },
       { q: 'How much disk space does it use?', a: 'It depends on traffic and conversation length. A typical setup uses a few hundred MB per month.' },
     ],
@@ -226,13 +226,13 @@ export const zh: T = {
     kicker: '功能', title: '会对观测结果采取行动的可观测性',
     desc: '闭环感知和跨 agent 协作是主轴，dashboard 提供事后复盘所需的证据。一个 Go 二进制，本地时序库，不需要 Grafana，不需要 YAML。',
     cards: [
-      { num: '01', title: '让 agent 形成闭环', desc: 'TMA1 持续关注重复失败、过期的文件视图和失败的 build。规则命中时，它把一条具体的修复路径写进 agent 的下一个 prompt，而不是写进一块等人明天来看的 dashboard。<strong>五个 hook</strong> 负责送达，<strong>六条规则</strong>各自给出可执行的建议。<strong>HIGH</strong> 级别可以 block <code>Stop</code>，避免失败的 build 静默交付。' },
+      { num: '01', title: '让 agent 形成闭环', desc: '四条提示规则检测重复的构建或测试失败、过期文件视图、外部文件变更和较大的输入用量样本。检测结果包含观测证据和下一步建议，写入 agent 上下文。当前规则不阻止 Stop。' },
       { num: '02', title: '跨 agent 的 peer session', desc: 'Claude Code <em>原样</em>读到 Codex 在同一个文件上留下的内容，反过来同样成立。<code>/tma1-peer</code> skill 取回 peer 在这个项目上最近一次 session：消息、用过的工具、动过的文件。默认不返回调用方自己的 session，避免 echo chamber；显式指定 <code>self</code> 就能读回自己的历史。' },
       { num: '03', title: '异常检测', desc: 'agent 卡在重试循环里可以烧掉几百美元。每个 agent 视图都有 Anomalies 标签页，点击任意一条异常可以直接跳到对应 session 定位问题。' },
       { num: '04', title: 'Sessions', desc: 'agent 跑了 25 分钟，中间发生了什么？打开 session overlay：左边是文件活动、上下文分布和 API 调用明细，右边是完整时间线。也可以打开 live canvas 实时观察 agent 工作。' },
       { num: '05', title: '工具分析', desc: 'agent 变慢了，是模型的问题还是工具调用的问题？每个工具的 p50、p95 延迟，调用次数、成功率和趋势线。' },
       { num: '06', title: '费用明细', desc: '哪个模型最贵？哪次对话消耗了大部分预算？按模型追踪 token 和费用，并提供 burn rate 趋势和缓存命中率。' },
-      { num: '07', title: '安全监控', desc: 'agent 可以执行 shell 命令、请求外部 URL，也可能被注入 prompt，TMA1 会全部标记。OpenClaw 的 webhook 错误和卡死的 session 同样在追踪范围内。' },
+      { num: '07', title: '安全监控', desc: 'agent 可以执行 shell 命令、请求外部 URL，也可能被注入 prompt，TMA1 会全部标记。' },
       { num: '08', title: '会话检索——人和 agent 用同一份数据', desc: '在 Sessions 搜索框输入关键词，检索全部 session 的对话和工具调用，点击结果直接跳到对应事件。agent 通过 <code>search_sessions</code> 查询同一份数据，再用 <code>get_session_transcript</code> 把某次会话完整读回来。' },
     ],
   },
@@ -241,10 +241,10 @@ export const zh: T = {
     items: [
       {
         kind: 'repeated_failed_build',
-        severity: 'HIGH',
-        narrative: '用 `tma1 build -- npm test` 包装。agent 跑了三次，每次都是同一个错误。',
+        severity: 'MEDIUM',
+        narrative: 'Bash hook 记录了同一目录中三次失败的 `npm test`，期间没有成功运行。',
         // verbatim — do not translate
-        suggestion: 'Stop retrying `npm test` and address this error first: TypeError: Cannot read prop ‘user’ of undefined',
+        suggestion: 'Latest diagnostic: TypeError: Cannot read prop ‘user’ of undefined. Compare the latest diagnostic with the changes since the previous run before retrying. Repeated failures alone do not establish a loop or its cause.',
         footer: 'injected into next user_prompt_submit',
       },
       {
@@ -292,7 +292,7 @@ export const zh: T = {
     desc: '把接入指令粘贴给 agent，它会自动完成配置；也可以手动安装：',
     steps: [
       { num: '[1]', title: '安装', desc: '一条命令，所有文件安装到 <code>~/.tma1/</code>。不需要 Docker，也不需要额外的系统包。' },
-      { num: '[2]', title: '配置你的 agent', desc: '将 OTel endpoint 指向 <code>http://localhost:14318/v1/otlp</code>。支持 Claude Code、Codex、OpenClaw 或任何 OTel SDK。GitHub Copilot CLI 零配置，TMA1 会自动发现它的 session 日志。' },
+      { num: '[2]', title: '配置你的 agent', desc: '将 OTel endpoint 指向 <code>http://localhost:14318/v1/otlp</code>。支持 Claude Code、Codex 或任何 OTel SDK。GitHub Copilot CLI 零配置，TMA1 会自动发现它的 session 日志。' },
       { num: '[3]', title: '看到闭环发生', desc: '浏览器打开 <code>localhost:14318</code> 查看 dashboard。agent 会开始读到 <code>&lt;tma1-context&gt;</code> 块并据此行动。可选：用 <code>tma1 build -- &lt;command&gt;</code> 包装 dev / test 命令，让 build 失败也进入闭环（支持 <code>--watch</code> / <code>--tag</code> / <code>--filter-regex</code>）。Dashboard 用于人工事后复盘，闭环面向 agent。需要直接写 SQL 时，GreptimeDB 自带的 dashboard 在 <code>localhost:14000/dashboard</code>。' },
     ],
   },
@@ -311,7 +311,7 @@ export const zh: T = {
   faq: {
     kicker: 'FAQ', title: '常见问题',
     items: [
-      { q: '支持哪些 agent？', a: '任何发送 OpenTelemetry 数据的 agent，以及通过 JSONL 自动发现的几个 agent。Claude Code 发送 metrics 和 logs；Codex 发送 logs 和 metrics，会话 JSONL 自动解析用于对话回放。GitHub Copilot CLI 零配置：TMA1 自动发现并解析 <code>~/.copilot/session-state/</code> 下的 session JSONL。OpenClaw 发送 traces 和 metrics，会话 JSONL 也会自动解析。任何遵循 GenAI 语义规范的 OTel SDK 应用开箱即用。Dashboard 根据数据自动切换到对应视图。' },
+      { q: '支持哪些 agent？', a: '任何发送 OpenTelemetry 数据的 agent，以及通过 JSONL 自动发现的几个 agent。Claude Code 发送 metrics 和 logs；Codex 发送 logs 和 metrics，会话 JSONL 自动解析用于对话回放。GitHub Copilot CLI 零配置：TMA1 自动发现并解析 <code>~/.copilot/session-state/</code> 下的 session JSONL。任何遵循 GenAI 语义规范的 OTel SDK 应用开箱即用。Dashboard 根据数据自动切换到对应视图。' },
       { q: '能直接用 SQL 查吗？', a: '能。运行 <code>mysql -h 127.0.0.1 -P 14002</code> 连接本地 SQL 端口，或打开 <code><a href="http://localhost:14000/dashboard/">localhost:14000/dashboard/</a></code> 使用内置查询界面。agent 也可以查询：通过 <code>exec_query</code> MCP 工具，每次执行一条只读 SELECT。Traces 在 <code>opentelemetry_traces</code>，logs 在 <code>opentelemetry_logs</code>，session 数据在 <code>tma1_hook_events</code> 和 <code>tma1_messages</code>，OTel metrics 自动建表。' },
       { q: '大约占用多少磁盘？', a: '取决于 agent 流量和对话长度。常见场景下，每月大约几百 MB。' },
     ],
@@ -358,13 +358,13 @@ export const es: T = {
     kicker: 'Funcionalidades', title: 'Observabilidad que hace algo con lo que ve',
     desc: 'Percepción en loop cerrado y colaboración entre agentes primero. Los dashboards quedan como respaldo. Un binario Go, un store de series temporales local, sin Grafana, sin YAML.',
     cards: [
-      { num: '01', title: 'Cierra el loop del agente', desc: 'TMA1 vigila fallos repetidos, vistas obsoletas y builds rotos. Cuando una regla se dispara, escribe un camino concreto de solución en el siguiente prompt del agente — no en un dashboard para que alguien lo lea mañana. <strong>Cinco hooks</strong> lo entregan. <strong>Seis reglas</strong>, cada una con una sugerencia accionable. Severidad <strong>HIGH</strong> puede bloquear <code>Stop</code> para que un build roto no se publique en silencio.' },
+      { num: '01', title: 'Cierra el loop del agente', desc: 'Cuatro reglas consultivas detectan fallos repetidos de compilación o pruebas, vistas de archivos obsoletas, cambios externos y muestras grandes de uso de entrada. Incluyen evidencia y una acción en el contexto del agente. Las reglas actuales no bloquean Stop.' },
       { num: '02', title: 'Sesiones de agentes pares', desc: 'Claude Code lee <em>palabra por palabra</em> lo que Codex dejó en el mismo archivo. Codex lee lo que Claude hizo. La skill <code>/tma1-peer</code> trae la última sesión del par en este proyecto: mensajes, herramientas usadas, archivos tocados. Por defecto un agente no ve sus propias sesiones en la lista de pares — sin cámaras de eco; pide <code>self</code> y recupera su propio historial.' },
       { num: '03', title: 'Detección de anomalías', desc: 'Un agente en un loop de reintentos puede quemar cientos de dólares. Cada vista de agente tiene una pestaña Anomalies. Haz clic en cualquiera para saltar a esa sesión y ver qué salió mal.' },
       { num: '04', title: 'Sessions', desc: 'Tu agente corrió 25 minutos. ¿Qué pasó? Abre el overlay de sesión: a la izquierda la actividad de archivos, contexto y API calls. A la derecha, el timeline completo. También puedes ver el canvas en vivo mientras tu agente trabaja.' },
       { num: '05', title: 'Análisis de herramientas', desc: 'Cuando tu agente se siente lento, ¿es el modelo o las herramientas? p50 y p95 de latencia por herramienta, conteos de llamadas, tasas de éxito y líneas de tendencia.' },
       { num: '06', title: 'Desglose de costos', desc: '¿Qué modelo cuesta más? ¿Qué conversación quemó tu presupuesto? Tokens y costo estimado por modelo, más burn rate y ratios de cache hit.' },
-      { num: '07', title: 'Monitoreo de seguridad', desc: 'Tu agente puede ejecutar comandos shell, hacer fetches a URLs externas y recibir prompts inyectados. TMA1 marca todo. Para OpenClaw también rastrea errores de webhook y sesiones atascadas.' },
+      { num: '07', title: 'Monitoreo de seguridad', desc: 'Tu agente puede ejecutar comandos shell, hacer fetches a URLs externas y recibir prompts inyectados. TMA1 marca todo.' },
       { num: '08', title: 'Búsqueda de sesiones — para ti y para el agente', desc: 'Escribe una palabra clave en la pestaña Sessions para encontrar conversaciones, llamadas a herramientas y resultados en todas las sesiones, y haz clic para abrir la sesión en ese evento exacto. El agente consulta los mismos datos con <code>search_sessions</code> y recupera cualquier sesión con <code>get_session_transcript</code>.' },
     ],
   },
@@ -373,10 +373,10 @@ export const es: T = {
     items: [
       {
         kind: 'repeated_failed_build',
-        severity: 'HIGH',
-        narrative: 'Envuelto con `tma1 build -- npm test`. El agente lo corrió tres veces, el mismo error cada vez.',
+        severity: 'MEDIUM',
+        narrative: 'Los hooks de Bash registran tres fallos de `npm test` en el mismo directorio sin una ejecución exitosa intermedia.',
         // verbatim — do not translate
-        suggestion: 'Stop retrying `npm test` and address this error first: TypeError: Cannot read prop ‘user’ of undefined',
+        suggestion: 'Latest diagnostic: TypeError: Cannot read prop ‘user’ of undefined. Compare the latest diagnostic with the changes since the previous run before retrying. Repeated failures alone do not establish a loop or its cause.',
         footer: 'injected into next user_prompt_submit',
       },
       {
@@ -425,7 +425,7 @@ export const es: T = {
     desc: 'Pega la instrucción de onboarding en tu agente y se encarga del resto, o instálalo manualmente:',
     steps: [
       { num: '[1]', title: 'Instalar', desc: 'Un comando. Todo se descarga en <code>~/.tma1/</code>. Sin Docker, sin paquetes del sistema.' },
-      { num: '[2]', title: 'Configurar tu agente', desc: 'Apunta el endpoint OTel a <code>http://localhost:14318/v1/otlp</code>. Funciona con Claude Code, Codex, OpenClaw o cualquier SDK OTel. GitHub Copilot CLI no necesita configuración — TMA1 detecta sus logs de sesión automáticamente.' },
+      { num: '[2]', title: 'Configurar tu agente', desc: 'Apunta el endpoint OTel a <code>http://localhost:14318/v1/otlp</code>. Funciona con Claude Code, Codex o cualquier SDK OTel. GitHub Copilot CLI no necesita configuración — TMA1 detecta sus logs de sesión automáticamente.' },
       { num: '[3]', title: 'Observa el loop cerrarse', desc: 'Abre <code>localhost:14318</code> para el dashboard. El agente empieza a recibir bloques <code>&lt;tma1-context&gt;</code> y a actuar sobre ellos. Opcional: envuelve tus comandos dev / test con <code>tma1 build -- &lt;command&gt;</code> para que los fallos de build también entren al loop (flags: <code>--watch</code>, <code>--tag</code>, <code>--filter-regex</code>). El dashboard es para el postmortem humano; el loop es para el agente. Para SQL directo, el dashboard propio de GreptimeDB está en <code>localhost:14000/dashboard</code>.' },
     ],
   },
@@ -444,7 +444,7 @@ export const es: T = {
   faq: {
     kicker: 'FAQ', title: 'Preguntas frecuentes',
     items: [
-      { q: '¿Qué agentes son compatibles?', a: 'Cualquier agente que emita datos OpenTelemetry, más algunos vía auto-descubrimiento de JSONL. Claude Code envía métricas y logs. Codex envía logs y métricas, y los archivos JSONL de sesión se analizan automáticamente para la reproducción de conversaciones. GitHub Copilot CLI no requiere configuración: sus logs de sesión en <code>~/.copilot/session-state/</code> se detectan automáticamente. OpenClaw envía traces y métricas, y los archivos JSONL de sesión se analizan automáticamente. Cualquier SDK OTel con convenciones semánticas GenAI funciona sin configuración adicional. El dashboard detecta automáticamente la fuente de datos y muestra la vista correspondiente.' },
+      { q: '¿Qué agentes son compatibles?', a: 'Cualquier agente que emita datos OpenTelemetry, más algunos vía auto-descubrimiento de JSONL. Claude Code envía métricas y logs. Codex envía logs y métricas, y los archivos JSONL de sesión se analizan automáticamente para la reproducción de conversaciones. GitHub Copilot CLI no requiere configuración: sus logs de sesión en <code>~/.copilot/session-state/</code> se detectan automáticamente. Cualquier SDK OTel con convenciones semánticas GenAI funciona sin configuración adicional. El dashboard detecta automáticamente la fuente de datos y muestra la vista correspondiente.' },
       { q: '¿Se pueden consultar los datos con SQL?', a: 'Sí. Ejecuta <code>mysql -h 127.0.0.1 -P 14002</code> para conectarte al endpoint SQL local, o abre <code><a href="http://localhost:14000/dashboard/">localhost:14000/dashboard/</a></code> para la interfaz de consultas. Tu agente también puede consultarlos con la herramienta MCP <code>exec_query</code>: un SELECT de solo lectura por llamada. Traces en <code>opentelemetry_traces</code>, logs en <code>opentelemetry_logs</code>, datos de sesión en <code>tma1_hook_events</code> y <code>tma1_messages</code>, y las métricas OTel crean tablas automáticamente.' },
       { q: '¿Cuánto disco ocupa?', a: 'Depende de la actividad del agente y del largo de las conversaciones. En un uso típico, unos cientos de MB por mes.' },
     ],

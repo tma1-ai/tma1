@@ -17,7 +17,6 @@ func TestNormalizePeerAgent(t *testing.T) {
 		{"*", ""},
 		{"codex", "codex"},
 		{"CODEX", "codex"},
-		{"openclaw", "openclaw"},
 		{"copilot", "copilot_cli"},     // alias
 		{"Copilot", "copilot_cli"},     // case-insensitive alias
 		{"copilot-cli", "copilot_cli"}, // hyphen alias
@@ -143,13 +142,13 @@ func TestIsWindowsAbsPath(t *testing.T) {
 	}
 }
 
-func TestValidPeerAgentsCoversAllFourAdapters(t *testing.T) {
+func TestValidPeerAgentsCoversAllAdapters(t *testing.T) {
 	// Each agent that can write to tma1_hook_events / tma1_messages
 	// must be a queryable peer from every other agent's MCP tool.
 	// Codex calling with agent_source="claude_code" was rejected by
 	// an earlier draft that hard-coded CC as the caller; this test
 	// guards against that regression.
-	for _, want := range []string{"claude_code", "codex", "openclaw", "copilot_cli"} {
+	for _, want := range []string{"claude_code", "codex", "copilot_cli"} {
 		if !validPeerAgents[want] {
 			t.Errorf("expected %q to be a valid peer agent", want)
 		}
@@ -256,12 +255,12 @@ func TestPeerAgentListExcludesCaller(t *testing.T) {
 		caller string
 		want   []string
 	}{
-		{"claude_code", []string{"codex", "copilot_cli", "openclaw"}},
-		{"codex", []string{"claude_code", "copilot_cli", "openclaw"}},
-		{"openclaw", []string{"claude_code", "codex", "copilot_cli"}},
-		{"copilot_cli", []string{"claude_code", "codex", "openclaw"}},
-		{"", []string{"claude_code", "codex", "copilot_cli", "openclaw"}},
-		{"unknown_agent", []string{"claude_code", "codex", "copilot_cli", "openclaw"}},
+		{"claude_code", []string{"codex", "copilot_cli", "opencode"}},
+		{"codex", []string{"claude_code", "copilot_cli", "opencode"}},
+		{"copilot_cli", []string{"claude_code", "codex", "opencode"}},
+		{"opencode", []string{"claude_code", "codex", "copilot_cli"}},
+		{"", []string{"claude_code", "codex", "copilot_cli", "opencode"}},
+		{"unknown_agent", []string{"claude_code", "codex", "copilot_cli", "opencode"}},
 	}
 	for _, c := range cases {
 		b := &Bundler{Caller: c.caller}

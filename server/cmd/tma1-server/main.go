@@ -426,28 +426,26 @@ func main() {
 		logger.Warn("schema migrations failed; subsequent inserts may fail on missing columns", "err", err)
 	}
 
-	// Step 3.5: check for tma1-server upgrade.
+	// Step 3.5: refresh the derived pricing catalog independently of dev builds.
 	// No version file (old == "") covers both fresh install and old-version upgrade;
 	// we cannot distinguish the two, so we always attempt truncate+reseed.
 	// On fresh install the table doesn't exist yet — TruncatePricing returns a
 	// benign "table not found" error, which we ignore (SeedPricing creates it).
-	versionFile := filepath.Join(cfg.DataDir, ".tma1-version")
+	versionFile := filepath.Join(cfg.DataDir, ".pricing-version")
 	upgraded := false
 	var upgradeErr error
-	if Version != "dev" {
-		old := readVersionFile(versionFile)
-		if old != Version {
-			upgraded = true
-			if old != "" {
-				logger.Info("tma1 upgrade detected", "from", old, "to", Version)
-			}
-			if err := onUpgrade(cfg.GreptimeDBHTTPPort, logger); err != nil {
-				if greptimedb.IsTableNotFound(err) {
-					logger.Info("pricing table does not exist yet (fresh install), skipping truncate")
-				} else {
-					upgradeErr = err
-					logger.Warn("truncate pricing on upgrade failed, will retry next start", "err", err)
-				}
+	old := readVersionFile(versionFile)
+	if old != greptimedb.PricingVersion {
+		upgraded = true
+		if old != "" {
+			logger.Info("pricing catalog update", "from", old, "to", greptimedb.PricingVersion)
+		}
+		if err := onUpgrade(cfg.GreptimeDBHTTPPort, logger); err != nil {
+			if greptimedb.IsTableNotFound(err) {
+				logger.Info("pricing table does not exist yet (fresh install), skipping truncate")
+			} else {
+				upgradeErr = err
+				logger.Warn("truncate pricing on upgrade failed, will retry next start", "err", err)
 			}
 		}
 	}
@@ -459,14 +457,14 @@ func main() {
 	}
 
 	// Step 4.5: post-upgrade — write version file + best-effort cost flow recreate.
-	// Version file gates on truncate+seed only; cost flow creation is best-effort
+	// Catalog version gates on truncate+seed only; cost flow creation is best-effort
 	// because it requires opentelemetry_traces which may not exist yet.
 	// initFlowsWithRetry (Step 5) handles deferred cost flow creation.
 	if upgraded && upgradeErr == nil && seedErr == nil {
 		if err := greptimedb.InitCostFlow(cfg.GreptimeDBHTTPPort, logger); err != nil {
 			logger.Warn("cost flow creation deferred to background retry", "err", err)
 		}
-		if err := os.WriteFile(versionFile, []byte(Version), 0o644); err != nil {
+		if err := os.WriteFile(versionFile, []byte(greptimedb.PricingVersion), 0o644); err != nil {
 			logger.Warn("failed to write version file", "err", err)
 		}
 	}
@@ -505,11 +503,6 @@ func main() {
 	codexCtx, codexCancel := context.WithCancel(context.Background())
 	defer codexCancel()
 	go tw.StartCodexScanner(codexCtx)
-
-	// Start OpenClaw session scanner (discovers ~/.openclaw/agents/*/sessions/ JSONL files).
-	openclawCtx, openclawCancel := context.WithCancel(context.Background())
-	defer openclawCancel()
-	go tw.StartOpenClawScanner(openclawCtx)
 
 	// Start Copilot CLI session scanner (discovers ~/.copilot/session-state/*/events.jsonl).
 	copilotCLICtx, copilotCLICancel := context.WithCancel(context.Background())
@@ -555,7 +548,6 @@ func main() {
 		flowCancel()
 		bgCancel()
 		codexCancel()
-		openclawCancel()
 		copilotCLICancel()
 		tw.StopAll()
 

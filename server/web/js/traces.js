@@ -100,11 +100,11 @@ async function loadMetrics() {
     // [0] Cost — needs model + token columns
     if (hasModel && hasInputTok && hasOutputTok) {
       queries.push(query(
-        "SELECT ROUND(SUM(" + costCaseSQL(
+        "SELECT ROUND(" + sumKnownCostSQL(costCaseSQL(
           '"span_attributes.gen_ai.request.model"',
           '"span_attributes.gen_ai.usage.input_tokens"',
           '"span_attributes.gen_ai.usage.output_tokens"'
-        ) + "), 4) AS total " +
+        )) + ", 4) AS total " +
         "FROM opentelemetry_traces " +
         "WHERE " + genaiWhere + " " +
         "AND timestamp > NOW() - INTERVAL '" + iv + "'"
@@ -517,10 +517,6 @@ async function loadTraceDetailData(traceId) {
 // Infer span type from span data for badge display
 function inferSpanType(s) {
   var n = s.span_name || '';
-  if (n === 'openclaw.model.usage') return 'llm';
-  if (n.indexOf('openclaw.message.') === 0) return 'msg';
-  if (n.indexOf('openclaw.webhook.') === 0) return 'webhook';
-  if (n === 'openclaw.session.stuck') return 'session';
   if (n.indexOf('sessions_spawn') >= 0) return 'spawn';
   if (n.indexOf('subagent') >= 0) return 'subagent';
   if (n.indexOf('tool_result') >= 0 || n.indexOf('tool_call') >= 0 ||
