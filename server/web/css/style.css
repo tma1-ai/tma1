@@ -1351,6 +1351,7 @@ tr.active-trace td { background: var(--bg-hover); }
 .comparison-table { width: 100%; table-layout: fixed; }
 .comparison-table td { font-size: 20px; font-variant-numeric: tabular-nums; }
 .comparison-table th { white-space: normal; }
+.compare-source { text-transform: none; letter-spacing: normal; font-size: 13px; }
 .compare-project { font-size: 11px; overflow-wrap: anywhere; margin-top: 8px; color: var(--text-muted); }
 .comparison-note { margin-top: 20px; font-size: 12px; line-height: 1.7; color: var(--text-muted); }
 .compare-select { width: 16px; height: 16px; accent-color: var(--blue); cursor: pointer; }

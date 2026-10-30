@@ -92,8 +92,8 @@ async function comparisonOpen() {
       "</th>";
     columns.forEach(function (c) {
       html +=
-        '<th><span class="eyebrow">' +
-        escapeHTML(c.source) +
+        '<th><span class="compare-source">' +
+        escapeHTML(AGENT_LABELS[c.source] || c.source) +
         "</span><br><code>" +
         escapeHTML(c.id.slice(0, 8)) +
         '</code><div class="compare-project">' +

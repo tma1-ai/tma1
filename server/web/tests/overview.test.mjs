@@ -36,3 +36,16 @@ test('activity keeps empty hourly buckets between observations', () => {
   assert.equal(positions.length, 2);
   assert.ok(positions[1] > 600, 'the empty middle hour must occupy horizontal space');
 });
+
+test('dense activity keeps edge labels inside the chart', () => {
+  ctx.currentTimeRange = '24h';
+  ctx.tsToMs = Number;
+  ctx.escapeHTML = String;
+  const html = ctx.overviewActivity(Array.from({ length: 24 }, (_, i) => ({
+    hour: i * 3600000, agent_source: 'codex', events: 1,
+  })));
+  const labels = [...html.matchAll(/<text x="([^"]+)" y="[^"]+" text-anchor="([^"]+)"/g)];
+  assert.deepEqual(labels.map(label => label[2]), ['start', 'middle', 'end']);
+  assert.equal(Number(labels[0][1]), 0);
+  assert.equal(Number(labels[2][1]), 920);
+});
