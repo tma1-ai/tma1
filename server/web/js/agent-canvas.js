@@ -778,14 +778,23 @@ var AgentCanvas = (function () {
     // For global live (no sessionId), we'll start polling once we see a session from SSE.
     if (!sessionId) return;
     var sid = escapeSQLString(sessionId);
-    // Codex counts cache reads and writes inside input_tokens.
-    var inputIncludesCache = query("SELECT agent_source FROM tma1_hook_events WHERE session_id = '" + sid + "' " +
-      "AND agent_source IS NOT NULL LIMIT 1").then(function (res) {
-      return (rows(res)?.[0]?.[0]) === 'codex';
-    });
+    // Codex counts cache reads and writes inside input_tokens. The hook row
+    // can land after the first live event, so keep looking until it does.
+    var includesCache = null;
+    function detectSource() {
+      if (includesCache != null) return null;
+      return query("SELECT agent_source FROM tma1_hook_events WHERE session_id = '" + sid + "' " +
+        "AND agent_source IS NOT NULL LIMIT 1").then(function (res) {
+        var source = rows(res)?.[0]?.[0];
+        if (source) includesCache = source === 'codex';
+      });
+    }
     function updateCost() {
-      Promise.all([loadPricing(), inputIncludesCache]).then(function (r) {
-        var includesCache = r[1];
+      Promise.all([loadPricing(), detectSource()]).then(function () {
+        if (includesCache == null) {
+          costTotal = null;
+          return;
+        }
         var promptTokens = includesCache ? "input_tokens" :
           "input_tokens + COALESCE(cache_read_tokens, 0) + COALESCE(cache_creation_tokens, 0)";
         // Cost is linear in each counter; only the prompt-size limit needs the

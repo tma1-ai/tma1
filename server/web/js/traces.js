@@ -227,11 +227,11 @@ async function loadCostChart() {
   try {
     var res = await query(
       "SELECT date_bin('" + chartBucket() + "'::INTERVAL, timestamp) AS t, " +
-      "SUM(" + costCaseSQL(
+      sumKnownCostSQL(costCaseSQL(
         '"span_attributes.gen_ai.request.model"',
         '"span_attributes.gen_ai.usage.input_tokens"',
         '"span_attributes.gen_ai.usage.output_tokens"'
-      ) + ") AS cost " +
+      )) + " AS cost " +
       "FROM opentelemetry_traces " +
       "WHERE " + genaiWhere + " " +
       "  AND timestamp > NOW() - INTERVAL '" + intervalSQL() + "' " +
@@ -888,8 +888,8 @@ async function loadCostByModel() {
       '"span_attributes.gen_ai.usage.output_tokens"'
     );
     var res = await query(
-      "SELECT \"span_attributes.gen_ai.request.model\" AS model, ROUND(SUM(" + costExpr +
-      "), 4) AS total_cost " +
+      "SELECT \"span_attributes.gen_ai.request.model\" AS model, ROUND(" + sumKnownCostSQL(costExpr) +
+      ", 4) AS total_cost " +
       "FROM opentelemetry_traces " +
       "WHERE " + genaiWhere + " " +
       "  AND timestamp > NOW() - INTERVAL '" + intervalSQL() + "' " +
@@ -990,7 +990,7 @@ async function loadModelComparison() {
       "COUNT(1) AS reqs, " +
       "SUM(CASE WHEN span_status_code = 'STATUS_CODE_ERROR' THEN 1 ELSE 0 END) AS errs, " +
       "ROUND(AVG(duration_nano) / 1000000.0, 0) AS avg_latency_ms, " +
-      "SUM(" + costExpr + ") AS total_cost " +
+      sumKnownCostSQL(costExpr) + " AS total_cost " +
       "FROM opentelemetry_traces " +
       "WHERE " + genaiWhere + " " +
       "  AND timestamp > NOW() - INTERVAL '" + intervalSQL() + "' " +
@@ -1006,7 +1006,7 @@ async function loadModelComparison() {
       var reqs = Number(d.reqs) || 0;
       var errs = Number(d.errs) || 0;
       var errRate = reqs > 0 ? ((errs / reqs) * 100).toFixed(1) + '%' : '0%';
-      var avgCost = reqs > 0 ? fmtCost(Number(d.total_cost) / reqs) : '\u2014';
+      var avgCost = reqs > 0 && d.total_cost != null ? fmtCost(Number(d.total_cost) / reqs) : '\u2014';
       return '<tr>' +
         '<td>' + escapeHTML(d.model) + '</td>' +
         '<td>' + fmtNum(reqs) + '</td>' +
@@ -1167,7 +1167,7 @@ async function loadPerQuestionCost() {
       "COUNT(*) AS llm_calls, " +
       "SUM(CAST(\"span_attributes.gen_ai.usage.input_tokens\" AS DOUBLE)) AS input_tokens, " +
       "SUM(CAST(\"span_attributes.gen_ai.usage.output_tokens\" AS DOUBLE)) AS output_tokens, " +
-      "ROUND(SUM(" + costExpr + "), 4) AS est_cost_usd, " +
+      "ROUND(" + sumKnownCostSQL(costExpr) + ", 4) AS est_cost_usd, " +
       "MIN(timestamp) AS started " +
       "FROM opentelemetry_traces " +
       "WHERE " + genaiWhere + " " +

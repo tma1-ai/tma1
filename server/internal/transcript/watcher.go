@@ -382,6 +382,10 @@ func (w *Watcher) processLine(sessionID, line string, seen map[string]struct{}, 
 				currentLong := max(current.CacheCreation.LongTokens, previousLong)
 				current.CacheCreation = &cacheCreationSplit{LongTokens: currentLong}
 				delta.CacheCreation = &cacheCreationSplit{LongTokens: currentLong - previousLong}
+			} else {
+				// Keep the last reported split so a later entry does not
+				// count it again; this entry's own split stays unknown.
+				current.CacheCreation = previous.CacheCreation
 			}
 			usageByResponse[id] = current
 			usage = &delta

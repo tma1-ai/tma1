@@ -199,3 +199,27 @@ func TestCodexUsageRecordsServiceTier(t *testing.T) {
 		t.Fatalf("a null tier setting means requests use the default tier: %s", sql)
 	}
 }
+
+func TestClaudeCacheSplitSurvivesEntryWithoutSplit(t *testing.T) {
+	ch := make(chan string, 8)
+	srv := httptest.NewServer(httpTestHandler(ch))
+	defer srv.Close()
+	w := &Watcher{sqlURL: srv.URL, logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	seen := map[string]struct{}{sessionStartKey: {}}
+	usage := map[string]msgUsage{}
+	entry := func(output int, split string) string {
+		return `{"timestamp":"2026-10-28T10:00:00Z","type":"assistant","message":{"id":"response-1","role":"assistant","content":[],"usage":{"input_tokens":10,"output_tokens":` +
+			strconv.Itoa(output) + `,"cache_creation_input_tokens":200` + split + `,"service_tier":"standard"}}}`
+	}
+	withSplit := `,"cache_creation":{"ephemeral_1h_input_tokens":200}`
+	w.processLine("session", entry(1, withSplit), seen, usage)
+	waitForSQL(t, ch)
+	w.processLine("session", entry(2, ""), seen, usage)
+	if sql := waitForSQL(t, ch); !strings.HasSuffix(sql, ", 0, 1, 0, 0, NULL, 'standard')") {
+		t.Fatalf("entry without a split must leave its split unknown: %s", sql)
+	}
+	w.processLine("session", entry(3, withSplit), seen, usage)
+	if sql := waitForSQL(t, ch); !strings.HasSuffix(sql, ", 0, 1, 0, 0, 0, 'standard')") {
+		t.Fatalf("1-hour writes counted twice: %s", sql)
+	}
+}
