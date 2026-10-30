@@ -37,13 +37,15 @@ async function pr_sourceSessionIDs() {
   return ids;
 }
 
-// prCachedSourceIDs is populated in pr_loadCards() before source-filtered queries run.
-var prCachedSourceIDs = null; // null = "All", '' = no match, 'id,...' = filter list
+function pr_selectionKey() {
+  var el = document.getElementById('pr-source-filter');
+  return currentTimeRange + ':' + (el ? el.value : '');
+}
 
-function pr_sourceSQL() {
-  if (prCachedSourceIDs === null) return ''; // "All"
-  if (prCachedSourceIDs === '') return ' AND 1=0'; // no matching sessions
-  return ' AND session_id IN (' + prCachedSourceIDs + ')';
+function pr_sourceSQL(ids) {
+  if (ids === null) return '';
+  if (ids === '') return ' AND 1=0';
+  return ' AND session_id IN (' + ids + ')';
 }
 
 function pr_reload() {
@@ -52,7 +54,10 @@ function pr_reload() {
   prPage = 0;
   prExpandedIdx = -1;
   prSourceCache = { range: null, source: null, ids: null }; // invalidate source cache on reload
+  var insights = document.getElementById('pr-ai-insights');
+  if (insights) insights.innerHTML = '<div class="chart-empty">' + t('pr.ai_click_to_generate') + '</div>';
   pr_loadCards().then(function(ok) {
+    if (ok === null) return;
     if (!ok) {
       // Clear KPI cards and content areas when no data matches the filter.
       ['pr-val-prompts', 'pr-val-turns', 'pr-val-cost'].forEach(function(id) {
@@ -89,19 +94,21 @@ var PR_VERBS = ['fix', 'add', 'implement', 'refactor', 'debug', 'explain', 'upda
 // ============================================================
 
 var prTotalPrompts = 0; // full count from DB (may exceed analyzed)
-var prDataCache = null; // { range: string, data: requests[] }
+var prDataCache = null; // { key: string, data: requests[] }
 var prDataGeneration = 0; // incremented on each pr_loadData(), used as AI insights cache key
 
 async function pr_loadCards() {
   prDataCache = null; // invalidate on every cards reload (refresh / time range change)
   prPromptData = [];  // force pr_loadData() re-fetch (don't let AI Insights use stale data)
+  var key = pr_selectionKey();
   var iv = intervalSQL();
   try {
-    prCachedSourceIDs = await pr_sourceSessionIDs();
+    var sourceIDs = await pr_sourceSessionIDs();
     var res = await query(
       "SELECT COUNT(*) AS total_prompts, COUNT(DISTINCT session_id) AS sessions " +
-      "FROM tma1_messages WHERE message_type = 'user' AND ts > NOW() - INTERVAL '" + iv + "'" + pr_sourceSQL()
+      "FROM tma1_messages WHERE message_type = 'user' AND ts > NOW() - INTERVAL '" + iv + "'" + pr_sourceSQL(sourceIDs)
     );
+    if (key !== pr_selectionKey()) return null;
     var r = rows(res);
     if (!r || !r[0]) return false;
     prTotalPrompts = Number(r[0][0]) || 0;
@@ -114,24 +121,25 @@ async function pr_loadCards() {
 
     return true;
   } catch (e) {
-    return false;
+    return key === pr_selectionKey() ? false : null;
   }
 }
 
 async function pr_loadData() {
-  // Return cached data if time range hasn't changed.
-  if (prDataCache && prDataCache.range === currentTimeRange) {
+  var key = pr_selectionKey();
+  if (prDataCache && prDataCache.key === key) {
     return prDataCache.data;
   }
 
   var iv = intervalSQL();
 
-  // Q1: User prompts
+  var sourceIDs = await pr_sourceSessionIDs();
   var promptRes = await query(
     "SELECT session_id, ts, content, model FROM tma1_messages " +
-    "WHERE message_type = 'user' AND ts > NOW() - INTERVAL '" + iv + "'" + pr_sourceSQL() +
+    "WHERE message_type = 'user' AND ts > NOW() - INTERVAL '" + iv + "'" + pr_sourceSQL(sourceIDs) +
     " ORDER BY ts DESC LIMIT 500"
   );
+  if (key !== pr_selectionKey()) return null;
   var prompts = rowsToObjects(promptRes);
   if (!prompts || prompts.length === 0) return [];
 
@@ -143,7 +151,7 @@ async function pr_loadData() {
       previousPrompts:earlier};
   });
 
-  prDataCache = { range: currentTimeRange, data: requests };
+  prDataCache = { key: key, data: requests };
   prDataGeneration++;
   return requests;
 }
@@ -172,7 +180,9 @@ async function pr_loadOverview() {
 // ============================================================
 
 async function pr_loadPrompts() {
-  var requests = (await pr_loadData()).slice();
+  var data = await pr_loadData();
+  if (data === null) return;
+  var requests = data.slice();
   if (!requests || requests.length === 0) {
     document.getElementById('pr-prompt-list').innerHTML = '<div class="chart-empty">' + t('empty.waiting') + '</div>';
     return;
@@ -261,6 +271,7 @@ function pr_nextPage() { if (prHasNext) { prPage++; pr_loadPrompts(); } }
 
 async function pr_loadPatterns() {
   var requests = await pr_loadData();
+  if (requests === null) return;
   var groups = {};
   requests.forEach(function(p) { var verb = pr_extractVerb(p.content); groups[verb] = (groups[verb] || 0) + 1; });
   var html = '<p class="panel-caption">' + t('pr.signal_note') + '</p><table><thead><tr><th>' + t('pr.pattern') + '</th><th>' + t('pr.count') + '</th></tr></thead><tbody>';
@@ -403,7 +414,8 @@ function pr_samplePrompts(requests) {
 }
 
 async function pr_loadAIInsights() {
-  var key = prDataGeneration + ':' + (currentLocale || 'en');
+  var selection = pr_selectionKey();
+  var key = selection + ":" + prDataGeneration + ':' + (currentLocale || 'en');
   if (prAIInsightsCache[key]) {
     pr_renderAIInsights(prAIInsightsCache[key]);
     return;
@@ -415,6 +427,10 @@ async function pr_loadAIInsights() {
   el.innerHTML = '<div class="loading">' + t('pr.ai_generating') + '</div>';
 
   var dataset = await pr_loadData();
+  if (dataset === null) {
+    if (btn) { btn.disabled = false; btn.textContent = t('pr.generate_insights'); }
+    return;
+  }
   var sample = pr_samplePrompts(dataset);
   if (sample.length === 0) {
     el.innerHTML = '<div class="chart-empty">' + t('pr.no_prompts') + '</div>';
@@ -446,6 +462,7 @@ async function pr_loadAIInsights() {
       body: JSON.stringify(payload),
     });
     var data = await resp.json();
+    if (selection !== pr_selectionKey()) return;
     if (data.error) {
       el.innerHTML = '<div class="pr-llm-result" style="border-color:var(--red)"><div style="font-size:13px;color:var(--red)">' + escapeHTML(data.error) + '</div></div>';
       return;
@@ -459,7 +476,7 @@ async function pr_loadAIInsights() {
     pr_renderAIInsights(data);
     pr_saveInsight(data); // persist to DB (best-effort)
   } catch (e) {
-    el.innerHTML = '<div style="color:var(--red);font-size:13px">' + t('pr.ai_error') + '</div>';
+    if (selection === pr_selectionKey()) el.innerHTML = '<div style="color:var(--red);font-size:13px">' + t('pr.ai_error') + '</div>';
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = t('pr.generate_insights'); }
   }

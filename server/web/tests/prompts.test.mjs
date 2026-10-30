@@ -53,3 +53,25 @@ test('time-spaced sample includes both ends without score bias',()=>{
  const sample=ctx.pr_samplePrompts(data);
  assert.equal(sample.length,14);assert.equal(sample[0].ts,0);assert.equal(sample[13].ts,99);
 });
+test('late results from a previous source cannot overwrite the selected source',async()=>{
+ const local=vm.createContext({currentTimeRange:'7d',intervalSQL:()=> '7 days',
+  document:{getElementById:()=>filter},rowsToObjects:x=>x,tsToMs:Number});
+ const filter={value:''};
+ vm.runInContext(readFileSync(new URL('../js/prompts.js',import.meta.url),'utf8'),local);
+ local.pr_sourceSessionIDs=async()=>filter.value===''?null:"'oc:fixture'";
+ let resolveOld;
+ let started;
+ const pending=new Promise(resolve=>started=resolve);
+ local.query=async sql=>{
+  if(!sql.includes('session_id IN'))return new Promise(resolve=>{resolveOld=resolve;started();});
+  return [{session_id:'oc:fixture',ts:1,content:'OpenCode request'}];
+ };
+ const old=local.pr_loadData();await pending;
+ filter.value='opencode';
+ const selected=await local.pr_loadData();
+ resolveOld([{session_id:'codex:other',ts:2,content:'Different source'}]);
+ assert.equal(await old,null);
+ assert.equal(selected[0].sessionId,'oc:fixture');
+ assert.equal(local.prDataCache.key,'7d:opencode');
+ assert.equal(local.prDataCache.data[0].sessionId,'oc:fixture');
+});
