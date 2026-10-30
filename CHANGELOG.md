@@ -1,5 +1,25 @@
 # Changelog
 
+## v0.3.0-beta4 — Cache-aware pricing
+
+- **Cache reads, cache writes and OpenAI Fast mode are priced.** Costs used
+  to stay unknown whenever a request hit the prompt cache, which is almost
+  every Claude Code and Codex request. The catalog now carries cache read
+  prices, cache write prices by duration (Anthropic 5m / 1h, OpenAI
+  30m / 12h), Fast-tier prices for OpenAI models, and a short-context limit
+  (272K for OpenAI, 200K for Claude Sonnet 4 and 4.5). `claude-sonnet-5-5`
+  is back in the catalog.
+- **Usage records the service tier and cache-write duration.** Migration 7
+  adds `service_tier` and `cache_creation_long_tokens` to `tma1_messages`.
+  Claude Code reads both from transcript usage; Codex reads the tier from
+  `thread_settings_applied`, and its OTel logs from the request attribute.
+- **Unpriced stays unpriced.** A request shows no cost when its tier, its
+  cache-write duration or a needed price is unknown, or its prompt exceeds
+  the short-context limit. Usage recorded before this release has no tier,
+  and Copilot CLI and OpenCode report none. Trace cost aggregates no longer
+  show partial totals.
+- The pricing catalog is recreated on upgrade; it holds no user data.
+
 ## v0.3.0-beta3
 
 - **Model pricing no longer disappears.** Pricing rows use a fixed 2024
