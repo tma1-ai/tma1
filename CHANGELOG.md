@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.3.0-beta3
+
+- **Model pricing no longer disappears.** Pricing rows use a fixed 2024
+  timestamp, and the table inherited the database TTL, so compaction
+  deleted the whole catalog shortly after seeding. Since beta1 removed the
+  Sonnet fallback, every estimated cost showed as unknown.
+  `tma1_model_pricing` and `tma1_schema_version` now use `ttl = 'forever'`;
+  the catalog reseeds and the cost flow is rebuilt on upgrade.
+- **Codex latency works with current Codex.** Traces from
+  `codex-app-server` and `codex_exec` are recognized, not only
+  `codex_cli_rs`. Latency cards and charts measure `run_sampling_request`
+  instead of `stream_request`, which only timed sending the request.
+- **install.sh upgrades an existing GreptimeDB.** The official GreptimeDB
+  script declined to replace an existing binary under `curl | bash` and
+  still exited 0; the installer now downloads into an empty directory and
+  checks the new binary's version before swapping it in.
+
 ## v0.3.0-beta2
 
 - **Sidebar credits GreptimeDB.** The dashboard sidebar footer now reads
