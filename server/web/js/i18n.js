@@ -3,6 +3,8 @@
 
 var I18N = {
   en: {
+    "pricing.list_estimate": "List-rate estimate",
+    "pricing.trace_note": "Uncached list-rate equivalent; excludes cache discounts, service tiers and subscription billing.",
     "compare.reported_tokens": "Reported tokens",
     "overview.nav": "Overview",
     "overview.workspace": "Workspace",
@@ -642,6 +644,8 @@ var I18N = {
     "pr.unscored": "Follow-up / unscored",
   },
   zh: {
+    "pricing.list_estimate": "目录价估算",
+    "pricing.trace_note": "按非缓存 token 目录价折算，不包含缓存折扣、服务档位差价和订阅计费。",
     "compare.reported_tokens": "上报 token",
     "overview.nav": "总览",
     "overview.workspace": "工作区",
@@ -1239,6 +1243,8 @@ var I18N = {
     "pr.unscored": "跟进 / 未评分",
   },
   es: {
+    "pricing.list_estimate": "Estimación a precio de lista",
+    "pricing.trace_note": "Equivalente sin caché; excluye descuentos de caché, niveles de servicio y suscripciones.",
     'header.tagline': 'Tu agente ejecuta. TMA1 recuerda.',
     'card.cost': 'Costo Hoy',
     'card.tokens': 'Tokens Hoy',

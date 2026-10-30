@@ -515,9 +515,10 @@
 
   <!-- ========================= TRACES VIEW ========================= -->
   <div id="view-traces" style="display:none">
+  <p class="panel-caption" data-i18n="pricing.trace_note">Uncached list-rate equivalent; excludes cache discounts, service tiers and subscription billing.</p>
   <div class="cards cards-5">
     <div class="card">
-      <div class="label" data-i18n="card.cost">Today's Cost</div>
+      <div class="label" data-i18n="pricing.list_estimate">List-rate estimate</div>
       <div class="value cost" id="val-cost">&mdash;</div>
     </div>
     <div class="card">
@@ -1008,7 +1009,7 @@
         <div class="value requests" id="pr-val-prompts">&mdash;</div>
       </div>
       <div class="card">
-        <div class="label" data-i18n="pr.card.avg_score">Avg Score</div>
+        <div class="label" data-i18n="pr.card.avg_score">Text signal coverage</div>
         <div class="value" id="pr-val-score">&mdash;</div>
       </div>
       <div class="card">
@@ -1016,7 +1017,7 @@
         <div class="value tokens" id="pr-val-turns">&mdash;</div>
       </div>
       <div class="card">
-        <div class="label" data-i18n="pr.card.avg_cost">Avg Cost / Session</div>
+        <div class="label" data-i18n="pr.card.avg_cost">Sessions in range</div>
         <div class="value cost" id="pr-val-cost">&mdash;</div>
       </div>
     </div>

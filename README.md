@@ -61,9 +61,10 @@ acknowledgments remain unscored. Optional model assessments include source
 quotes and can abstain when conversation context is missing.
 
 Cost estimates use standard short-context API list prices checked on
-2026-10-30. Unknown models and usage requiring unavailable cache rates show
-no estimate. Estimates exclude subscription plans, service-tier adjustments,
-regional premiums, and historical price changes.
+2026-10-30. Unknown models show no estimate. Session costs also remain unknown
+when required cache rates are unavailable. GenAI trace aggregates show the
+uncached list-rate equivalent. Estimates exclude subscription plans,
+service-tier adjustments, regional premiums, and historical price changes.
 
 ## Supported sources
 
