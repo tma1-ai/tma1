@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -94,7 +95,7 @@ func TestClaudeStreamingUsageDeltas(t *testing.T) {
 	w.processLine("session", line, seen, usage)
 	w.processLine("session", strings.Replace(line, `"output_tokens":1`, `"output_tokens":21`, 1), seen, usage)
 	sql := waitForSQL(t, ch)
-	if !strings.Contains(sql, "'usage'") || !strings.Contains(sql, ", 0, 20, 0, 0)") {
+	if !strings.Contains(sql, "'usage'") || !strings.Contains(sql, ", 0, 20, 0, 0, NULL, NULL)") {
 		t.Fatalf("expected incremental output only: %s", sql)
 	}
 	select {
@@ -151,5 +152,74 @@ func TestStoppedWatcherDoesNotStopReplacement(t *testing.T) {
 	w.tailFile(ctx, "session", t.TempDir()+"/missing.jsonl", old)
 	if replacement.stopped {
 		t.Fatal("old watcher marked its replacement as stopped")
+	}
+}
+
+func TestClaudeCacheWriteSplitAndTier(t *testing.T) {
+	ch := make(chan string, 8)
+	srv := httptest.NewServer(httpTestHandler(ch))
+	defer srv.Close()
+	w := &Watcher{sqlURL: srv.URL, logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	seen := map[string]struct{}{sessionStartKey: {}}
+	usage := map[string]msgUsage{}
+	line := `{"timestamp":"2026-10-28T10:00:00Z","type":"assistant","message":{"id":"response-1","role":"assistant","content":[{"type":"text","text":"answer"}],"usage":{"input_tokens":10,"output_tokens":1,"cache_read_input_tokens":0,"cache_creation_input_tokens":300,"cache_creation":{"ephemeral_1h_input_tokens":200,"ephemeral_5m_input_tokens":100},"service_tier":"standard"}}}`
+	w.processLine("session", line, seen, usage)
+	if sql := waitForSQL(t, ch); !strings.Contains(sql, ", 10, 1, 0, 300, 200, 'standard')") {
+		t.Fatalf("missing long cache writes or tier: %s", sql)
+	}
+	grown := strings.NewReplacer(`"output_tokens":1`, `"output_tokens":5`, `"cache_creation_input_tokens":300`, `"cache_creation_input_tokens":350`, `"ephemeral_1h_input_tokens":200`, `"ephemeral_1h_input_tokens":250`).Replace(line)
+	w.processLine("session", grown, seen, usage)
+	if sql := waitForSQL(t, ch); !strings.Contains(sql, ", 0, 4, 0, 50, 50, 'standard')") {
+		t.Fatalf("long cache writes must be recorded as deltas: %s", sql)
+	}
+}
+
+func TestCodexUsageRecordsServiceTier(t *testing.T) {
+	ch := make(chan string, 8)
+	srv := httptest.NewServer(httpTestHandler(ch))
+	defer srv.Close()
+	w := &Watcher{sqlURL: srv.URL, logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	ctx := &codexFileContext{model: "test-model"}
+	seen := map[string]struct{}{}
+	usage := func(ts string, input int) string {
+		return `{"timestamp":"` + ts + `","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":` + strconv.Itoa(input) + `,"output_tokens":1}}}}`
+	}
+	w.processCodexLine("session", usage("2026-10-28T10:00:00Z", 10), seen, ctx)
+	if sql := waitForSQL(t, ch); !strings.HasSuffix(sql, ", NULL)") {
+		t.Fatalf("tier must stay unknown before thread settings: %s", sql)
+	}
+	w.processCodexLine("session", `{"timestamp":"2026-10-28T10:00:01Z","type":"event_msg","payload":{"type":"thread_settings_applied","thread_settings":{"model":"test-model","service_tier":"priority"}}}`, seen, ctx)
+	w.processCodexLine("session", usage("2026-10-28T10:00:02Z", 11), seen, ctx)
+	if sql := waitForSQL(t, ch); !strings.HasSuffix(sql, ", 'priority')") {
+		t.Fatalf("missing priority tier: %s", sql)
+	}
+	w.processCodexLine("session", `{"timestamp":"2026-10-28T10:00:03Z","type":"event_msg","payload":{"type":"thread_settings_applied","thread_settings":{"model":"test-model","service_tier":null}}}`, seen, ctx)
+	w.processCodexLine("session", usage("2026-10-28T10:00:04Z", 12), seen, ctx)
+	if sql := waitForSQL(t, ch); !strings.HasSuffix(sql, ", 'default')") {
+		t.Fatalf("a null tier setting means requests use the default tier: %s", sql)
+	}
+}
+
+func TestClaudeCacheSplitSurvivesEntryWithoutSplit(t *testing.T) {
+	ch := make(chan string, 8)
+	srv := httptest.NewServer(httpTestHandler(ch))
+	defer srv.Close()
+	w := &Watcher{sqlURL: srv.URL, logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	seen := map[string]struct{}{sessionStartKey: {}}
+	usage := map[string]msgUsage{}
+	entry := func(output int, split string) string {
+		return `{"timestamp":"2026-10-28T10:00:00Z","type":"assistant","message":{"id":"response-1","role":"assistant","content":[],"usage":{"input_tokens":10,"output_tokens":` +
+			strconv.Itoa(output) + `,"cache_creation_input_tokens":200` + split + `,"service_tier":"standard"}}}`
+	}
+	withSplit := `,"cache_creation":{"ephemeral_1h_input_tokens":200}`
+	w.processLine("session", entry(1, withSplit), seen, usage)
+	waitForSQL(t, ch)
+	w.processLine("session", entry(2, ""), seen, usage)
+	if sql := waitForSQL(t, ch); !strings.HasSuffix(sql, ", 0, 1, 0, 0, NULL, 'standard')") {
+		t.Fatalf("entry without a split must leave its split unknown: %s", sql)
+	}
+	w.processLine("session", entry(3, withSplit), seen, usage)
+	if sql := waitForSQL(t, ch); !strings.HasSuffix(sql, ", 0, 1, 0, 0, 0, 'standard')") {
+		t.Fatalf("1-hour writes counted twice: %s", sql)
 	}
 }

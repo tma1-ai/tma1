@@ -62,11 +62,16 @@ provider. Suggestions include source quotes, an impact, and a concrete action,
 separating request gaps from agent execution. The model can abstain when context
 is missing. AI Insights summarizes a text-only sample, not task outcomes.
 
-Cost estimates use standard short-context API list prices checked on
-2026-10-30. Unknown models show no estimate. Session costs also remain unknown
-when required cache rates are unavailable. GenAI trace aggregates show the
-uncached list-rate equivalent. Estimates exclude subscription plans,
-service-tier adjustments, regional premiums, and historical price changes.
+Cost estimates use API list prices checked on 2026-10-30, including cache
+reads, cache writes by duration, and OpenAI Fast mode (`service_tier`
+`priority`). Unknown models show no estimate. A request stays unpriced when its
+service tier, its cache-write duration, or a price it needs is unavailable, or
+when its prompt exceeds the short-context limit (272K tokens for OpenAI models,
+200K for Claude Sonnet 4 and 4.5). Claude Code and Codex transcripts record the
+tier and write duration from this version on; earlier transcript usage stays
+unpriced. GenAI trace aggregates show the uncached standard-tier list-rate
+equivalent. Estimates exclude subscription plans, regional premiums, batch and
+flex pricing, and historical price changes.
 
 ## Supported sources
 

@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -268,6 +269,18 @@ type msgUsage struct {
 	OutputTokens        int64 `json:"output_tokens"`
 	CacheReadTokens     int64 `json:"cache_read_input_tokens"`
 	CacheCreationTokens int64 `json:"cache_creation_input_tokens"`
+	// Splits cache writes by duration, which Anthropic bills at different
+	// rates. Older transcripts omit it.
+	CacheCreation *cacheCreationSplit `json:"cache_creation"`
+	ServiceTier   string              `json:"service_tier"`
+}
+
+type cacheCreationSplit struct {
+	LongTokens int64 `json:"ephemeral_1h_input_tokens"`
+}
+
+func (u msgUsage) countsZero() bool {
+	return u.InputTokens == 0 && u.OutputTokens == 0 && u.CacheReadTokens == 0 && u.CacheCreationTokens == 0
 }
 
 type contentBlock struct {
@@ -354,10 +367,29 @@ func (w *Watcher) processLine(sessionID, line string, seen map[string]struct{}, 
 			current.OutputTokens = max(current.OutputTokens, previous.OutputTokens)
 			current.CacheReadTokens = max(current.CacheReadTokens, previous.CacheReadTokens)
 			current.CacheCreationTokens = max(current.CacheCreationTokens, previous.CacheCreationTokens)
-			delta := msgUsage{current.InputTokens - previous.InputTokens, current.OutputTokens - previous.OutputTokens, current.CacheReadTokens - previous.CacheReadTokens, current.CacheCreationTokens - previous.CacheCreationTokens}
+			delta := msgUsage{
+				InputTokens:         current.InputTokens - previous.InputTokens,
+				OutputTokens:        current.OutputTokens - previous.OutputTokens,
+				CacheReadTokens:     current.CacheReadTokens - previous.CacheReadTokens,
+				CacheCreationTokens: current.CacheCreationTokens - previous.CacheCreationTokens,
+				ServiceTier:         current.ServiceTier,
+			}
+			if current.CacheCreation != nil {
+				var previousLong int64
+				if previous.CacheCreation != nil {
+					previousLong = previous.CacheCreation.LongTokens
+				}
+				currentLong := max(current.CacheCreation.LongTokens, previousLong)
+				current.CacheCreation = &cacheCreationSplit{LongTokens: currentLong}
+				delta.CacheCreation = &cacheCreationSplit{LongTokens: currentLong - previousLong}
+			} else {
+				// Keep the last reported split so a later entry does not
+				// count it again; this entry's own split stays unknown.
+				current.CacheCreation = previous.CacheCreation
+			}
 			usageByResponse[id] = current
 			usage = &delta
-			if recorded && delta == (msgUsage{}) {
+			if recorded && delta.countsZero() {
 				usage = nil
 			}
 		}
@@ -456,8 +488,8 @@ func (w *Watcher) insertMessage(ts time.Time, sessionID, messageType, role, cont
 	if usage != nil {
 		sql = fmt.Sprintf(
 			"INSERT INTO tma1_messages (ts, session_id, message_type, \"role\", content, model, tool_name, tool_use_id, "+
-				"input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens) "+
-				"VALUES (%d, '%s', '%s', '%s', '%s', '%s', '%s', '%s', %d, %d, %d, %d)",
+				"input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, cache_creation_long_tokens, service_tier) "+
+				"VALUES (%d, '%s', '%s', '%s', '%s', '%s', '%s', '%s', %d, %d, %d, %d, %s, %s)",
 			now,
 			escapeSQLString(sessionID),
 			escapeSQLString(messageType),
@@ -470,6 +502,8 @@ func (w *Watcher) insertMessage(ts time.Time, sessionID, messageType, role, cont
 			usage.OutputTokens,
 			usage.CacheReadTokens,
 			usage.CacheCreationTokens,
+			usage.longCacheWriteSQL(),
+			nullableString(usage.ServiceTier),
 		)
 	} else {
 		sql = fmt.Sprintf(
@@ -517,6 +551,22 @@ func (w *Watcher) execSQL(sql string) {
 	if resp.StatusCode != 200 {
 		w.logger.Debug("transcript insert non-200", "status", resp.StatusCode)
 	}
+}
+
+// longCacheWriteSQL is NULL when the transcript did not split cache writes
+// by duration, so the write cost stays unknown.
+func (u msgUsage) longCacheWriteSQL() string {
+	if u.CacheCreation == nil {
+		return "NULL"
+	}
+	return strconv.FormatInt(u.CacheCreation.LongTokens, 10)
+}
+
+func nullableString(s string) string {
+	if s == "" {
+		return "NULL"
+	}
+	return "'" + escapeSQLString(s) + "'"
 }
 
 func truncate(s string, maxLen int) string {

@@ -36,10 +36,22 @@ function cdx_eventFilterPredicate(filter) {
 }
 
 function cdx_estimatedCostExpr() {
-  var modelExpr = "COALESCE(json_get_string(log_attributes, 'model'), 'unknown')";
-  var inputExpr = "COALESCE(json_get_int(log_attributes, 'input_token_count'), 0)";
-  var outputExpr = "COALESCE(json_get_int(log_attributes, 'output_token_count'), 0)";
-  return "CASE WHEN COALESCE(json_get_int(log_attributes, 'cached_token_count'), 0) > 0 THEN NULL ELSE " + costCaseSQL(modelExpr, inputExpr, outputExpr) + " END";
+  var input = "COALESCE(json_get_int(log_attributes, 'input_token_count'), 0)";
+  var cached = "COALESCE(json_get_int(log_attributes, 'cached_token_count'), 0)";
+  var written = "COALESCE(json_get_int(log_attributes, 'cache_write_token_count'), 0)";
+  // input_token_count includes cache reads and writes. Codex omits
+  // service_tier for the default tier and does not report write durations.
+  return usageCostSQL({
+    model: "COALESCE(json_get_string(log_attributes, 'model'), 'unknown')",
+    tier: serviceTierSQL("COALESCE(json_get_string(log_attributes, 'service_tier'), 'default')"),
+    fresh: "GREATEST(" + input + " - " + cached + " - " + written + ", 0)",
+    output: "COALESCE(json_get_int(log_attributes, 'output_token_count'), 0)",
+    cacheRead: cached,
+    writeShort: "0",
+    writeLong: "0",
+    writeUnsplit: written,
+    totalInput: input,
+  });
 }
 
 function cdx_resetEventsPaging() {

@@ -46,14 +46,6 @@ CREATE TABLE IF NOT EXISTS tma1_status_1m (
     PRIMARY KEY (model)
 );
 
-CREATE TABLE IF NOT EXISTS tma1_model_pricing (
-    model_pattern STRING PRIMARY KEY,
-    priority      INT32,
-    input_price   DOUBLE,
-    output_price  DOUBLE,
-    ts            TIMESTAMP TIME INDEX DEFAULT '2024-01-01T00:00:00Z'
-);
-
 -- =============================================================================
 -- Flows (continuous aggregation from traces)
 -- These only activate when opentelemetry_traces exists (i.e., when agents

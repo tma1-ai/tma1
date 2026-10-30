@@ -418,8 +418,10 @@ LIMIT 20
 ### Cost by model (using TMA1's pricing table)
 
 ```sql
--- Joins against tma1_model_pricing (seeded by tma1-server on first start).
--- To see/edit pricing: SELECT * FROM tma1_model_pricing ORDER BY priority;
+-- Joins against tma1_model_pricing (seeded by tma1-server on start).
+-- Traces carry no service tier or cache counters, so this is the uncached
+-- standard-tier list price. Matches the exact model ID or a dated snapshot.
+-- To see pricing: SELECT * FROM tma1_model_pricing ORDER BY priority;
 SELECT t.model,
        ROUND(SUM(
          CAST(t.input_tok AS DOUBLE) * p.input_price / 1e6 +
@@ -434,7 +436,8 @@ FROM (
     AND timestamp >= DATE_TRUNC('day', NOW())
 ) t
 JOIN tma1_model_pricing p
-  ON t.model LIKE CONCAT('%', p.model_pattern, '%')
+  ON p.service_tier = 'standard'
+ AND (t.model = p.model_pattern OR t.model LIKE CONCAT(p.model_pattern, '-20%'))
 GROUP BY t.model
 ORDER BY cost_usd DESC
 ```

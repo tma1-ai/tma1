@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -284,68 +285,145 @@ func execSQL(sqlURL, stmt string) error {
 	return nil
 }
 
-// modelPrice holds one row from tma1_model_pricing.
+// modelPrice holds one row from tma1_model_pricing. A nil price means the
+// provider publishes none for that token class; usage that needs it stays
+// unpriced.
 type modelPrice struct {
 	Pattern     string
+	Tier        string // pricingTierStandard or pricingTierPriority
 	Priority    int
 	InputPrice  float64
 	OutputPrice float64
+	// CacheWriteShort is Anthropic's 5-minute and OpenAI's 30-minute write;
+	// CacheWriteLong is Anthropic's 1-hour and OpenAI's 12-hour write.
+	CacheReadPrice       *float64
+	CacheWriteShortPrice *float64
+	CacheWriteLongPrice  *float64
+	// MaxInputTokens is the largest prompt billed at these rates. Longer
+	// prompts use long-context prices that the catalog does not carry.
+	MaxInputTokens *int64
 }
 
+const (
+	pricingTierStandard = "standard"
+	// OpenAI renamed priority processing to Fast mode; requests still report
+	// service_tier "priority".
+	pricingTierPriority = "priority"
+)
+
 const pricingTableDDL = `CREATE TABLE IF NOT EXISTS tma1_model_pricing (
-    model_pattern STRING PRIMARY KEY,
-    priority      INT32,
-    input_price   DOUBLE,
-    output_price  DOUBLE,
-    ts            TIMESTAMP TIME INDEX DEFAULT '2024-01-01T00:00:00Z'
-);`
+    model_pattern           STRING,
+    service_tier            STRING,
+    priority                INT32,
+    input_price             DOUBLE,
+    output_price            DOUBLE,
+    cache_read_price        DOUBLE NULL,
+    cache_write_short_price DOUBLE NULL,
+    cache_write_long_price  DOUBLE NULL,
+    max_input_tokens        BIGINT NULL,
+    ts                      TIMESTAMP TIME INDEX DEFAULT '2024-01-01T00:00:00Z',
+    PRIMARY KEY (model_pattern, service_tier)
+) WITH ('ttl'='forever');`
 
-// PricingVersion identifies the built-in catalog independently of the binary version.
-const PricingVersion = "2026-10-30.2"
+// PricingVersion identifies the built-in catalog independently of the binary
+// version. Changing it drops and recreates tma1_model_pricing.
+const PricingVersion = "2026-10-30.3"
 
-// Standard, short-context API rates in USD per million tokens. These are
-// estimates, not invoices; cache writes, service tiers and regional premiums
-// require billing metadata that transcripts do not consistently supply.
-// Sources: https://developers.openai.com/api/docs/pricing
+func usd(v float64) *float64 { return &v }
+
+func maxInput(n int64) *int64 { return &n }
+
+// OpenAI bills prompts over 272K input tokens at long-context rates.
+const openAIShortContext = 272000
+
+// claude prices an Anthropic model at standard tier. Anthropic bills 5-minute
+// cache writes at 1.25x and 1-hour writes at 2x base input for every model in
+// this catalog; cache reads vary by model.
+func claude(pattern string, input, output, cacheRead float64) modelPrice {
+	return modelPrice{
+		Pattern: pattern, Tier: pricingTierStandard, InputPrice: input, OutputPrice: output,
+		CacheReadPrice: usd(cacheRead), CacheWriteShortPrice: usd(input * 1.25), CacheWriteLongPrice: usd(input * 2),
+	}
+}
+
+func openai(pattern, tier string, input, output float64, cacheRead, writeShort, writeLong *float64, max *int64) modelPrice {
+	return modelPrice{
+		Pattern: pattern, Tier: tier, InputPrice: input, OutputPrice: output,
+		CacheReadPrice: cacheRead, CacheWriteShortPrice: writeShort, CacheWriteLongPrice: writeLong, MaxInputTokens: max,
+	}
+}
+
+func withMaxInput(p modelPrice, n int64) modelPrice {
+	p.MaxInputTokens = maxInput(n)
+	return p
+}
+
+// Short-context API list rates in USD per million tokens. These are list-rate
+// equivalents, not invoices: regional, batch and flex pricing and Anthropic's
+// Priority Tier are not modelled. Sources:
 // https://platform.claude.com/docs/en/about-claude/pricing
-// Unverified models and context-tiered Haiku 5.5 are deliberately absent.
+// https://developers.openai.com/api/docs/pricing.md
+// Context-tiered Claude Haiku 5.5 is deliberately absent.
 var defaultPricing = []modelPrice{
-	{"claude-fable-5-1", 0, 10, 50},
-	{"claude-opus-5-5", 1, 4, 20},
-	{"claude-mythos-5-1", 3, 10, 50},
-	{"claude-fable-5", 4, 10, 50},
-	{"claude-mythos-5", 5, 10, 50},
-	{"claude-opus-5", 6, 5, 25},
-	{"claude-opus-4-8", 7, 5, 25},
-	{"claude-opus-4-7", 8, 5, 25},
-	{"claude-opus-4-6", 9, 5, 25},
-	{"claude-opus-4-5", 10, 5, 25},
-	{"claude-opus-4-1", 11, 15, 75},
-	{"claude-opus-4", 12, 15, 75},
-	{"claude-opus-4-0", 13, 15, 75},
-	{"claude-sonnet-5", 14, 2, 10},
-	{"claude-sonnet-4-6", 15, 3, 15},
-	{"claude-sonnet-4-5", 16, 3, 15},
-	{"claude-sonnet-4", 17, 3, 15},
-	{"claude-sonnet-4-0", 18, 3, 15},
-	{"claude-haiku-4-5", 19, 1, 5},
-	{"claude-3-5-haiku", 20, 0.8, 4},
-	{"gpt-6-astra", 21, 10, 50},
-	{"gpt-6.1-sol", 22, 2, 10},
-	{"gpt-6.1-terra", 23, 1, 5},
-	{"gpt-6-sol", 24, 2, 10},
-	{"gpt-6-luna", 25, 0.1, 0.5},
-	{"gpt-5.6-sol", 26, 4, 20},
-	{"gpt-5.6-cyber", 27, 12.5, 75},
-	{"gpt-5.5", 28, 5, 30},
-	{"gpt-5.3-codex", 29, 1.75, 14},
-	{"gpt-4.1", 30, 2, 8},
-	{"gpt-5.4", 31, 2.5, 15},
-	{"gpt-5.2", 32, 1.75, 14},
-	{"gpt-5.4-mini", 33, .75, 4.5},
-	{"gpt-5-mini", 34, .25, 2},
-	{"gpt-4o-mini", 35, .15, .6},
-	{"gpt-4o", 36, 2.5, 10},
+	claude("claude-fable-5-1", 10, 50, 0.25),
+	claude("claude-mythos-5-1", 10, 50, 0.25),
+	claude("claude-fable-5", 10, 50, 1),
+	claude("claude-mythos-5", 10, 50, 1),
+	claude("claude-opus-5-5", 4, 20, 0.20),
+	claude("claude-opus-5", 5, 25, 0.50),
+	claude("claude-opus-4-8", 5, 25, 0.50),
+	claude("claude-opus-4-7", 5, 25, 0.50),
+	claude("claude-opus-4-6", 5, 25, 0.50),
+	claude("claude-opus-4-5", 5, 25, 0.50),
+	claude("claude-opus-4-1", 15, 75, 1.50),
+	claude("claude-opus-4", 15, 75, 1.50),
+	claude("claude-opus-4-0", 15, 75, 1.50),
+	claude("claude-sonnet-5-5", 2, 10, 0.10),
+	claude("claude-sonnet-5", 2, 10, 0.20),
+	claude("claude-sonnet-4-6", 3, 15, 0.30),
+	// Only Claude 4.6 and later bill a 1M context at standard rates.
+	withMaxInput(claude("claude-sonnet-4-5", 3, 15, 0.30), 200000),
+	withMaxInput(claude("claude-sonnet-4", 3, 15, 0.30), 200000),
+	withMaxInput(claude("claude-sonnet-4-0", 3, 15, 0.30), 200000),
+	claude("claude-haiku-4-5", 1, 5, 0.10),
+	claude("claude-3-5-haiku", 0.80, 4, 0.08),
+
+	openai("gpt-6-astra", pricingTierStandard, 10, 50, usd(1), usd(12.50), usd(25), maxInput(openAIShortContext)),
+	openai("gpt-6.1-sol", pricingTierStandard, 2, 10, usd(0.10), usd(2.50), usd(5), maxInput(openAIShortContext)),
+	openai("gpt-6.1-terra", pricingTierStandard, 1, 5, usd(0.05), usd(1.25), usd(2.50), maxInput(openAIShortContext)),
+	openai("gpt-6-sol", pricingTierStandard, 2, 10, usd(0.20), usd(2.50), usd(5), maxInput(openAIShortContext)),
+	openai("gpt-6-luna", pricingTierStandard, 0.10, 0.50, usd(0.01), usd(0.125), usd(0.25), maxInput(openAIShortContext)),
+	openai("gpt-5.6-sol", pricingTierStandard, 4, 20, usd(0.40), usd(5), usd(10), maxInput(openAIShortContext)),
+	openai("gpt-5.6-terra", pricingTierStandard, 2, 12, usd(0.20), usd(2.50), usd(5), maxInput(openAIShortContext)),
+	openai("gpt-5.6-luna", pricingTierStandard, 0.20, 1.20, usd(0.02), usd(0.25), usd(0.50), maxInput(openAIShortContext)),
+	openai("gpt-5.6-cyber", pricingTierStandard, 12.50, 75, usd(1.25), usd(15.625), usd(31.25), maxInput(openAIShortContext)),
+	openai("gpt-5.5", pricingTierStandard, 5, 30, usd(0.50), nil, nil, maxInput(openAIShortContext)),
+	openai("gpt-5.4", pricingTierStandard, 2.50, 15, usd(0.25), nil, nil, maxInput(openAIShortContext)),
+	openai("gpt-5.3-codex", pricingTierStandard, 1.75, 14, usd(0.175), nil, nil, nil),
+	openai("gpt-5.4-mini", pricingTierStandard, 0.75, 4.50, usd(0.075), nil, nil, nil),
+	openai("gpt-5.2", pricingTierStandard, 1.75, 14, usd(0.175), nil, nil, nil),
+	openai("gpt-5-mini", pricingTierStandard, 0.25, 2, usd(0.025), nil, nil, nil),
+	openai("gpt-4.1", pricingTierStandard, 2, 8, usd(0.50), nil, nil, nil),
+	openai("gpt-4o", pricingTierStandard, 2.50, 10, usd(1.25), nil, nil, nil),
+	openai("gpt-4o-mini", pricingTierStandard, 0.15, 0.60, usd(0.075), nil, nil, nil),
+
+	openai("gpt-6-astra", pricingTierPriority, 20, 100, usd(2), usd(25), usd(50), maxInput(openAIShortContext)),
+	openai("gpt-6.1-sol", pricingTierPriority, 4, 20, usd(0.20), usd(5), usd(10), maxInput(openAIShortContext)),
+	openai("gpt-6.1-terra", pricingTierPriority, 2, 10, usd(0.10), usd(2.50), usd(5), maxInput(openAIShortContext)),
+	openai("gpt-6-sol", pricingTierPriority, 4, 20, usd(0.40), usd(5), usd(10), maxInput(openAIShortContext)),
+	openai("gpt-6-luna", pricingTierPriority, 0.20, 1, usd(0.02), usd(0.25), usd(0.50), maxInput(openAIShortContext)),
+	openai("gpt-5.6-sol", pricingTierPriority, 8, 40, usd(0.80), usd(10), usd(20), maxInput(openAIShortContext)),
+	openai("gpt-5.6-terra", pricingTierPriority, 4, 24, usd(0.40), usd(5), usd(10), maxInput(openAIShortContext)),
+	openai("gpt-5.6-luna", pricingTierPriority, 0.40, 2.40, usd(0.04), usd(0.50), usd(1), maxInput(openAIShortContext)),
+	openai("gpt-5.5", pricingTierPriority, 12.50, 75, usd(1.25), nil, nil, maxInput(openAIShortContext)),
+	openai("gpt-5.4", pricingTierPriority, 5, 30, usd(0.50), nil, nil, maxInput(openAIShortContext)),
+	openai("gpt-5.3-codex", pricingTierPriority, 3.50, 28, usd(0.35), nil, nil, nil),
+	openai("gpt-5.4-mini", pricingTierPriority, 1.50, 9, usd(0.15), nil, nil, nil),
+	openai("gpt-5.2", pricingTierPriority, 3.50, 28, usd(0.35), nil, nil, nil),
+	openai("gpt-5-mini", pricingTierPriority, 0.45, 3.60, usd(0.045), nil, nil, nil),
+	openai("gpt-4.1", pricingTierPriority, 3.50, 14, usd(0.875), nil, nil, nil),
+	openai("gpt-4o", pricingTierPriority, 4.25, 17, usd(2.125), nil, nil, nil),
+	openai("gpt-4o-mini", pricingTierPriority, 0.25, 1, usd(0.125), nil, nil, nil),
 }
 
 // SeedPricing inserts default model pricing if the table is empty.
@@ -354,12 +432,6 @@ func SeedPricing(httpPort int, logger *slog.Logger) error {
 	if err := execSQL(sqlURL, pricingTableDDL); err != nil {
 		return fmt.Errorf("ensure pricing table: %w", err)
 	}
-	// Rows use a fixed 2024 timestamp. With the inherited database TTL,
-	// compaction deletes the whole catalog shortly after seeding.
-	if err := execSQL(sqlURL, "ALTER TABLE tma1_model_pricing SET 'ttl'='forever'"); err != nil {
-		return fmt.Errorf("keep pricing table: %w", err)
-	}
-
 	count, err := queryScalarInt(sqlURL, "SELECT COUNT(*) FROM tma1_model_pricing")
 	if err != nil {
 		return fmt.Errorf("seed pricing: %w", err)
@@ -371,13 +443,15 @@ func SeedPricing(httpPort int, logger *slog.Logger) error {
 
 	// Build a single INSERT with all rows.
 	var sb strings.Builder
-	sb.WriteString("INSERT INTO tma1_model_pricing (model_pattern, priority, input_price, output_price, ts) VALUES ")
+	sb.WriteString("INSERT INTO tma1_model_pricing (model_pattern, service_tier, priority, input_price, output_price, " +
+		"cache_read_price, cache_write_short_price, cache_write_long_price, max_input_tokens, ts) VALUES ")
 	for i, p := range defaultPricing {
 		if i > 0 {
 			sb.WriteString(", ")
 		}
-		fmt.Fprintf(&sb, "('%s', %d, %g, %g, '2024-01-01T00:00:00Z')",
-			p.Pattern, p.Priority, p.InputPrice, p.OutputPrice)
+		fmt.Fprintf(&sb, "('%s', '%s', %d, %g, %g, %s, %s, %s, %s, '2024-01-01T00:00:00Z')",
+			p.Pattern, p.Tier, i, p.InputPrice, p.OutputPrice,
+			sqlFloat(p.CacheReadPrice), sqlFloat(p.CacheWriteShortPrice), sqlFloat(p.CacheWriteLongPrice), sqlInt(p.MaxInputTokens))
 	}
 	sb.WriteString(";")
 
@@ -388,17 +462,27 @@ func SeedPricing(httpPort int, logger *slog.Logger) error {
 	return nil
 }
 
-// TruncatePricing removes all rows from the pricing table so that
-// SeedPricing can re-insert the latest defaults on upgrade.
-func TruncatePricing(httpPort int) error {
-	sqlURL := fmt.Sprintf("http://localhost:%d/v1/sql", httpPort)
-	return execSQL(sqlURL, "TRUNCATE TABLE tma1_model_pricing")
+func sqlFloat(v *float64) string {
+	if v == nil {
+		return "NULL"
+	}
+	return strconv.FormatFloat(*v, 'g', -1, 64)
 }
 
-// IsTableNotFound returns true if the error indicates the table does not exist.
-func IsTableNotFound(err error) bool {
-	return err != nil && strings.Contains(err.Error(), "not found")
+func sqlInt(v *int64) string {
+	if v == nil {
+		return "NULL"
+	}
+	return strconv.FormatInt(*v, 10)
 }
+
+// ResetPricing drops the derived pricing catalog so that SeedPricing recreates
+// it with the current schema and rows. The table carries no user data.
+func ResetPricing(httpPort int) error {
+	sqlURL := fmt.Sprintf("http://localhost:%d/v1/sql", httpPort)
+	return execSQL(sqlURL, "DROP TABLE IF EXISTS tma1_model_pricing")
+}
+
 
 // InitCostFlow reads pricing from tma1_model_pricing and creates/replaces
 // the cost flow with a dynamic CASE expression.
@@ -449,7 +533,11 @@ func buildCostCaseSQL(prices []modelPrice, modelExpr, inputExpr, outputExpr stri
 	sb.WriteString("CASE")
 	for _, p := range prices {
 		safe := strings.ReplaceAll(modelPricePattern(p.Pattern), "'", "''")
-		fmt.Fprintf(&sb, " WHEN regexp_like(%s, '%s') THEN CAST(%s AS DOUBLE)*%.6f/1000000.0+CAST(%s AS DOUBLE)*%.6f/1000000.0", modelExpr, safe, inputExpr, p.InputPrice, outputExpr, p.OutputPrice)
+		cond := fmt.Sprintf("regexp_like(%s, '%s')", modelExpr, safe)
+		if p.MaxInputTokens != nil {
+			cond += fmt.Sprintf(" AND CAST(%s AS BIGINT) <= %d", inputExpr, *p.MaxInputTokens)
+		}
+		fmt.Fprintf(&sb, " WHEN %s THEN CAST(%s AS DOUBLE)*%.6f/1000000.0+CAST(%s AS DOUBLE)*%.6f/1000000.0", cond, inputExpr, p.InputPrice, outputExpr, p.OutputPrice)
 	}
 	sb.WriteString(" ELSE CAST(NULL AS DOUBLE) END")
 	return sb.String()
@@ -495,7 +583,9 @@ func queryScalarInt(sqlURL, stmt string) (int, error) {
 // queryPricing reads all rows from tma1_model_pricing ordered by priority.
 func queryPricing(sqlURL string) ([]modelPrice, error) {
 	form := url.Values{}
-	form.Set("sql", "SELECT model_pattern, priority, input_price, output_price FROM tma1_model_pricing ORDER BY priority")
+	// Traces carry no service tier or cache counters; price them at standard rates.
+	form.Set("sql", "SELECT model_pattern, priority, input_price, output_price, max_input_tokens FROM tma1_model_pricing "+
+		"WHERE service_tier = '"+pricingTierStandard+"' ORDER BY priority")
 
 	resp, err := httpClient.Post(sqlURL, "application/x-www-form-urlencoded", strings.NewReader(form.Encode())) //nolint:gosec
 	if err != nil {
@@ -524,19 +614,21 @@ func queryPricing(sqlURL string) ([]modelPrice, error) {
 
 	var prices []modelPrice
 	for _, row := range result.Output[0].Records.Rows {
-		if len(row) < 4 {
+		if len(row) < 5 {
 			continue
 		}
 		pattern, _ := row[0].(string)
-		priority := toInt(row[1])
-		inputPrice := toFloat(row[2])
-		outputPrice := toFloat(row[3])
-		prices = append(prices, modelPrice{
+		p := modelPrice{
 			Pattern:     pattern,
-			Priority:    priority,
-			InputPrice:  inputPrice,
-			OutputPrice: outputPrice,
-		})
+			Tier:        pricingTierStandard,
+			Priority:    toInt(row[1]),
+			InputPrice:  toFloat(row[2]),
+			OutputPrice: toFloat(row[3]),
+		}
+		if row[4] != nil {
+			p.MaxInputTokens = maxInput(int64(toInt(row[4])))
+		}
+		prices = append(prices, p)
 	}
 	return prices, nil
 }

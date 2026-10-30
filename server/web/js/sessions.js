@@ -254,7 +254,7 @@ async function sess_loadDetail(sessionId, agentSource) {
     ).catch(function() { return null; }),
     query(
       "SELECT ts, session_id, message_type, tool_name, tool_use_id, content, model, " +
-      "input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, reasoning_tokens, duration_ms " +
+      "input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, cache_creation_long_tokens, service_tier, reasoning_tokens, duration_ms " +
       "FROM tma1_messages WHERE session_id = '" + sid + "' ORDER BY ts ASC LIMIT 50000"
     ).catch(function() { return null; }),
   ]);
@@ -374,13 +374,13 @@ async function sess_loadDetail(sessionId, agentSource) {
         if (cIn === 0 && cOut === 0 && cReasoning === 0) continue;
         var cCache = Number(cm.cache_read_tokens) || 0;
         var cWrite = Number(cm.cache_creation_tokens) || 0;
-        var cPrice = sess_lookupPrice(cm.model);
+        var cPrice = sess_lookupPrice(cm.model, normalizeServiceTier(cm.service_tier));
         apiCalls.push({
           ts: tsToMs(cm.ts), model: cm.model || '',
           inputTokens: cIn, outputTokens: cOut,
           reasoningTokens: cReasoning,
           cacheTokens: cCache, cacheCreationTokens: cWrite,
-          cost: sess_usageCost(cPrice, cIn, cOut, cCache, cWrite),
+          cost: sess_usageCost(cPrice, sess_usage(cIn, cOut, cCache, cWrite, cm.cache_creation_long_tokens, true)),
           inputIncludesCache: true, usageRecord: true,
           durationMs: Number(cm.duration_ms) || 0, toolUseIds: [],
         });
@@ -402,13 +402,13 @@ async function sess_loadDetail(sessionId, agentSource) {
         var outTok = Number(um.output_tokens) || 0;
         var cacheRead = Number(um.cache_read_tokens) || 0;
         var cacheCreate = Number(um.cache_creation_tokens) || 0;
-        var mPrice = sess_lookupPrice(um.model);
+        var mPrice = sess_lookupPrice(um.model, normalizeServiceTier(um.service_tier));
         apiCalls.push({
           ts: tsToMs(um.ts), model: um.model || '',
           inputTokens: inTok, outputTokens: outTok,
           reasoningTokens: Number(um.reasoning_tokens) || 0,
           cacheTokens: cacheRead, cacheCreationTokens: cacheCreate,
-          cost: sess_usageCost(mPrice, inTok, outTok, cacheRead, cacheCreate),
+          cost: sess_usageCost(mPrice, sess_usage(inTok, outTok, cacheRead, cacheCreate, um.cache_creation_long_tokens, false)),
           durationMs: 0, toolUseIds: [], usageRecord: true,
         });
       }

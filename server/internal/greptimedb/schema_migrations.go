@@ -122,6 +122,12 @@ var schemaMigrations = []Migration{
 	{Version: 6, Description: "prompt insight rubric identity", SQL: []string{
 		`ALTER TABLE tma1_prompt_insights ADD COLUMN rubric_version STRING NULL`,
 	}, IgnoreErr: isIgnorableSchemaUpgradeError},
+	// NULL in either column means the source did not report it, which keeps
+	// the affected usage unpriced rather than priced at a guessed rate.
+	{Version: 7, Description: "cache write duration and service tier for usage pricing", SQL: []string{
+		`ALTER TABLE tma1_messages ADD COLUMN cache_creation_long_tokens BIGINT NULL`,
+		`ALTER TABLE tma1_messages ADD COLUMN service_tier STRING NULL`,
+	}, IgnoreErr: isIgnorableSchemaUpgradeError},
 }
 
 // schemaVersionDDL creates the migration ledger. Append-only so the
