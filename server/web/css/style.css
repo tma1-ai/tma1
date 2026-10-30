@@ -136,6 +136,7 @@ header .tagline { font-size: 13px; color: var(--text-muted); }
   padding: 16px 32px;
   border-bottom: 1px solid var(--border);
 }
+.cards-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .cards-5 {
   grid-template-columns: repeat(5, 1fr);
 }
@@ -1200,7 +1201,7 @@ tr.active-trace td { background: var(--bg-hover); }
 
 /* --- Responsive --- */
 @media (max-width: 768px) {
-  .cards, .cards.cards-5 { grid-template-columns: repeat(2, 1fr); padding: 12px 16px; }
+  .cards, .cards.cards-5, .cards.cards-3 { grid-template-columns: repeat(2, 1fr); padding: 12px 16px; }
   .trace-charts { grid-template-columns: 1fr; }
   header, .tabs, .tab-content { padding-left: 16px; padding-right: 16px; }
   .waterfall-label { width: 140px !important; }

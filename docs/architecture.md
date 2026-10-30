@@ -17,7 +17,7 @@ file index. Read this when you need to know *where* something is or
 | `server/internal/handler/` | HTTP handlers: /health, /status, /api/query, /api/evaluate, /api/settings, /api/hooks (returns injection content), /api/hooks/stream (SSE), /api/anomalies{,/budget,/follow-rate}, /v1/otlp/*, dashboard UI |
 | `server/internal/hooks/` | Hook script installer + per-adapter wiring. `install_cc.go` (Claude Code: `~/.claude/settings.json` hooks + `~/.claude.json` MCP + `~/.claude/{skills,commands}/`). `install_codex.go` (Codex: `~/.codex/hooks.json` + `~/.codex/config.toml` `[mcp_servers.tma1]` + `~/.agents/skills/tma1-*/`, TOML merge via `BurntSushi/toml`). `install_shared.go` carries the helpers both use (atomic writes, JSON-strict reads, owner-prefix-scoped stale sweep, instructions/.gitignore). |
 | `server/internal/transcript/` | JSONL transcript watcher (Claude Code) + Codex / Copilot CLI session log parsers |
-| `server/internal/perception/` | v2 perception layer: bundler, anomaly detector (6 rules + channel routing + 10-min suppression + resolvers), incremental injection cache, session readers (peer / search / transcript), read-only query executor, file writer for `.tma1-context.md` |
+| `server/internal/perception/` | v2 perception layer: bundler, anomaly detector (4 rules + channel routing + 10-min suppression + resolvers), incremental injection cache, session readers (peer / search / transcript), read-only query executor, file writer for `.tma1-context.md` |
 | `server/internal/sensor/build/` | `tma1-server build [--watch] -- <cmd>` subprocess capture: stdout/stderr tee + batched writes into `tma1_build_events`, force-colour env injection |
 | `server/internal/sensor/git/` | fsnotify file watcher + 30 s git poll + agent-write attribution honoring `.gitignore` + static ignore list; writes `tma1_external_changes` |
 | `server/internal/sensor/project/` | Lazy project-state indexer (language / build / test / key files / top-level dirs) with 24 h TTL gate; writes `tma1_project_state` |
@@ -88,9 +88,9 @@ Browser dashboard (served by tma1-server)
     │   ├── Anomalies panel inside session detail (reads /api/anomalies?session_id=…)
     │   ├── Replay mode: replay past sessions as agent orchestration animation
     │   └── Live mode: real-time SSE streaming of hook events → canvas visualization
-    ├── Prompts view: Prompt evaluation & improvement (text signal coverage + optional evidence-based model assessment)
-    │   ├── Overview: score distribution, trend, top suggestions, dimension breakdown
-    │   ├── Prompts: card-based list with per-prompt scoring, suggestions, optional LLM deep eval
+    ├── Prompts view: Request history and optional contextual model review
+    │   ├── Overview: request/session counts and text-only sampled AI Insights
+    │   ├── Prompts: request cards with optional review of bounded conversation excerpts
     │   └── Patterns: verb-based grouping (fix/add/implement/debug/...) with counts
     └── Anomalies view: cross-session anomaly list, severity filter, 10 s auto-refresh; budget +
         follow-rate validation endpoints back the Phase 1.7 quality gates
@@ -247,7 +247,7 @@ The published REFERENCE.md mirrors `claude-plugin/skills/tma1/SKILL.md`.
 | Hook telemetry | `server/internal/handler/hook_telemetry.go` — periodic per-event call + inject counter, flushed via slog |
 | SSE streaming + broadcast | `server/internal/handler/sse.go`, `broadcast.go` |
 | Perception bundler | `server/internal/perception/bundle.go` — Bundle + Digest + RenderSummaryDelta; `client.go` is the local SQL HTTP client. `Bundler.Caller` (set from `TMA1_MCP_CALLER`) drives peer-session self-exclusion. |
-| Anomaly engine | `server/internal/perception/anomaly.go` — 6 rules, channel routing, 10-min suppression, per-rule resolvers, age-evicted history cache. Two public entry points: `Detect` (push-channel — mutates `sessHistory`, INSERTs to `tma1_anomaly_emits`, advances `LastEmittedAt`) and `DetectPreview` (pull-channel — runs the same rules + resolvers but reads suppression state without writing; used by MCP `get_anomalies`) |
+| Anomaly engine | `server/internal/perception/anomaly.go` — 4 rules, channel routing, 10-min suppression, per-rule resolvers, age-evicted history cache. Two public entry points: `Detect` (push-channel — mutates `sessHistory`, INSERTs to `tma1_anomaly_emits`, advances `LastEmittedAt`) and `DetectPreview` (pull-channel — runs the same rules + resolvers but reads suppression state without writing; used by MCP `get_anomalies`) |
 | Anomaly emit log | `server/internal/perception/anomaly_emits.go` — fire-and-forget INSERTs routed through the handler's `writeq.Sem` |
 | Peer-session reader | `server/internal/perception/peer.go` — backs `get_peer_sessions` MCP tool + `/tma1-peer` skill. Caller-aware exclusion applies to the all-peers fan-out only (via `peerAgentList()`); naming an agent explicitly — including `self`, resolved through `resolveAgentAlias` — returns that agent's sessions. `Detail` (summary/preview/full) sets the message + per-message byte budget; the deprecated `message_limit` still overrides it for skill files installed before `detail` existed. `peerCwdFilter` handles POSIX absolute, Windows absolute (drive-letter + UNC, both separator styles), and bare-name fallback. All-peers fan-out captures per-agent SQL failures and surfaces them via a `partial_failures` map in the MCP payload so callers can distinguish "no sessions" from "1-of-N queries failed". `limit` clamps to `[1, 5]` |
 | Session search / transcript | `server/internal/perception/search.go` — backs `search_sessions` + `get_session_transcript`. Scope (project + agent) is resolved against `tma1_hook_events` BEFORE the keyword search runs against `tma1_messages`, and the term→substring widening is decided inside that scope; filtering after the fact would let another project's hits fill the candidate limit. `matches_term` is case-sensitive on the pinned GreptimeDB, so the substring pass folds case (`lower(content) LIKE`) and rescues a wrong-case query. `fetchSessionMessages` is shared with the peer reader so both drop empty-content `usage` rows, apply the same rune-based truncation, and drop the pagination probe row before dedup |
@@ -284,7 +284,7 @@ The published REFERENCE.md mirrors `claude-plugin/skills/tma1/SKILL.md`.
 | Sessions view JS | `server/web/js/sessions.js` — orchestrator (KPI cards, session list, detail loading, search) |
 | Sessions sub-modules | `server/web/js/sessions-{stats,detail,insights,waterfall,timeline}.js` — stats computation, detail overlay, insight panels, waterfall chart, timeline rendering |
 | Agent Canvas animation | `server/web/js/agent-canvas.js` — canvas animation + tool fade-out + subagent lifecycle + compaction/permission events |
-| Prompts view JS | `server/web/js/prompts.js` — heuristic scoring engine, data loading, rendering, LLM eval integration |
+| Prompts view JS | `server/web/js/prompts.js` — data loading, bounded transcript excerpts, rendering, LLM review integration |
 | LLM evaluation endpoint | `server/internal/handler/evaluate.go` — `/api/evaluate` (Anthropic/OpenAI proxy for prompt evaluation) |
 | Settings endpoint | `server/internal/handler/settings.go` — `GET/POST /api/settings` (read/write server config, hot-reload LLM) |
 | Settings persistence | `server/internal/config/settings.go` — Load/save `~/.tma1/settings.json`, env var override logic |

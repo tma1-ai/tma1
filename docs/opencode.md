@@ -29,7 +29,10 @@ curl --fail-with-body http://127.0.0.1:14318/api/import/opencode \
 The response contains the TMA1 session ID (`oc:SESSION_ID`) and inserted record
 count. Reimporting a snapshot skips persisted records, including after a TMA1
 restart. A failed import may have committed some records; retry the same file.
-Requests are limited to 20 MiB.
+Requests are limited to 20 MiB. A larger snapshot is rejected before import;
+previously imported records remain available, but new turns in that session
+are not imported while its snapshots exceed the limit. Automatic retries do
+not bypass the limit. The plugin logs the failure in the OpenCode console.
 
 ## Recorded data
 

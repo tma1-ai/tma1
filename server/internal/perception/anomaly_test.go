@@ -1,6 +1,8 @@
 package perception
 
 import (
+	"context"
+	"encoding/json"
 	"strconv"
 	"strings"
 	"testing"
@@ -40,58 +42,12 @@ func TestFirstErrorLineFindsTheActualError(t *testing.T) {
 	}
 }
 
-func TestExtractErrorLineCrossLanguage(t *testing.T) {
-	// Each entry is one synthetic error blob the build/test runner of
-	// some language might emit. We assert extractErrorLine pulls the
-	// line number that points into `base`, and returns "" when the
-	// number names a different file or is missing entirely.
-	cases := []struct {
-		name, result, base, want string
-	}{
-		{"go compiler", "./pkg/auth.go:42:7: undefined: bar", "auth.go", "42"},
-		{"clang/gcc",   "src/util.c:128: error: expected ';'", "util.c", "128"},
-		{"rustc",       "error[E0282]: type annotations needed\n  --> src/lib.rs:88:5", "lib.rs", "88"},
-		{"tsc",         "src/index.ts:14:3 - error TS2322: Type 'string' is not assignable", "index.ts", "14"},
-		{"python tb",   "Traceback ...\n  File \"app/handlers.py\", line 27, in handle\n    raise ValueError", "handlers.py", "27"},
-		{"unrelated",   "./pkg/other.go:10: missing return", "auth.go", ""},
-		{"no line",     "linker: undefined symbol _foo in auth.go", "auth.go", ""},
-		{"empty",       "", "auth.go", ""},
-		{"empty base",  "auth.go:1: blah", "", ""},
-	}
-	for _, c := range cases {
-		got := extractErrorLine(c.result, c.base)
-		if got != c.want {
-			t.Errorf("%s: extractErrorLine = %q, want %q\nresult=%q base=%q",
-				c.name, got, c.want, c.result, c.base)
-		}
-	}
-}
-
 func TestTestRunnerPrefixesAcrossLanguages(t *testing.T) {
-	// Locks the cross-language coverage of R-test-stuck. The rule's
-	// SQL builds LIKE clauses from testRunnerPrefixes; this test
-	// asserts the prefix set keeps covering the languages we care
-	// about. The matching semantics mirror the SQL LIKE 'prefix%' --
-	// case-sensitive prefix match -- so the test lowercases inputs
-	// because tool_command_prefix arrives lowercased at ingest.
-	matches := func(cmd string) bool {
-		cmd = strings.TrimSpace(strings.ToLower(cmd))
-		if cmd == "" {
-			return false
-		}
-		for _, p := range testRunnerPrefixes {
-			if strings.HasPrefix(cmd, p) {
-				rest := cmd[len(p):]
-				if rest == "" || rest[0] == ' ' || rest[0] == '\t' {
-					return true
-				}
-			}
-		}
-		return false
-	}
 	positive := []string{
 		"go test ./...",
-		"GO TEST ./pkg", // case-insensitive
+		"make test",
+		"go build ./...",
+		"cargo build",
 		"cargo test --workspace",
 		"cargo nextest run",
 		"pytest -k foo",
@@ -116,7 +72,7 @@ func TestTestRunnerPrefixesAcrossLanguages(t *testing.T) {
 		"mix test --trace",
 	}
 	for _, cmd := range positive {
-		if !matches(cmd) {
+		if !isBuildCommand(cmd) {
 			t.Errorf("expected test-runner match: %q", cmd)
 		}
 	}
@@ -124,17 +80,16 @@ func TestTestRunnerPrefixesAcrossLanguages(t *testing.T) {
 	negative := []string{
 		"",
 		"   ",
-		"go build",
 		"go testify", // word-boundary guard: not "go test"
-		"cargo build",
 		"npm install",
 		"npm run dev",
-		"make test", // intentionally NOT covered -- Makefile target names are project-defined
+		"make clean",
+		"GO TEST ./pkg",
 		"./bin/foo",
 		"docker compose up",
 	}
 	for _, cmd := range negative {
-		if matches(cmd) {
+		if isBuildCommand(cmd) {
 			t.Errorf("expected NO match: %q", cmd)
 		}
 	}
@@ -400,6 +355,8 @@ func TestDetectStaleEdit(t *testing.T) {
 			changes: []int64{150},
 			want:    0,
 		},
+		{name: "successful reread after stale edit resolves the finding", reads: []int64{100, 250}, edits: []int64{200}, changes: []int64{150}, want: 0},
+		{name: "new stale edit after recovery qualifies again", reads: []int64{100, 250}, edits: []int64{200, 400}, changes: []int64{150, 300}, want: 300},
 		{
 			name: "edit without ever reading — rule doesn't apply",
 			// Agents that Edit a never-Read file aren't in the stale-view
@@ -458,5 +415,68 @@ func TestAnomalyCacheGCDropsOtherExpiredEntries(t *testing.T) {
 	c.mu.Unlock()
 	if has {
 		t.Error("opportunistic GC did not drop expired peer")
+	}
+}
+
+func TestRepeatedBuildFailuresRecoveryAndIdentity(t *testing.T) {
+	row := func(command, cwd, event string, ts int) []any {
+		input, _ := json.Marshal(map[string]string{"command": command})
+		return []any{string(input), cwd, event, "error: unavailable", ts}
+	}
+	fail := func(command string, ts int) []any { return row(command, "/repo", "PostToolUseFailure", ts) }
+	command := "go test ./..."
+	for _, tc := range []struct {
+		name string
+		rows [][]any
+		want int
+	}{
+		{"three unresolved", [][]any{fail(command, 3), fail(command, 2), fail(command, 1)}, 1},
+		{"unrelated success", [][]any{row("ls", "/repo", "PostToolUse", 4), fail(command, 3), fail(command, 2), fail(command, 1)}, 1},
+		{"same command recovers", [][]any{row(command, "/repo", "PostToolUse", 4), fail(command, 3), fail(command, 2), fail(command, 1)}, 0},
+		{"success resets count", [][]any{fail(command, 5), row(command, "/repo", "PostToolUse", 4), fail(command, 3), fail(command, 2), fail(command, 1)}, 0},
+		{"other directory", [][]any{row(command, "/other", "PostToolUse", 4), fail(command, 3), fail(command, 2), fail(command, 1)}, 1},
+		{"search miss is not a build", [][]any{fail("rg missing", 3), fail("rg missing", 2), fail("rg missing", 1)}, 0},
+		{"ambiguous timestamp", [][]any{fail(command, 4), row(command, "/repo", "PostToolUse", 4), fail(command, 3), fail(command, 2)}, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := repeatedBuildFailures(tc.rows)
+			if len(got) != tc.want {
+				t.Fatalf("got %+v, want %d findings", got, tc.want)
+			}
+			for _, a := range got {
+				if a.Channel == ChannelStopBlock {
+					t.Fatal("correlation must not block Stop")
+				}
+			}
+		})
+	}
+	prefix := "go test ./" + strings.Repeat("a", 70)
+	rows := [][]any{fail(prefix+"x", 6), fail(prefix+"y", 5), fail(prefix+"x", 4), fail(prefix+"y", 3), fail(prefix+"x", 2), fail(prefix+"y", 1)}
+	got := repeatedBuildFailures(rows)
+	if len(got) != 2 || got[0].stableKey() == got[1].stableKey() {
+		t.Fatalf("distinct commands were merged: %+v", got)
+	}
+	if kept := newAnomalyCache(time.Minute).suppress("session", got); len(kept) != 2 {
+		t.Fatal("suppression merged distinct commands")
+	}
+}
+
+func TestChannelSelectionDoesNotConsumeOtherFindings(t *testing.T) {
+	d := NewDetector(0, nil)
+	d.SetSubmit(func(func()) bool { return false })
+	d.cache.set("s", []Anomaly{{Kind: "repeated_failed_build", Severity: SeverityMedium, Channel: ChannelUserPromptSubmit, identity: "command"}})
+	for _, channel := range []string{ChannelStopBlock, ChannelPostToolUse} {
+		if got := d.DetectByChannel(context.Background(), "s", channel); len(got) != 0 {
+			t.Fatalf("wrong-channel findings: %+v", got)
+		}
+	}
+	if len(d.cache.history) != 0 {
+		t.Fatal("undelivered findings consumed suppression")
+	}
+	if got := d.DetectByChannel(context.Background(), "s", ChannelUserPromptSubmit); len(got) != 1 {
+		t.Fatal("next-prompt finding was lost")
+	}
+	if got := d.DetectByChannel(context.Background(), "s", ChannelUserPromptSubmit); len(got) != 0 {
+		t.Fatal("cached finding emitted twice")
 	}
 }

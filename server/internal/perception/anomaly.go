@@ -2,10 +2,10 @@ package perception
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -48,6 +48,7 @@ type Anomaly struct {
 	Suggestion     string    `json:"suggestion"`
 	RelatedFiles   []string  `json:"related_files,omitempty"`
 	FirstEmittedAt time.Time `json:"first_emitted_at,omitempty"`
+	identity       string
 }
 
 // stableKey is a session-scoped identity for an anomaly, used by the
@@ -55,7 +56,7 @@ type Anomaly struct {
 func (a Anomaly) stableKey() string {
 	files := append([]string{}, a.RelatedFiles...)
 	sort.Strings(files)
-	return a.Kind + "|" + a.Severity + "|" + strings.Join(files, ",")
+	return a.Kind + "|" + a.Severity + "|" + strings.Join(files, ",") + "|" + a.identity
 }
 
 // Detector runs the Phase 1.7 anomaly rules against a session.
@@ -90,102 +91,57 @@ func NewDetector(httpPort int, logger *slog.Logger) *Detector {
 	}
 }
 
-// Detect runs all rules and returns the post-suppression anomaly set for
-// sessionID. The cache merges two purposes:
-//   - Short-lived result cache (30s TTL) so a flurry of hook calls don't
-//     re-run every SQL
-//   - Per-session "emit history" so the Suppression layer can decide
-//     whether a candidate anomaly is worth re-telling the agent
-//
-// IMPORTANT: Detect is NON-IDEMPOTENT. Every call:
-//   - Advances per-rule suppression state (`LastEmittedAt = now`)
-//   - INSERTs a row into tma1_anomaly_emits
-//   - Consumes the 10-minute silence window for any kept anomaly
-//
-// Only call Detect from PUSH-CHANNEL paths (hook handlers driving
-// UserPromptSubmit / Stop / PreCompact / etc.). Pull-channel paths
-// must use one of two side-effect-free alternatives, picked by intent:
-//   - Current active anomalies ("what would the next hook surface?") →
-//     DetectPreview. Runs the rules + resolvers but never writes
-//     sessHistory or the emit log. Used by MCP `get_anomalies`.
-//   - Past emitted history ("what has been told to agents already?") →
-//     Bundler.ListEmittedAnomalies. Reads tma1_anomaly_emits directly.
-//     Used by the dashboard `/api/anomalies` endpoint.
-//
-// Calling Detect from a pull path consumes suppression silently and
-// weakens the next real Stop block — that's the bug both alternatives
-// exist to prevent.
+// Detect emits eligible findings across all channels, advancing suppression and
+// recording new emissions. Only push paths should call it; use DetectPreview
+// for current findings or ListEmittedAnomalies for emission history.
 func (d *Detector) Detect(ctx context.Context, sessionID string) []Anomaly {
+	return d.DetectByChannel(ctx, sessionID, "")
+}
+
+// DetectByChannel applies suppression only after selecting the delivery channel.
+// A Stop or PostToolUse hook must not consume a pending next-prompt finding.
+func (d *Detector) DetectByChannel(ctx context.Context, sessionID, channel string) []Anomaly {
 	if strings.TrimSpace(sessionID) == "" {
 		return nil
 	}
-	if cached, ok := d.cache.get(sessionID); ok {
-		return cached
-	}
-
-	// Run the rules concurrently. Each rule issues 1-3 GreptimeDB
-	// queries and is independent of the others' output — the
-	// suppression layer below merges per-key. Total wall-clock drops
-	// from sum(rule latencies) to max(rule latency).
-	//
-	// Map iteration is non-deterministic (it always was), so we
-	// collect under a mutex; suppression layer sorts by stableKey
-	// anyway when deduping.
-	type ruleResult struct {
-		hits []Anomaly
-		err  error
-		name string
-	}
-	rules := d.rules()
-	resCh := make(chan ruleResult, len(rules))
-	var wg sync.WaitGroup
-	for name, rule := range rules {
-		wg.Add(1)
-		go func(name string, rule ruleFunc) {
-			defer wg.Done()
-			hits, err := rule(ctx, sessionID)
-			resCh <- ruleResult{hits: hits, err: err, name: name}
-		}(name, rule)
-	}
-	wg.Wait()
-	close(resCh)
-
-	var candidates []Anomaly
-	for r := range resCh {
-		if r.err != nil {
-			d.logger.Debug("anomaly rule failed", "rule", r.name, "session", sessionID, "err", r.err)
-			continue
+	candidates, cached := d.cache.get(sessionID)
+	if !cached {
+		type ruleResult struct {
+			hits []Anomaly
+			err  error
+			name string
 		}
-		candidates = append(candidates, r.hits...)
+		rules := d.rules()
+		results := make(chan ruleResult, len(rules))
+		var wg sync.WaitGroup
+		for name, rule := range rules {
+			wg.Add(1)
+			go func(name string, rule ruleFunc) {
+				defer wg.Done()
+				hits, err := rule(ctx, sessionID)
+				results <- ruleResult{hits: hits, err: err, name: name}
+			}(name, rule)
+		}
+		wg.Wait()
+		close(results)
+		for result := range results {
+			if result.err != nil {
+				d.logger.Debug("anomaly rule failed", "rule", result.name, "session", sessionID, "err", result.err)
+				continue
+			}
+			candidates = append(candidates, result.hits...)
+		}
+		d.cache.set(sessionID, candidates)
 	}
-
-	// Apply suppression. The Detector layer first asks each candidate's
-	// resolver (if any) whether the underlying condition has been
-	// addressed since the last emit — if so we reset the emit state so
-	// the candidate goes through again immediately, rather than waiting
-	// out the silence window.
-	kept := d.suppressWithResolvers(ctx, sessionID, candidates)
-	d.cache.set(sessionID, kept)
-	// Persist the emit log async — feeds the 1.7 validation gates
-	// (precision / daily budget / action follow-rate). Cache hits at
-	// the top of Detect short-circuit before this point, so each kept
-	// anomaly is logged at most once per suppression cycle.
+	selected := make([]Anomaly, 0, len(candidates))
+	for _, candidate := range candidates {
+		if channel == "" || candidate.Channel == channel {
+			selected = append(selected, candidate)
+		}
+	}
+	kept := d.suppressWithResolvers(ctx, sessionID, selected)
 	d.logEmits(sessionID, kept)
 	return kept
-}
-
-// DetectByChannel filters Detect output to a specific Channel — used by
-// the handler to assemble per-injection-point payloads without re-running
-// the rules.
-func (d *Detector) DetectByChannel(ctx context.Context, sessionID, channel string) []Anomaly {
-	all := d.Detect(ctx, sessionID)
-	out := all[:0:0]
-	for _, a := range all {
-		if a.Channel == channel || (channel == "" && a.Channel == "") {
-			out = append(out, a)
-		}
-	}
-	return out
 }
 
 // Invalidate drops cached anomalies (but NOT emit history) for sessionID
@@ -280,10 +236,8 @@ type ruleFunc func(ctx context.Context, sessionID string) ([]Anomaly, error)
 // downstream consumers (suppression, UI) key on.
 func (d *Detector) rules() map[string]ruleFunc {
 	return map[string]ruleFunc{
-		"build_broken_after_my_edit":       d.ruleBuildBrokenAfterMyEdit,
 		"repeated_failed_build":            d.ruleRepeatedFailedBuild,
 		"stale_file_view":                  d.ruleStaleFileView,
-		"test_stuck":                       d.ruleTestStuck,
 		"external_modified_during_session": d.ruleExternalModifiedDuringSession,
 		"context_pressure":                 d.ruleContextPressure,
 	}
@@ -307,10 +261,7 @@ func (d *Detector) resolverFor(kind string) resolverFunc {
 	switch kind {
 	case "stale_file_view":
 		return d.resolverReReadHappened
-	case "build_broken_after_my_edit",
-		"repeated_failed_build",
-		"test_stuck":
-		return d.resolverBashSucceededSince
+
 	default:
 		return nil
 	}
@@ -343,8 +294,8 @@ func (d *Detector) suppressWithResolvers(ctx context.Context, sessionID string, 
 	return d.cache.suppressWithResolution(sessionID, candidates, resolved)
 }
 
-// resolverReReadHappened — R-stale-view resolves when the agent does a
-// PreToolUse Read of the related file after lastEmitted. The same Read
+// resolverReReadHappened — R-stale-view resolves when the agent completes a
+// PostToolUse Read of the related file after lastEmitted. The same Read
 // that resolves this anomaly will also push the underlying rule's
 // last_read.ts past the change.ts on the next run, so the rule itself
 // will stop generating the candidate.
@@ -356,7 +307,7 @@ func (d *Detector) resolverReReadHappened(ctx context.Context, sessionID string,
 	sql := fmt.Sprintf(
 		`SELECT COUNT(*) FROM tma1_hook_events
 		 WHERE session_id = '%s'
-		   AND event_type = 'PreToolUse' AND tool_name = 'Read'
+		   AND event_type = 'PostToolUse' AND tool_name = 'Read'
 		   AND ts > %d
 		   AND (tool_file_path = '%s' OR tool_input LIKE '%%"file_path":"%s"%%')`,
 		escapeSQL(sessionID), lastEmitted.UnixMilli(),
@@ -369,221 +320,91 @@ func (d *Detector) resolverReReadHappened(ctx context.Context, sessionID string,
 	return intAt(rows[0], 0) > 0
 }
 
-// resolverBashSucceededSince — build / test rules resolve when ANY Bash
-// PostToolUse (non-failure) lands after lastEmitted. We don't insist on
-// the exact command matching: in practice, a successful test run after
-// a stretch of failures is the strongest signal "things are recovering".
-func (d *Detector) resolverBashSucceededSince(ctx context.Context, sessionID string, a Anomaly, lastEmitted time.Time) bool {
-	sql := fmt.Sprintf(
-		`SELECT COUNT(*) FROM tma1_hook_events
-		 WHERE session_id = '%s'
-		   AND event_type = 'PostToolUse' AND tool_name = 'Bash'
-		   AND ts > %d`,
-		escapeSQL(sessionID), lastEmitted.UnixMilli(),
-	)
-	_, rows, err := d.client.Query(ctx, sql)
-	if err != nil || len(rows) == 0 {
-		return false
-	}
-	return intAt(rows[0], 0) > 0
-}
-
-// ───────────────────────────────────────────────────────────────────────
-// R-build-broken-mine — agent Edit followed by build/test failure that
-// mentions the same file's basename
-// ───────────────────────────────────────────────────────────────────────
-
-func (d *Detector) ruleBuildBrokenAfterMyEdit(ctx context.Context, sessionID string) ([]Anomaly, error) {
-	// 1) find Edit/Write events on real source files (not docs)
-	editsSQL := fmt.Sprintf(
-		`SELECT COALESCE(tool_file_path,
-		                 regexp_match(tool_input, '"file_path":"([^"]+)"')[1]) AS fp,
-		        CAST(MAX(ts) AS BIGINT) AS last_edit_ms,
-		        COUNT(*) AS n
-		 FROM tma1_hook_events
-		 WHERE session_id = '%s'
-		   AND event_type = 'PreToolUse'
-		   AND tool_name IN ('Edit','Write','MultiEdit')
-		   AND ts > now() - INTERVAL '30 minutes'
-		 GROUP BY fp
-		 HAVING fp IS NOT NULL AND fp != ''`,
-		escapeSQL(sessionID),
-	)
-	_, editRows, err := d.client.Query(ctx, editsSQL)
-	if err != nil || len(editRows) == 0 {
-		return nil, err
-	}
-
-	var out []Anomaly
-	for _, er := range editRows {
-		fp := stringAt(er, 0)
-		lastEdit := time.UnixMilli(int64At(er, 1))
-		editCount := intAt(er, 2)
-		base := basename(fp)
-		if base == "" || isDocFile(base) {
-			continue
-		}
-
-		// 2) check for Bash failures within ±10min whose tool_input OR
-		// tool_result mentions the basename. Pull the failures' results
-		// too so we can extract a line number for the suggestion --
-		// utility upgrade per the dogfood retro: "re-read around the
-		// error site" was vague; "re-read <file>:<line>" is one step.
-		failuresSQL := fmt.Sprintf(
-			`SELECT tool_result FROM tma1_hook_events
-			 WHERE session_id = '%s'
-			   AND event_type = 'PostToolUseFailure' AND tool_name = 'Bash'
-			   AND ts BETWEEN %d AND %d
-			   AND (tool_input LIKE '%%%s%%' OR tool_result LIKE '%%%s%%')
-			 ORDER BY ts DESC LIMIT 5`,
-			escapeSQL(sessionID),
-			lastEdit.Add(-10*time.Minute).UnixMilli(),
-			lastEdit.Add(10*time.Minute).UnixMilli(),
-			escapeSQLLike(base), escapeSQLLike(base),
-		)
-		_, fRows, err := d.client.Query(ctx, failuresSQL)
-		if err != nil || len(fRows) == 0 {
-			continue
-		}
-		failCount := len(fRows)
-
-		sev := SeverityMedium
-		if failCount >= 3 {
-			sev = SeverityHigh
-		}
-
-		// Best-effort line-number extraction from the most recent failure
-		// (rows are ordered DESC by ts). Format `<basename>:<line>` is
-		// emitted by virtually every compiler (gcc, clang, rustc, go,
-		// tsc, pyright, ...); when the runtime is Python the format
-		// becomes `File "path", line N` so we cover that too. When no
-		// number is found we drop back to the original "around the
-		// error site" phrasing.
-		lineHint := extractErrorLine(stringAt(fRows[0], 0), base)
-
-		// Action sentence: verb-first, names the file + the symptom + the next move.
-		var suggestion string
-		if lineHint != "" {
-			suggestion = fmt.Sprintf(
-				"Re-read %s near line %s before editing again -- %d build/test failure(s) since you started editing it.",
-				shortPath(fp), lineHint, failCount,
-			)
-		} else {
-			suggestion = fmt.Sprintf(
-				"Re-read %s around the error site before editing again -- %d build/test failure(s) since you started editing it.",
-				shortPath(fp), failCount,
-			)
-		}
-		evidence := fmt.Sprintf(
-			"Edited %s %d time(s) in 30 min; %d build/test failure(s) named this file in the same window.",
-			shortPath(fp), editCount, failCount,
-		)
-
-		channel := ChannelUserPromptSubmit
-		if sev == SeverityHigh {
-			channel = ChannelStopBlock
-		}
-
-		out = append(out, Anomaly{
-			Kind:         "build_broken_after_my_edit",
-			Severity:     sev,
-			Channel:      channel,
-			Evidence:     evidence,
-			Suggestion:   suggestion,
-			RelatedFiles: []string{fp},
-		})
-	}
-	return out, nil
-}
-
-// ───────────────────────────────────────────────────────────────────────
-// R-build-repeated — same command prefix failed 3+ times in 30 min
-// ───────────────────────────────────────────────────────────────────────
-
+// Successful runs clear only the same full command in the same working directory.
+// Prefixes cannot identify commands: different test targets often share them.
 func (d *Detector) ruleRepeatedFailedBuild(ctx context.Context, sessionID string) ([]Anomaly, error) {
-	const sqlFmt = `WITH bash_fails AS (
-		SELECT COALESCE(tool_command_prefix,
-		                regexp_match(tool_input, '"command":"([^"]+)"')[1]) AS cmd
-		FROM tma1_hook_events
-		WHERE session_id = '%s'
-		  AND event_type = 'PostToolUseFailure' AND tool_name = 'Bash'
-		  AND ts > now() - INTERVAL '30 minutes'
-	)
-	SELECT substr(cmd, 1, 60) AS prefix, COUNT(*) AS n FROM bash_fails
-	WHERE cmd IS NOT NULL
-	GROUP BY substr(cmd, 1, 60) HAVING COUNT(*) >= 3
-	ORDER BY n DESC LIMIT 5`
-
-	_, rows, err := d.client.Query(ctx, fmt.Sprintf(sqlFmt, escapeSQL(sessionID)))
-	if err != nil || len(rows) == 0 {
+	sql := fmt.Sprintf(`SELECT tool_input, cwd, event_type, tool_result, CAST(ts AS BIGINT) AS ts_ms
+ FROM tma1_hook_events WHERE session_id = '%s' AND tool_name = 'Bash'
+ AND event_type IN ('PostToolUse', 'PostToolUseFailure')
+ AND ts > now() - INTERVAL '30 minutes' ORDER BY ts DESC LIMIT 1000`, escapeSQL(sessionID))
+	_, rows, err := d.client.Query(ctx, sql)
+	if err != nil {
 		return nil, err
 	}
-	var out []Anomaly
-	for _, r := range rows {
-		prefix := stringAt(r, 0)
-		n := intAt(r, 1)
-		// Pull the most recent failure's stderr/result line so the
-		// suggestion names the actual error the agent keeps re-running
-		// into. Without this, the suggestion was "read the error
-		// output" -- which sent the agent grepping for context the
-		// rule already had access to.
-		lastErr := d.latestErrorLineForPrefix(ctx, sessionID, prefix)
-		var suggestion string
-		if lastErr != "" {
-			suggestion = fmt.Sprintf(
-				"Stop retrying `%s` and address this error first: %s",
-				prefix, lastErr,
-			)
-		} else {
-			suggestion = fmt.Sprintf(
-				"Read the actual error output from `%s` before retrying -- three consecutive identical failures means the root cause isn't fixed.",
-				prefix,
-			)
-		}
-		out = append(out, Anomaly{
-			Kind:       "repeated_failed_build",
-			Severity:   SeverityHigh,
-			Channel:    ChannelStopBlock,
-			Evidence:   fmt.Sprintf("`%s` failed %d times in the last 30 minutes.", prefix, n),
-			Suggestion: suggestion,
-		})
-	}
-	return out, nil
+	return repeatedBuildFailures(rows), nil
 }
 
-// latestErrorLineForPrefix returns a single representative error line
-// from the most recent Bash failure matching prefix. Returns "" when
-// the lookup fails or no row carries result text. The returned line is
-// truncated via oneLine() so a multi-KB stack trace doesn't bloat the
-// anomaly suggestion past the bundle budget.
-func (d *Detector) latestErrorLineForPrefix(ctx context.Context, sessionID, prefix string) string {
-	sql := fmt.Sprintf(
-		`SELECT tool_result FROM tma1_hook_events
-		 WHERE session_id = '%s'
-		   AND event_type = 'PostToolUseFailure' AND tool_name = 'Bash'
-		   AND substr(COALESCE(tool_command_prefix,
-		                       regexp_match(tool_input, '"command":"([^"]+)"')[1]), 1, 60) = '%s'
-		   AND ts > now() - INTERVAL '30 minutes'
-		   AND tool_result IS NOT NULL
-		 ORDER BY ts DESC LIMIT 1`,
-		escapeSQL(sessionID), escapeSQL(prefix),
-	)
-	_, rows, err := d.client.Query(ctx, sql)
-	if err != nil || len(rows) == 0 {
-		return ""
+func repeatedBuildFailures(rows [][]any) []Anomaly {
+	type run struct {
+		command, cwd, diagnostic string
+		failures                 int
+		closed                   bool
+		lastFailure              int64
 	}
-	raw := stringAt(rows[0], 0)
-	if raw == "" {
-		return ""
+	runs := map[string]*run{}
+	for _, row := range rows {
+		var input struct {
+			Command string `json:"command"`
+		}
+		if json.Unmarshal([]byte(stringAt(row, 0)), &input) != nil || !isBuildCommand(input.Command) {
+			continue
+		}
+		cwd := stringAt(row, 1)
+		if cwd == "" {
+			continue
+		}
+		key := cwd + "\x00" + input.Command
+		r := runs[key]
+		if r == nil {
+			r = &run{command: input.Command, cwd: cwd}
+			runs[key] = r
+		}
+		if r.closed {
+			continue
+		}
+		if stringAt(row, 2) == "PostToolUse" {
+			// Equal timestamps do not establish whether the success preceded a failure.
+			if r.lastFailure == int64At(row, 4) {
+				r.failures = 0
+			}
+			r.closed = true
+			continue
+		}
+		if r.failures == 0 {
+			r.diagnostic = firstErrorLine(stringAt(row, 3))
+		}
+		r.lastFailure = int64At(row, 4)
+		r.failures++
 	}
-	// Pick the first line that looks like an error message; fall back
-	// to the last non-empty line if no marker matches. Keeps the
-	// suggestion concrete instead of dragging "Compiling..." progress
-	// noise into it.
-	if line := firstErrorLine(raw); line != "" {
-		return oneLine(line, 200)
+	var out []Anomaly
+	for key, r := range runs {
+		if r.failures < 3 {
+			continue
+		}
+		suggestion := "Compare the latest diagnostic with the changes since the previous run before retrying. Repeated failures alone do not establish a loop or its cause."
+		if r.diagnostic != "" {
+			suggestion = "Latest diagnostic: " + oneLine(r.diagnostic, 200) + ". " + suggestion
+		}
+		out = append(out, Anomaly{Kind: "repeated_failed_build", Severity: SeverityMedium, Channel: ChannelUserPromptSubmit,
+			Evidence:   fmt.Sprintf("`%s` in %s has %d observed failures in the last 30 minutes since its most recent observed success (if any).", oneLine(r.command, 160), r.cwd, r.failures),
+			Suggestion: suggestion, identity: key})
 	}
-	return ""
+	sort.Slice(out, func(i, j int) bool { return out[i].identity < out[j].identity })
+	if len(out) > 5 {
+		out = out[:5]
+	}
+	return out
+}
+
+func isBuildCommand(command string) bool {
+	command = strings.TrimSpace(command)
+	prefixes := append([]string{"go build", "cargo build", "npm run build", "pnpm run build", "yarn build", "make build", "make test", "make check", "make lint", "cmake --build"}, testRunnerPrefixes...)
+	for _, prefix := range prefixes {
+		if command == prefix || strings.HasPrefix(command, prefix+" ") || strings.HasPrefix(command, prefix+"\t") {
+			return true
+		}
+	}
+	return false
 }
 
 // errorLineMarkers are case-insensitive substrings that indicate the
@@ -597,15 +418,15 @@ func (d *Detector) latestErrorLineForPrefix(ctx context.Context, sessionID, pref
 // list both compiler-style colon variants and free-text language-
 // specific tokens, ordered so the most discriminating match first.
 var errorLineMarkers = []string{
-	"error[", "error:",                     // compilers (rustc E-codes, gcc/clang colon)
-	"failed:", "failed ", "failure:",       // pytest "FAILED ", generic
-	"--- fail", "fail:",                    // go test
-	"panic:", "fatal:",                     // go panic, generic fatal
-	"undefined:", "undefined symbol",       // linker / compiler "undefined: X"
-	"cannot find ", "no such file",         // missing-symbol / missing-file diagnostics
-	"assertionerror", "typeerror",          // python / js runtime types
+	"error[", "error:", // compilers (rustc E-codes, gcc/clang colon)
+	"failed:", "failed ", "failure:", // pytest "FAILED ", generic
+	"--- fail", "fail:", // go test
+	"panic:", "fatal:", // go panic, generic fatal
+	"undefined:", "undefined symbol", // linker / compiler "undefined: X"
+	"cannot find ", "no such file", // missing-symbol / missing-file diagnostics
+	"assertionerror", "typeerror", // python / js runtime types
 	"syntaxerror", "valueerror", "runtimeerror",
-	"exception", "uncaught",                // generic runtime
+	"exception", "uncaught", // generic runtime
 }
 
 // firstErrorLine scans raw line-by-line looking for the first line
@@ -659,8 +480,8 @@ func (d *Detector) ruleStaleFileView(ctx context.Context, sessionID string) ([]A
 		        CASE WHEN tool_name = 'Read' THEN 'read' ELSE 'edit' END AS kind
 		 FROM tma1_hook_events
 		 WHERE session_id = '%s'
-		   AND event_type = 'PreToolUse'
-		   AND tool_name IN ('Read','Edit','MultiEdit','Write')
+		   AND ((event_type = 'PostToolUse' AND tool_name = 'Read')
+             OR (event_type = 'PreToolUse' AND tool_name IN ('Edit','MultiEdit','Write')))
 		   AND ts > now() - INTERVAL '%d minutes'
 		 ORDER BY ts ASC`,
 		escapeSQL(sessionID), window,
@@ -757,7 +578,7 @@ func (d *Detector) ruleStaleFileView(ctx context.Context, sessionID string) ([]A
 // so it's directly unit-testable without a live GreptimeDB.
 //
 // Inputs are timestamps (ms) for one file in one session:
-//   - reads:   PreToolUse Read events
+//   - reads:   successful PostToolUse Read events
 //   - edits:   PreToolUse Edit/MultiEdit/Write events
 //   - changes: modifications outside observed agent writes on the same file
 //
@@ -786,6 +607,11 @@ func detectStaleEdit(reads, edits, changes []int64) int64 {
 			}
 		}
 	}
+	for _, read := range reads {
+		if read > staleChangeMs {
+			return 0
+		}
+	}
 	return staleChangeMs
 }
 
@@ -793,18 +619,7 @@ func detectStaleEdit(reads, edits, changes []int64) int64 {
 // R-test-stuck — same test name appears in Bash failure outputs 3+ times
 // ───────────────────────────────────────────────────────────────────────
 
-// testRunnerPrefixes are the canonical prefixes for test-runner
-// invocations across the languages we know agents work in. A Bash
-// command whose first token (or first two for "npm run") matches one
-// of these is treated as a test run. Listed lowercase; matching is
-// LIKE against tool_command_prefix which is already lowercased at
-// ingest -- nope, it isn't; we use the LIKE escape pattern instead.
-//
-// Adding a runner: append a pattern that, when used in
-// `tool_command_prefix LIKE '<pattern>%'`, identifies a test
-// invocation. The trailing space-or-end is implicit in the 60-char
-// prefix store. GreptimeDB's LIKE escape char is backslash, which
-// sqlutil.EscapeLike emits inline — no explicit ESCAPE clause needed.
+// Recognized test invocations; wrapped shell scripts are not inferred.
 var testRunnerPrefixes = []string{
 	"go test",
 	"cargo test",
@@ -830,59 +645,6 @@ var testRunnerPrefixes = []string{
 	"bundle exec rspec",
 	"mix test",
 }
-
-func (d *Detector) ruleTestStuck(ctx context.Context, sessionID string) ([]Anomaly, error) {
-	// Cross-language: instead of regex-extracting a test name from
-	// tool_result (which only worked for Go-style "--- FAIL: TestX"),
-	// we now group Bash failures by the leading test-runner command
-	// across all supported runners. Cost: we lose the specific test ID
-	// in the evidence; gain: the rule actually fires in pytest / jest /
-	// cargo-test / mocha / vitest / rspec / phpunit / mix-test projects
-	// instead of being silently dead.
-	clauses := make([]string, 0, len(testRunnerPrefixes))
-	for _, p := range testRunnerPrefixes {
-		clauses = append(clauses,
-			fmt.Sprintf("tool_command_prefix LIKE '%s%%'", escapeSQLLike(p)))
-	}
-	sql := fmt.Sprintf(
-		`SELECT tool_command_prefix AS prefix, COUNT(*) AS n
-		 FROM tma1_hook_events
-		 WHERE session_id = '%s'
-		   AND event_type = 'PostToolUseFailure' AND tool_name = 'Bash'
-		   AND ts > now() - INTERVAL '30 minutes'
-		   AND tool_command_prefix IS NOT NULL
-		   AND (%s)
-		 GROUP BY tool_command_prefix
-		 HAVING COUNT(*) >= 3
-		 ORDER BY n DESC LIMIT 5`,
-		escapeSQL(sessionID),
-		strings.Join(clauses, " OR "),
-	)
-	_, rows, err := d.client.Query(ctx, sql)
-	if err != nil || len(rows) == 0 {
-		return nil, err
-	}
-	var out []Anomaly
-	for _, r := range rows {
-		prefix := stringAt(r, 0)
-		n := intAt(r, 1)
-		if prefix == "" {
-			continue
-		}
-		out = append(out, Anomaly{
-			Kind:       "test_stuck",
-			Severity:   SeverityMedium,
-			Channel:    ChannelUserPromptSubmit,
-			Evidence:   fmt.Sprintf("`%s` failed %d times in the last 30 minutes.", prefix, n),
-			Suggestion: fmt.Sprintf("Inspect the test fixture or mock for the failing case in `%s` — three identical test-run failures rarely fix themselves with another code tweak.", prefix),
-		})
-	}
-	return out, nil
-}
-
-// ───────────────────────────────────────────────────────────────────────
-// R-external-during — changes outside observed agent writes during this session
-// ───────────────────────────────────────────────────────────────────────
 
 func (d *Detector) ruleExternalModifiedDuringSession(ctx context.Context, sessionID string) ([]Anomaly, error) {
 	winSQL := fmt.Sprintf(
@@ -952,37 +714,26 @@ func (d *Detector) ruleExternalModifiedDuringSession(ctx context.Context, sessio
 	}}, nil
 }
 
-// ───────────────────────────────────────────────────────────────────────
-// R-context-pressure — current context-window OCCUPANCY crosses a
-// configurable threshold (default 700k ≈ 70% of a 1M-token window).
-//
-// Occupancy is a point-in-time measurement, NOT a running total. Each
-// main-loop request resends the whole conversation, so one request's
-// (input_tokens + cache_read_tokens + cache_creation_tokens) is the size of
-// the prompt currently in the window. Two reasons the old SUM(input_tokens)
-// was wrong: (1) it accumulated across every turn, so it crossed any fixed
-// threshold on long sessions regardless of real occupancy and never receded
-// after the agent compacted history; (2) input_tokens alone undercounts the
-// live prompt badly, because prompt caching moves most of the prefix into
-// cache_read_tokens — the uncached remainder can be a few K while the window
-// is nearly full. We take the MAX over the most recent usage-bearing rows so
-// an occasional small subagent/sidechain request can't mask the main-loop
-// occupancy, while the value still recedes once history is compacted.
-// ───────────────────────────────────────────────────────────────────────
-
+// Usage rows can be streaming deltas. A large input sample is advisory evidence,
+// not an exact occupancy measurement or a percentage of the model's window.
 func (d *Detector) ruleContextPressure(ctx context.Context, sessionID string) ([]Anomaly, error) {
 	threshold := contextPressureThreshold()
-	sql := fmt.Sprintf(
-		`SELECT COALESCE(MAX(occ), 0) FROM (
-		   SELECT COALESCE(input_tokens, 0) + COALESCE(cache_read_tokens, 0) + COALESCE(cache_creation_tokens, 0) AS occ
-		   FROM tma1_messages
-			 WHERE session_id = '%s'
-			   AND (input_tokens IS NOT NULL OR cache_read_tokens IS NOT NULL OR cache_creation_tokens IS NOT NULL)
-		   ORDER BY ts DESC
-		   LIMIT 20
-		 ) AS recent`,
-		escapeSQL(sessionID),
-	)
+	_, sources, err := d.client.Query(ctx, fmt.Sprintf(`SELECT agent_source FROM tma1_hook_events
+ WHERE session_id = '%s' AND agent_source IS NOT NULL AND agent_source <> '' ORDER BY ts DESC LIMIT 1`, escapeSQL(sessionID)))
+	if err != nil || len(sources) == 0 {
+		return nil, err
+	}
+	input := "COALESCE(input_tokens, 0)"
+	switch stringAt(sources[0], 0) {
+	case "codex": // Codex input already includes cached tokens.
+	case "claude_code", "opencode":
+		input += " + COALESCE(cache_read_tokens, 0) + COALESCE(cache_creation_tokens, 0)"
+	default:
+		return nil, nil
+	}
+	sql := fmt.Sprintf(`SELECT %s AS occ FROM tma1_messages
+ WHERE session_id = '%s' AND %s > 0
+ AND ts > now() - INTERVAL '30 minutes' ORDER BY ts DESC LIMIT 1`, input, escapeSQL(sessionID), input)
 	_, rows, err := d.client.Query(ctx, sql)
 	if err != nil || len(rows) == 0 {
 		return nil, err
@@ -995,16 +746,12 @@ func (d *Detector) ruleContextPressure(ctx context.Context, sessionID string) ([
 		Kind:       "context_pressure",
 		Severity:   SeverityMedium,
 		Channel:    ChannelUserPromptSubmit,
-		Evidence:   fmt.Sprintf("Context window is ~%d tokens full (threshold %d).", occupancy, threshold),
-		Suggestion: "Summarise current progress, commit partial work, and start a fresh session before context window fills.",
+		Evidence:   fmt.Sprintf("Latest nonzero input-usage sample is %d tokens (configured threshold %d); the model context limit is not inferred.", occupancy, threshold),
+		Suggestion: "Check the agent context indicator. If it is near its limit, use the agent’s compaction workflow; input usage alone does not require a new session or a commit.",
 	}}, nil
 }
 
-// contextPressureThreshold returns the configured occupancy threshold, in
-// tokens of the current context window. `TMA1_CONTEXT_PRESSURE_THRESHOLD=<int>`
-// overrides the default of 700,000 (≈70% of a 1M-token window — the size of
-// current frontier coding models: Claude Opus/Sonnet, Gemini, GPT-4.1-class).
-// Agents on a smaller window (e.g. a 200k model) should set the env var lower.
+// contextPressureThreshold is an absolute input-usage threshold, not a model limit.
 func contextPressureThreshold() int64 {
 	if v := os.Getenv("TMA1_CONTEXT_PRESSURE_THRESHOLD"); v != "" {
 		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
@@ -1017,79 +764,6 @@ func contextPressureThreshold() int64 {
 // ───────────────────────────────────────────────────────────────────────
 // Helpers
 // ───────────────────────────────────────────────────────────────────────
-
-// isDocFile returns true for extensions where iterative edits are normal
-// (writing prose / configs), so we don't flag "edited X 4 times".
-func isDocFile(base string) bool {
-	low := strings.ToLower(base)
-	for _, ext := range []string{".md", ".json", ".txt", ".yml", ".yaml", ".toml"} {
-		if strings.HasSuffix(low, ext) {
-			return true
-		}
-	}
-	return false
-}
-
-// basename returns the last path segment of p, used to keep the LIKE
-// pattern short and likely to match how build tools print errors.
-// Uses pathutil so a Windows agent's file_path lifts the right name.
-func basename(p string) string {
-	return pathutil.Basename(p)
-}
-
-// extractErrorLine pulls a line number from a compiler / runtime error
-// message that mentions base. Cross-language patterns:
-//
-//	gcc/clang/rustc/go/tsc/pyright: "foo.go:42:7: error: ..." or
-//	                                  "foo.go:42: undefined: bar"
-//	python tracebacks:               'File "foo.py", line 42, in ...'
-//
-// Returns "" when no line number is recognisable. The base argument
-// scopes the search so a compile error in `bar.go` doesn't leak into
-// a suggestion about `foo.go`.
-//
-// Pure function, easy to unit-test against synthetic error snippets.
-func extractErrorLine(result, base string) string {
-	if result == "" || base == "" {
-		return ""
-	}
-	// Pattern 1: "<...path...><base>:<line>" -- the dominant compiler
-	// shape. We anchor to base + ":" so we don't pick up the line
-	// number of an unrelated file mentioned in the same blob.
-	if reBase := regexpQuoteBaseColon(base); reBase != nil {
-		if m := reBase.FindStringSubmatch(result); len(m) > 1 {
-			return m[1]
-		}
-	}
-	// Pattern 2: Python traceback `File "...<base>", line N`.
-	if rePy := regexpQuoteBasePyTraceback(base); rePy != nil {
-		if m := rePy.FindStringSubmatch(result); len(m) > 1 {
-			return m[1]
-		}
-	}
-	return ""
-}
-
-// Pre-built regex cache keyed by base would matter at scale; the rule
-// fires at most O(edits-per-session) times per Detect, so a tiny
-// regex compile per call is fine and keeps the lifecycle simple.
-func regexpQuoteBaseColon(base string) *regexp.Regexp {
-	pat := `\b` + regexp.QuoteMeta(base) + `:(\d+)`
-	re, err := regexp.Compile(pat)
-	if err != nil {
-		return nil
-	}
-	return re
-}
-
-func regexpQuoteBasePyTraceback(base string) *regexp.Regexp {
-	pat := `File\s+"[^"]*` + regexp.QuoteMeta(base) + `",\s*line\s+(\d+)`
-	re, err := regexp.Compile(pat)
-	if err != nil {
-		return nil
-	}
-	return re
-}
 
 // projectBasename: basename of the .git-preferred project root for cwd.
 func projectBasename(cwd string) string {

@@ -1003,14 +1003,10 @@
   <!-- ========================= PROMPTS VIEW ========================= -->
   <div id="view-prompts" style="display:none">
     <p class="panel-caption" style="padding:20px 32px 0" data-i18n="pr.signal_note"></p>
-    <div class="cards">
+    <div class="cards cards-3">
       <div class="card">
         <div class="label" data-i18n="pr.card.prompts">Total Prompts</div>
         <div class="value requests" id="pr-val-prompts">&mdash;</div>
-      </div>
-      <div class="card">
-        <div class="label" data-i18n="pr.card.avg_score">Text signal coverage</div>
-        <div class="value" id="pr-val-score">&mdash;</div>
       </div>
       <div class="card">
         <div class="label" data-i18n="pr.card.avg_turns">Avg Turns / Session</div>
@@ -1037,24 +1033,7 @@
 
     <!-- Overview -->
     <div class="tab-content active" id="tab-pr-overview">
-      <div class="trace-charts">
-        <div class="chart-container">
-          <h3 data-i18n="pr.score_distribution">Score Distribution</h3>
-          <div id="pr-chart-distribution"><div class="chart-empty" data-i18n="empty.waiting">Waiting for data...</div></div>
-        </div>
-        <div class="chart-container">
-          <h3 data-i18n="pr.score_trend">Score Trend</h3>
-          <div id="pr-chart-trend"><div class="chart-empty" data-i18n="empty.waiting">Waiting for data...</div></div>
-        </div>
-      </div>
-      <div class="chart-container">
-        <h3 data-i18n="pr.top_suggestions">Top Improvement Suggestions</h3>
-        <div id="pr-chart-suggestions"><div class="chart-empty" data-i18n="empty.waiting">Waiting for data...</div></div>
-      </div>
-      <div class="chart-container">
-        <h3 data-i18n="pr.dimension_breakdown">Dimension Breakdown</h3>
-        <div id="pr-chart-dimensions"><div class="chart-empty" data-i18n="empty.waiting">Waiting for data...</div></div>
-      </div>
+      <p class="panel-caption" data-i18n="pr.review_note"></p>
       <div class="chart-container" id="pr-ai-container" style="display:none">
         <h3 style="display:flex;align-items:center;gap:10px">
           <span data-i18n="pr.ai_insights">AI Insights</span>
@@ -1070,20 +1049,6 @@
 
     <!-- Prompts list -->
     <div class="tab-content" id="tab-pr-prompts">
-      <div class="filters">
-        <select class="filter-select" onchange="pr_onSortChange(this.value)">
-          <option value="time" data-i18n="pr.sort.time">Sort: Time</option>
-          <option value="score" data-i18n="pr.sort.score">Sort: Signal coverage</option>
-        </select>
-        <select class="filter-select" onchange="pr_onScoreFilterChange(this.value)">
-          <option value="all" data-i18n="pr.filter.all">Coverage: All</option>
-          <option value="unscored" data-i18n="pr.unscored">Unscored</option>
-          <option value="poor" data-i18n="pr.filter.poor">0–1 signals</option>
-          <option value="fair" data-i18n="pr.filter.fair">2–3 signals</option>
-          <option value="good" data-i18n="pr.filter.good">4 signals</option>
-          <option value="excellent" data-i18n="pr.filter.excellent">5 signals</option>
-        </select>
-      </div>
       <div id="pr-prompt-list"><div class="chart-empty" data-i18n="empty.waiting">Waiting for data...</div></div>
       <div id="pr-pagination" style="text-align:center;padding:16px 0"></div>
     </div>

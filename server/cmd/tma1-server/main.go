@@ -434,20 +434,18 @@ func main() {
 	versionFile := filepath.Join(cfg.DataDir, ".pricing-version")
 	upgraded := false
 	var upgradeErr error
-	{
-		old := readVersionFile(versionFile)
-		if old != greptimedb.PricingVersion {
-			upgraded = true
-			if old != "" {
-				logger.Info("pricing catalog update", "from", old, "to", greptimedb.PricingVersion)
-			}
-			if err := onUpgrade(cfg.GreptimeDBHTTPPort, logger); err != nil {
-				if greptimedb.IsTableNotFound(err) {
-					logger.Info("pricing table does not exist yet (fresh install), skipping truncate")
-				} else {
-					upgradeErr = err
-					logger.Warn("truncate pricing on upgrade failed, will retry next start", "err", err)
-				}
+	old := readVersionFile(versionFile)
+	if old != greptimedb.PricingVersion {
+		upgraded = true
+		if old != "" {
+			logger.Info("pricing catalog update", "from", old, "to", greptimedb.PricingVersion)
+		}
+		if err := onUpgrade(cfg.GreptimeDBHTTPPort, logger); err != nil {
+			if greptimedb.IsTableNotFound(err) {
+				logger.Info("pricing table does not exist yet (fresh install), skipping truncate")
+			} else {
+				upgradeErr = err
+				logger.Warn("truncate pricing on upgrade failed, will retry next start", "err", err)
 			}
 		}
 	}

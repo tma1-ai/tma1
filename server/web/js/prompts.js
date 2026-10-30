@@ -1,14 +1,10 @@
 // prompts.js — Prompt Evaluation & Improvement view
-// Depends on: core.js (query, rows, rowsToObjects, fmtNum, fmtCost, escapeHTML, intervalSQL, loadPricing, costCaseSQL),
-//             chart.js (renderUPlot), i18n.js (t)
+// Depends on core.js and i18n.js.
 
 var prPage = 0;
 var prPageSize = 50;
 var prHasNext = false;
-var prSort = 'time'; // 'time' | 'score'
-var prScoreFilter = 'all'; // 'all' | 'poor' | 'fair' | 'good' | 'excellent'
-var prPromptData = []; // cached scored prompts for current page
-var prAllScores = [];    // all composite scores for distribution
+var prPromptData = []; // prompts on the current page
 var prLLMAvailable = null; // null = unchecked, true/false
 var prExpandedIdx = -1;
 
@@ -59,13 +55,12 @@ function pr_reload() {
   pr_loadCards().then(function(ok) {
     if (!ok) {
       // Clear KPI cards and content areas when no data matches the filter.
-      ['pr-val-prompts', 'pr-val-score', 'pr-val-turns', 'pr-val-cost'].forEach(function(id) {
+      ['pr-val-prompts', 'pr-val-turns', 'pr-val-cost'].forEach(function(id) {
         var el = document.getElementById(id);
         if (el) el.textContent = '\u2014';
       });
       var empty = '<div class="chart-empty">' + t('empty.no_data') + '</div>';
-      ['pr-chart-distribution', 'pr-chart-trend', 'pr-chart-suggestions', 'pr-chart-dimensions', 'pr-prompt-list', 'pr-pattern-content'].forEach(function(id) {
-        if (chartInstances[id]) { chartInstances[id].destroy(); delete chartInstances[id]; }
+      ['pr-prompt-list', 'pr-pattern-content'].forEach(function(id) {
         var el = document.getElementById(id);
         if (el) el.innerHTML = empty;
       });
@@ -84,59 +79,17 @@ function pr_reload() {
 }
 
 // ============================================================
-// Scoring Engine
+// Request patterns
 // ============================================================
 
 var PR_VERBS = ['fix', 'add', 'implement', 'refactor', 'debug', 'explain', 'update', 'remove', 'test', 'review', 'create', 'change', 'optimize', 'migrate', 'upgrade', 'configure', 'write', 'build', 'check', 'find', 'search', 'read', 'show'];
-
-// These are text signals, not a calibrated measure of prompt quality.
-function pr_scorePrompt(content) {
-  var text = (content || '').trim();
-  var followup = /^(?:ok(?:ay)?|yes|no|thanks?|continue|go ahead|do it|lgtm|好的?|可以|继续|执行|同意|谢谢|没问题)[.!。！\s]*$/i.test(text);
-  var signals = {
-    specificity: /\b(?:fix|add|implement|refactor|debug|explain|update|remove|test|review|create|change|optimize|migrate|upgrade|configure|write|build|check|find|search|compare|summari[sz]e)\b|修复|添加|实现|重构|解释|更新|删除|测试|审查|创建|修改|优化|迁移|升级|配置|编写|检查|查找|调查|比较|总结/i.test(text),
-    context: /```|`[^`]+`|https?:\/\/|\b(?:currently|observed|actual|because|error|failed)\b|当前|目前|现状|报错|错误|原因|因为|参考/i.test(text),
-    clarity: /\b(?:should|expect|return|produce|display|output|result|so that)\b|应该|预期|返回|输出|结果|显示|希望|目标|使得/i.test(text),
-    constraints: /\b(?:must|without|preserve|only|avoid|do not|don't|limit|compatible)\b|必须|不要|不得|保持|保留|只|避免|限制|兼容/i.test(text),
-    verification: /\b(?:test|verify|validate|acceptance|assert|reproduce|example|check)\b|测试|验证|验收|断言|复现|示例|检查/i.test(text),
-  };
-  var dims = {_patterns: [], _stats: {}, followup: followup, evidence: signals};
-  Object.keys(signals).forEach(function(key) { dims[key] = followup ? null : (signals[key] ? 100 : 0); });
-  dims.composite = followup || !text ? null : Object.values(signals).filter(Boolean).length * 20;
-  return dims;
-}
-
-function pr_scoreTier(score) {
-  if (score == null) return 'unscored';
-  if (score >= 90) return 'excellent';
-  if (score >= 70) return 'good';
-  if (score >= 40) return 'fair';
-  return 'poor';
-}
-
-function pr_tierColor(tier) {
-  return {excellent:'var(--green)',good:'var(--blue)',fair:'var(--yellow)',poor:'var(--text-muted)',unscored:'var(--text-muted)'}[tier];
-}
-
-function pr_mean(values) {
-  var known = values.filter(function(value) { return Number.isFinite(value); });
-  return known.length ? known.reduce(function(a,b) { return a+b; },0)/known.length : null;
-}
-
-function pr_getSuggestions(content, dims) {
-  if (dims.followup) return [t('pr.sug.followup')];
-  var suggestions = [];
-  if (/\[(?:TODO|TBD|insert [^\]]+|file path)\]|<insert[^>]*>/i.test(content)) suggestions.push(t('pr.sug.placeholder'));
-  if (dims.evidence.specificity && !dims.evidence.clarity && !dims.evidence.verification) suggestions.push(t('pr.sug.acceptance'));
-  return suggestions;
-}
 
 // ============================================================
 // Data Loading
 // ============================================================
 
 var prTotalPrompts = 0; // full count from DB (may exceed analyzed)
-var prDataCache = null; // { range: string, data: scored[] }
+var prDataCache = null; // { range: string, data: requests[] }
 var prDataGeneration = 0; // incremented on each pr_loadData(), used as AI insights cache key
 
 async function pr_loadCards() {
@@ -168,7 +121,6 @@ async function pr_loadCards() {
 async function pr_loadData() {
   // Return cached data if time range hasn't changed.
   if (prDataCache && prDataCache.range === currentTimeRange) {
-    prAllScores = prDataCache.data.map(function(s) { return s.dims.composite; }).filter(Number.isFinite);
     return prDataCache.data;
   }
 
@@ -183,18 +135,17 @@ async function pr_loadData() {
   var prompts = rowsToObjects(promptRes);
   if (!prompts || prompts.length === 0) return [];
 
-  var scored = prompts.map(function(p) {
+  var requests = prompts.map(function(p) {
     var earlier = prompts.filter(function(other) {
       return other.session_id === p.session_id && tsToMs(other.ts) < tsToMs(p.ts);
     }).slice(0, 4).reverse().map(function(other) { return other.content || ''; });
     return {sessionId:p.session_id, ts:p.ts, content:p.content || '', model:p.model || '',
-      dims:pr_scorePrompt(p.content || ''), previousPrompts:earlier};
+      previousPrompts:earlier};
   });
 
-  prAllScores = scored.map(function(s) { return s.dims.composite; }).filter(Number.isFinite);
-  prDataCache = { range: currentTimeRange, data: scored };
+  prDataCache = { range: currentTimeRange, data: requests };
   prDataGeneration++;
-  return scored;
+  return requests;
 }
 
 // ============================================================
@@ -202,157 +153,18 @@ async function pr_loadData() {
 // ============================================================
 
 async function pr_loadOverview() {
-  var scored = await pr_loadData();
-  if (!scored || scored.length === 0) return;
+  var requests = await pr_loadData();
+  if (!requests || requests.length === 0) return;
 
   // Update KPI: show analyzed count (may differ from total if truncated)
-  if (scored.length < prTotalPrompts) {
-    document.getElementById('pr-val-prompts').innerHTML = fmtNum(scored.length) +
+  if (requests.length < prTotalPrompts) {
+    document.getElementById('pr-val-prompts').innerHTML = fmtNum(requests.length) +
       ' <span style="font-size:12px;color:var(--text-dim);font-weight:400">/ ' + fmtNum(prTotalPrompts) + '</span>';
   }
-
-  // Update KPI: avg score
-  var avgScore = pr_mean(prAllScores);
-  document.getElementById('pr-val-score').innerHTML = pr_renderScoreRing(avgScore, 44);
-
-  // Score distribution (4 buckets)
-  var buckets = [0, 0, 0, 0]; // poor, fair, good, excellent
-  prAllScores.forEach(function(s) {
-    if (s >= 90) buckets[3]++;
-    else if (s >= 70) buckets[2]++;
-    else if (s >= 40) buckets[1]++;
-    else buckets[0]++;
-  });
-  pr_renderDistribution(buckets);
-
-  // Score trend
-  pr_renderTrend(scored);
-
-  // Top suggestions
-  pr_renderTopSuggestions(scored);
-
-  // Dimension breakdown
-  pr_renderDimensionBreakdown(scored);
 
   // AI Insights container (only when LLM configured)
   var aiContainer = document.getElementById('pr-ai-container');
   if (aiContainer) aiContainer.style.display = prLLMAvailable ? '' : 'none';
-}
-
-function pr_renderDistribution(buckets) {
-  var el = document.getElementById('pr-chart-distribution');
-  var labels = [t('pr.tier.poor'), t('pr.tier.fair'), t('pr.tier.good'), t('pr.tier.excellent')];
-  var colors = ['var(--text-muted)', 'var(--yellow)', 'var(--blue)', 'var(--green)'];
-  var max = Math.max.apply(null, buckets) || 1;
-
-  var html = '<div class="bar-chart">';
-  for (var i = 0; i < 4; i++) {
-    var pct = buckets[i] / max * 100;
-    html += '<div class="bar-row">' +
-      '<div class="bar-label">' + labels[i] + '</div>' +
-      '<div class="bar-track"><div class="bar-fill" style="width:' + pct + '%;background:' + colors[i] + '"></div></div>' +
-      '<div class="bar-value">' + buckets[i] + '</div></div>';
-  }
-  html += '</div>';
-  el.innerHTML = html;
-}
-
-function pr_renderTrend(scored) {
-  var el = document.getElementById('pr-chart-trend');
-  // Group by day
-  var dayMap = {};
-  scored.forEach(function(s) {
-    var day = new Date(tsToMs(s.ts)).toISOString().slice(0, 10);
-    if (!dayMap[day]) dayMap[day] = [];
-    if (s.dims.composite != null) dayMap[day].push(s.dims.composite);
-  });
-
-  var days = Object.keys(dayMap).sort();
-  if (days.length < 2) {
-    el.innerHTML = '<div class="chart-empty">' + t('pr.trend.not_enough') + '</div>';
-    return;
-  }
-
-  var timestamps = days.map(function(d) { return new Date(d).getTime() / 1000; });
-  var avgs = days.map(function(d) {
-    var arr = dayMap[d];
-    return pr_mean(arr);
-  });
-
-  el.innerHTML = '';
-  if (chartInstances['pr-chart-trend']) chartInstances['pr-chart-trend'].destroy();
-  var opts = {
-    width: el.clientWidth || 500,
-    height: 200,
-    series: [
-      {},
-      { label: t('pr.avg_score'), stroke: 'var(--blue)', width: 2, fill: 'rgba(121,192,255,0.1)' },
-    ],
-    axes: [
-      { stroke: 'var(--text-dim)', grid: { stroke: 'var(--border)' } },
-      { stroke: 'var(--text-dim)', grid: { stroke: 'var(--border)' }, values: function(u, vals) { return vals.map(function(v) { return v != null ? v : ''; }); } },
-    ],
-    scales: { y: { min: 0, max: 100 } },
-  };
-  chartInstances['pr-chart-trend'] = new uPlot(opts, [timestamps, avgs], el);
-}
-
-function pr_renderTopSuggestions(scored) {
-  var el = document.getElementById('pr-chart-suggestions');
-  // Count suggestion frequency
-  var counts = {};
-  scored.forEach(function(s) {
-    var suggestions = pr_getSuggestions(s.content, s.dims);
-    suggestions.forEach(function(sug) {
-      counts[sug] = (counts[sug] || 0) + 1;
-    });
-  });
-
-  var sorted = Object.entries(counts).sort(function(a, b) { return b[1] - a[1]; }).slice(0, 5);
-  if (sorted.length === 0) {
-    el.innerHTML = '<div class="chart-empty">' + t('pr.no_suggestions') + '</div>';
-    return;
-  }
-
-  var total = scored.length;
-  var html = '';
-  sorted.forEach(function(entry, i) {
-    var pct = Math.round(entry[1] / total * 100);
-    html += '<div class="pr-sug-card">' +
-      '<div class="pr-sug-card-head">' +
-        '<span class="pr-sug-rank">' + (i + 1) + '</span>' +
-        '<span class="pr-sug-badge">' + pct + '% ' + t('pr.of_prompts') + '</span>' +
-      '</div>' +
-      '<div class="pr-sug-card-body">' + escapeHTML(entry[0]) + '</div>' +
-    '</div>';
-  });
-  el.innerHTML = html;
-}
-
-function pr_renderDimensionBreakdown(scored) {
-  var el = document.getElementById('pr-chart-dimensions');
-  var dims = ['specificity', 'context', 'clarity', 'constraints', 'verification'];
-  var labels = [t('pr.dim.spec'), t('pr.dim.ctx'), t('pr.dim.clarity'), t('pr.dim.cost'), t('pr.dim.tool')];
-  var descs = [t('pr.dim.spec_desc'), t('pr.dim.ctx_desc'), t('pr.dim.clarity_desc'), t('pr.dim.cost_desc'), t('pr.dim.tool_desc')];
-
-  var avgs = dims.map(function(d) {
-    return pr_mean(scored.map(function(s) { return s.dims[d]; }));
-  });
-
-  var html = '';
-  for (var i = 0; i < dims.length; i++) {
-    var tier = pr_scoreTier(avgs[i]);
-    var color = pr_tierColor(tier);
-    html += '<div class="pr-dim-card">' +
-      '<div class="pr-dim-card-head">' +
-        '<span class="pr-dim-card-label">' + labels[i] + '</span>' +
-        '<span class="pr-dim-card-val" style="color:' + color + '">' + (avgs[i] == null ? '—' : Math.round(avgs[i])) + ' / 100</span>' +
-      '</div>' +
-      '<div class="bar-track" style="height:6px;border-radius:3px"><div class="bar-fill" style="width:' + (avgs[i] || 0) + '%;background:' + color + ';border-radius:3px"></div></div>' +
-      '<div class="pr-dim-card-desc">' + escapeHTML(descs[i]) + '</div>' +
-    '</div>';
-  }
-  el.innerHTML = html;
 }
 
 // ============================================================
@@ -360,34 +172,23 @@ function pr_renderDimensionBreakdown(scored) {
 // ============================================================
 
 async function pr_loadPrompts() {
-  var scored = (await pr_loadData()).slice();
-  if (!scored || scored.length === 0) {
+  var requests = (await pr_loadData()).slice();
+  if (!requests || requests.length === 0) {
     document.getElementById('pr-prompt-list').innerHTML = '<div class="chart-empty">' + t('empty.waiting') + '</div>';
     return;
   }
 
-  // Filter
-  if (prScoreFilter !== 'all') {
-    scored = scored.filter(function(s) { return pr_scoreTier(s.dims.composite) === prScoreFilter; });
-  }
+  requests.sort(function(a,b) { return tsToMs(b.ts)-tsToMs(a.ts); });
 
-  // Sort
-  if (prSort === 'score') {
-    scored.sort(function(a, b) { return (a.dims.composite == null ? Infinity : a.dims.composite) - (b.dims.composite == null ? Infinity : b.dims.composite); });
-  } else {
-    scored.sort(function(a,b) { return tsToMs(b.ts)-tsToMs(a.ts); });
-  }
-  // else time (already sorted by ts DESC)
-
-  prPromptData = scored;
+  prPromptData = requests;
 
   // Paginate
   var start = prPage * prPageSize;
-  var page = scored.slice(start, start + prPageSize);
-  prHasNext = scored.length > start + prPageSize;
+  var page = requests.slice(start, start + prPageSize);
+  prHasNext = requests.length > start + prPageSize;
 
   pr_renderPromptCards(page, start);
-  pr_renderPagination(scored.length);
+  pr_renderPagination(requests.length);
 }
 
 function pr_renderPromptCards(pageData, startIdx) {
@@ -400,12 +201,10 @@ function pr_renderPromptCards(pageData, startIdx) {
   var html = '';
   pageData.forEach(function(p, i) {
     var idx = startIdx + i;
-    var tier = pr_scoreTier(p.dims.composite);
     var expanded = prExpandedIdx === idx;
     var relTime = pr_relativeTime(p.ts);
     html += '<div class="pr-card' + (expanded ? ' expanded' : '') + '" data-idx="' + idx + '" onclick="pr_toggleCard(' + idx + ')">';
     html += '<div class="pr-card-header">';
-    html += '<div class="pr-score-dot ' + tier + '">' + (p.dims.composite == null ? '—' : p.dims.composite) + '</div>';
     html += '<div class="pr-card-meta">';
     html += '<span>' + escapeHTML(relTime) + '</span>';
     html += '<span class="pr-sep">\u00b7</span>';
@@ -423,35 +222,7 @@ function pr_renderPromptCards(pageData, startIdx) {
 }
 
 function pr_renderDetail(p) {
-  var dims = p.dims;
-  var suggestions = pr_getSuggestions(p.content, dims);
-  var dimNames = ['specificity', 'context', 'clarity', 'constraints', 'verification'];
-  var dimLabels = [t('pr.dim.spec'), t('pr.dim.ctx'), t('pr.dim.clarity'), t('pr.dim.cost'), t('pr.dim.tool')];
-
-  var html = '<div class="pr-detail">';
-
-  // Dimension bars
-  html += '<div class="pr-dims">';
-  for (var i = 0; i < dimNames.length; i++) {
-    var val = dims[dimNames[i]];
-    var tier = pr_scoreTier(val);
-    var color = pr_tierColor(tier);
-    html += '<div class="pr-dim-row">' +
-      '<div class="pr-dim-label">' + dimLabels[i] + '</div>' +
-      '<div class="pr-dim-track"><div class="pr-dim-fill" style="width:' + (val || 0) + '%;background:' + color + '"></div></div>' +
-      '<div class="pr-dim-val">' + (val == null ? '—' : val) + '</div></div>';
-  }
-  html += '</div>';
-
-  // Suggestions
-  if (suggestions.length > 0) {
-    html += '<div class="pr-suggestions">';
-    html += '<div class="pr-suggestions-title">' + t('pr.suggestions') + '</div>';
-    suggestions.forEach(function(s) {
-      html += '<div class="pr-suggestion-item">' + escapeHTML(s) + '</div>';
-    });
-    html += '</div>';
-  }
+  var html = '<div class="pr-detail"><p class="panel-caption">' + t('pr.review_note') + '</p>';
 
   // LLM evaluate button
   if (prLLMAvailable) {
@@ -484,28 +255,14 @@ function pr_renderPagination(total) {
 function pr_prevPage() { if (prPage > 0) { prPage--; pr_loadPrompts(); } }
 function pr_nextPage() { if (prHasNext) { prPage++; pr_loadPrompts(); } }
 
-function pr_onSortChange(val) {
-  prSort = val;
-  prPage = 0;
-  prExpandedIdx = -1;
-  pr_loadPrompts();
-}
-
-function pr_onScoreFilterChange(val) {
-  prScoreFilter = val;
-  prPage = 0;
-  prExpandedIdx = -1;
-  pr_loadPrompts();
-}
-
 // ============================================================
 // Patterns Tab
 // ============================================================
 
 async function pr_loadPatterns() {
-  var scored = await pr_loadData();
+  var requests = await pr_loadData();
   var groups = {};
-  scored.forEach(function(p) { var verb = pr_extractVerb(p.content); groups[verb] = (groups[verb] || 0) + 1; });
+  requests.forEach(function(p) { var verb = pr_extractVerb(p.content); groups[verb] = (groups[verb] || 0) + 1; });
   var html = '<p class="panel-caption">' + t('pr.signal_note') + '</p><table><thead><tr><th>' + t('pr.pattern') + '</th><th>' + t('pr.count') + '</th></tr></thead><tbody>';
   Object.entries(groups).sort(function(a,b) { return b[1]-a[1]; }).forEach(function(row) {
     html += '<tr><td>' + escapeHTML(row[0]) + '</td><td>' + row[1] + '</td></tr>';
@@ -539,6 +296,26 @@ async function pr_checkLLM() {
   }
 }
 
+async function pr_evaluationContext(p) {
+  var where = " FROM tma1_messages WHERE session_id = '" + escapeSQLString(p.sessionId) + "' AND content IS NOT NULL AND content <> ''";
+  var select = 'SELECT "role", message_type, SUBSTR(content, 1, 1501) AS content, ts';
+  var results = await Promise.all([
+    query(select + where + ' AND ts < ' + tsToMs(p.ts) + ' ORDER BY ts DESC LIMIT 21'),
+    query(select + where + ' AND ts > ' + tsToMs(p.ts) + ' ORDER BY ts ASC LIMIT 13'),
+  ]);
+  var before = rowsToObjects(results[0]);
+  var after = rowsToObjects(results[1]);
+  var boundary = after.findIndex(function(m) { return m.message_type === 'user'; });
+  var following = boundary < 0 ? after.slice(0,12) : after.slice(0,boundary);
+  var messages = before.slice(0,20).reverse().concat(following);
+  return {
+    excerpts: messages.map(function(m, i) { return {role:m.role, type:m.message_type,
+      position:i < Math.min(before.length,20) ? 'before' : 'after', content:m.content.slice(0,1500)}; }),
+    limitations: 'Partial transcript: at most 20 preceding and 12 following messages, 1500 characters each. Following messages stop at the next user request. Equal-timestamp messages are excluded because their order is unknown. Repository state and verified final outcome are not supplied.',
+    truncated: before.length > 20 || (boundary < 0 && after.length > 12) || messages.some(function(m) { return m.content.length > 1500; }),
+  };
+}
+
 async function pr_evaluate(idx) {
   var p = prPromptData[idx];
   if (!p) return;
@@ -548,12 +325,13 @@ async function pr_evaluate(idx) {
   if (btn) { btn.disabled = true; btn.textContent = t('pr.evaluating'); }
 
   try {
+    var context = await pr_evaluationContext(p);
     var resp = await fetch('/api/evaluate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         prompt: p.content,
-        context: {previous_prompts:p.previousPrompts || []},
+        context: context,
         lang: currentLocale || 'en',
       }),
     });
@@ -579,13 +357,9 @@ function pr_renderLLMResult(el, data) {
     if (data.reasoning) {
       html += '<div class="pr-ai-summary" style="margin-bottom:10px;font-style:italic">' + escapeHTML(data.reasoning) + '</div>';
     }
-    html += '<div style="font-size:13px;font-weight:600;margin-bottom:8px;color:var(--text)">' +
-      escapeHTML(data.total == null ? t('pr.unscored') : data.total + '/' + data.max_total) + '</div>';
     Object.entries(data.points).forEach(function(entry) {
       var dim = entry[0], detail = entry[1];
-      var pct = detail.score == null ? null : detail.score / 5 * 100;
-      var tier = pr_scoreTier(pct);
-      var color = pr_tierColor(tier);
+      var color = 'var(--text-muted)';
       html += '<div class="pr-dim-card" style="margin-bottom:6px">' +
         '<div class="pr-dim-card-head">' +
           '<span class="pr-dim-card-label">' + escapeHTML(dim) + '</span>' +
@@ -602,36 +376,13 @@ function pr_renderLLMResult(el, data) {
       html += '</div>';
     });
   }
-  // V1 fallback: raw 0-100 scores
-  else if (data.scores) {
-    html += '<div class="pr-dims" style="margin-bottom:8px">';
-    Object.entries(data.scores).forEach(function(entry) {
-      var val = entry[1];
-      var tier = pr_scoreTier(val);
-      var color = pr_tierColor(tier);
-      html += '<div class="pr-dim-row">' +
-        '<div class="pr-dim-label">' + escapeHTML(entry[0]) + '</div>' +
-        '<div class="pr-dim-track"><div class="pr-dim-fill" style="width:' + (val || 0) + '%;background:' + color + '"></div></div>' +
-        '<div class="pr-dim-val">' + (val == null ? '—' : val) + '</div></div>';
-    });
-    html += '</div>';
-  }
-
   // Suggestions
   if (data.suggestions && data.suggestions.length > 0) {
     html += '<div class="pr-suggestions" style="border-style:solid;border-color:var(--blue)">';
     html += '<div class="pr-suggestions-title" style="color:var(--blue)">' + t('pr.suggestions') + '</div>';
     data.suggestions.forEach(function(s) {
-      html += '<div class="pr-suggestion-item">' + escapeHTML(s) + '</div>';
+      html += '<div class="pr-suggestion-item"><strong>' + escapeHTML(t('pr.advice.' + s.target)) + '</strong><blockquote>' + s.evidence.map(escapeHTML).join('<br>') + '</blockquote><p>' + escapeHTML(s.impact) + '</p><p>' + escapeHTML(s.action) + '</p></div>';
     });
-    html += '</div>';
-  }
-
-  // Rewrite
-  if (data.rewrite) {
-    html += '<div class="pr-llm-rewrite">';
-    html += '<div class="pr-llm-rewrite-label">' + t('pr.suggested_rewrite') + '</div>';
-    html += escapeHTML(data.rewrite);
     html += '</div>';
   }
 
@@ -645,8 +396,8 @@ function pr_renderLLMResult(el, data) {
 
 var prAIInsightsCache = {};
 
-function pr_samplePrompts(scored) {
-  var ordered = scored.slice().sort(function(a,b) { return tsToMs(a.ts)-tsToMs(b.ts); });
+function pr_samplePrompts(requests) {
+  var ordered = requests.slice().sort(function(a,b) { return tsToMs(a.ts)-tsToMs(b.ts); });
   if (ordered.length <= 14) return ordered;
   return Array.from({length:14}, function(_,i) { return ordered[Math.floor(i*(ordered.length-1)/13)]; });
 }
@@ -674,14 +425,12 @@ async function pr_loadAIInsights() {
   // Snapshot stats before async LLM call (globals may change while awaiting).
   var snapshotTotal = dataset.length;
   var snapshotRange = currentTimeRange;
-  var avgScore = pr_mean(dataset.map(function(p) { return p.dims.composite; }));
-  if (avgScore != null) avgScore = Math.round(avgScore);
+  var avgScore = null;
 
   var payload = {
     prompts: sample.map(function(s) {
       return {
         content: s.content,
-        score: s.dims.composite,
         previous_prompts: s.previousPrompts || [],
       };
     }),
@@ -748,7 +497,6 @@ function pr_renderAIInsights(data) {
           if (s) {
             var preview = s.content.length > 120 ? s.content.slice(0, 120) + '...' : s.content;
             html += '<div class="pr-ai-example">' +
-              '<span class="pr-ai-example-score ' + pr_scoreTier(s.dims.composite) + '">' + s.dims.composite + '</span> ' +
               escapeHTML(preview) + '</div>';
           }
         });
@@ -786,7 +534,7 @@ var prActiveInsightId = null;
 async function pr_saveInsight(data) {
   try {
     var sampleForSave = (data._sample || []).map(function(s) {
-      return { content: (s.content || '').slice(0, 200), score: s.dims ? s.dims.composite : 0 };
+      return { content: s.content || '' };
     });
     await fetch('/api/insights', {
       method: 'POST',
@@ -799,7 +547,7 @@ async function pr_saveInsight(data) {
         sample_size: data._sampleSize || 0,
         total_prompts: data._totalSize || 0,
         avg_score: data._avgScore,
-        rubric_version: "text-signals-v3",
+        rubric_version: "task-evidence-v4",
         sample_prompts: sampleForSave,
         time_range: data._timeRange || currentTimeRange,
       }),
@@ -839,8 +587,6 @@ function pr_renderHistoryPanel(items) {
   var html = '<div class="pr-ai-history-panel">';
   items.forEach(function(item) {
     var id = item.insight_id || '';
-    var score = item.avg_score == null ? null : Number(item.avg_score);
-    var tier = pr_scoreTier(score);
     var sampleSize = Number(item.sample_size) || 0;
     var total = Number(item.total_prompts) || 0;
     var range = item.time_range || '';
@@ -851,8 +597,7 @@ function pr_renderHistoryPanel(items) {
     html += '<div class="pr-ai-history-card' + active + '" data-insight-id="' + escapeHTML(id) + '" onclick="pr_loadHistoryDetail(\'' + escapeJSString(id) + '\')">';
     html += '<div class="pr-ai-history-date">' + escapeHTML(ts) + '</div>';
     html += '<div class="pr-ai-history-meta">';
-    html += '<span class="pr-score-dot-sm ' + tier + '">' + (score == null ? '—' : score) + '</span>';
-    if (item.rubric_version !== 'text-signals-v3') html += '<span>Legacy rubric</span>';
+    if (item.rubric_version !== 'task-evidence-v4') html += '<span>Legacy rubric</span>';
     html += '<span>\u00b7</span>';
     html += '<span>' + sampleSize + ' / ' + total + ' ' + t('pr.ai_prompts_label') + '</span>';
     if (range) html += '<span>\u00b7</span><span>' + escapeHTML(range) + '</span>';
@@ -887,7 +632,7 @@ async function pr_loadHistoryDetail(insightId) {
       _sampleSize: Number(obj.sample_size) || 0,
       _totalSize: Number(obj.total_prompts) || 0,
       _sample: JSON.parse(obj.sample_prompts || '[]').map(function(s) {
-        return { content: s.content || '', dims: { composite: s.score == null ? null : s.score } };
+        return { content: s.content || '' };
       }),
     };
     prActiveInsightId = insightId;
@@ -914,25 +659,6 @@ function pr_onTabChange(tab) {
 // ============================================================
 // Helpers
 // ============================================================
-
-function pr_renderScoreRing(score, size) {
-  if (score == null) return '<span class="pr-score-num">—</span>';
-  score = Math.round(score);
-  var tier = pr_scoreTier(score);
-  var color = pr_tierColor(tier);
-  var r = (size - 6) / 2;
-  var circ = 2 * Math.PI * r;
-  var offset = circ * (1 - score / 100);
-  return '<div class="pr-score-ring" style="width:' + size + 'px;height:' + size + 'px">' +
-    '<svg width="' + size + '" height="' + size + '" viewBox="0 0 ' + size + ' ' + size + '">' +
-    '<circle cx="' + size / 2 + '" cy="' + size / 2 + '" r="' + r + '" fill="none" stroke="var(--border)" stroke-width="4"/>' +
-    '<circle cx="' + size / 2 + '" cy="' + size / 2 + '" r="' + r + '" fill="none" stroke="' + color + '" stroke-width="4" ' +
-    'stroke-dasharray="' + circ + '" stroke-dashoffset="' + offset + '" transform="rotate(-90 ' + size / 2 + ' ' + size / 2 + ')" ' +
-    'style="transition:stroke-dashoffset 0.5s ease"/>' +
-    '</svg>' +
-    '<span class="pr-score-num" style="color:' + color + '">' + score + '</span>' +
-    '</div>';
-}
 
 function pr_relativeTime(ts) {
   var ms = tsToMs(ts);

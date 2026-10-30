@@ -93,7 +93,7 @@ export const en: T = {
     kicker: 'Features', title: 'Observability that does something with what it sees',
     desc: 'Closed-loop perception and cross-agent collaboration come first. The dashboards back them up. One Go binary, one local time-series store, no Grafana, no YAML.',
     cards: [
-      { num: '01', title: 'Closes the agent loop', desc: 'TMA1 watches for repeated failures, stale views, broken builds. When a rule fires, it writes a concrete fix path into the agent’s next prompt — not into a dashboard for someone to read tomorrow. <strong>Five hooks</strong> deliver it. <strong>Six rules</strong>, each with an actionable suggestion. <strong>HIGH</strong> severity can block <code>Stop</code> so a broken build doesn’t silently ship.' },
+      { num: '01', title: 'Closes the agent loop', desc: 'Four advisory rules detect repeated build/test failures, stale file views, external file changes, and large input-usage samples. Findings include observed evidence and a next step in the agent context. Current rules do not block Stop.' },
       { num: '02', title: 'Cross-agent peer sessions', desc: 'Claude Code reads what Codex left on the same file, <em>verbatim</em>. Codex reads what Claude did. The <code>/tma1-peer</code> skill pulls the peer’s last session on this project — messages, tools used, files touched. By default an agent doesn’t see its own sessions in the peer list, so no echo chambers; ask for <code>self</code> and it reads its own history back.' },
       { num: '03', title: 'Anomaly detection', desc: 'An agent stuck in a retry loop can burn hundreds of dollars. Each agent view has an Anomalies tab. Click any flagged request to jump straight into the session and see what went wrong.' },
       { num: '04', title: 'Sessions', desc: 'Your agent ran for 25 minutes across 4 turns. What happened? Open the session overlay: left side shows file activity, context breakdown, and API calls. Right side is the full event timeline. Or watch the live canvas while your agent works.' },
@@ -108,10 +108,10 @@ export const en: T = {
     items: [
       {
         kind: 'repeated_failed_build',
-        severity: 'HIGH',
-        narrative: 'Wrapped with `tma1 build -- npm test`. Agent retried three times, same error each time.',
+        severity: 'MEDIUM',
+        narrative: 'Bash hooks record three failed `npm test` runs in the same directory without an intervening successful run.',
         // verbatim — do not translate (anomaly.go::repeated_failed_build, substituted with realistic values)
-        suggestion: 'Stop retrying `npm test` and address this error first: TypeError: Cannot read prop ‘user’ of undefined',
+        suggestion: 'Latest diagnostic: TypeError: Cannot read prop ‘user’ of undefined. Compare the latest diagnostic with the changes since the previous run before retrying. Repeated failures alone do not establish a loop or its cause.',
         footer: 'injected into next user_prompt_submit',
       },
       {
@@ -226,7 +226,7 @@ export const zh: T = {
     kicker: '功能', title: '会对观测结果采取行动的可观测性',
     desc: '闭环感知和跨 agent 协作是主轴，dashboard 提供事后复盘所需的证据。一个 Go 二进制，本地时序库，不需要 Grafana，不需要 YAML。',
     cards: [
-      { num: '01', title: '让 agent 形成闭环', desc: 'TMA1 持续关注重复失败、过期的文件视图和失败的 build。规则命中时，它把一条具体的修复路径写进 agent 的下一个 prompt，而不是写进一块等人明天来看的 dashboard。<strong>五个 hook</strong> 负责送达，<strong>六条规则</strong>各自给出可执行的建议。<strong>HIGH</strong> 级别可以 block <code>Stop</code>，避免失败的 build 静默交付。' },
+      { num: '01', title: '让 agent 形成闭环', desc: '四条提示规则检测重复的构建或测试失败、过期文件视图、外部文件变更和较大的输入用量样本。检测结果包含观测证据和下一步建议，写入 agent 上下文。当前规则不阻止 Stop。' },
       { num: '02', title: '跨 agent 的 peer session', desc: 'Claude Code <em>原样</em>读到 Codex 在同一个文件上留下的内容，反过来同样成立。<code>/tma1-peer</code> skill 取回 peer 在这个项目上最近一次 session：消息、用过的工具、动过的文件。默认不返回调用方自己的 session，避免 echo chamber；显式指定 <code>self</code> 就能读回自己的历史。' },
       { num: '03', title: '异常检测', desc: 'agent 卡在重试循环里可以烧掉几百美元。每个 agent 视图都有 Anomalies 标签页，点击任意一条异常可以直接跳到对应 session 定位问题。' },
       { num: '04', title: 'Sessions', desc: 'agent 跑了 25 分钟，中间发生了什么？打开 session overlay：左边是文件活动、上下文分布和 API 调用明细，右边是完整时间线。也可以打开 live canvas 实时观察 agent 工作。' },
@@ -241,10 +241,10 @@ export const zh: T = {
     items: [
       {
         kind: 'repeated_failed_build',
-        severity: 'HIGH',
-        narrative: '用 `tma1 build -- npm test` 包装。agent 跑了三次，每次都是同一个错误。',
+        severity: 'MEDIUM',
+        narrative: 'Bash hook 记录了同一目录中三次失败的 `npm test`，期间没有成功运行。',
         // verbatim — do not translate
-        suggestion: 'Stop retrying `npm test` and address this error first: TypeError: Cannot read prop ‘user’ of undefined',
+        suggestion: 'Latest diagnostic: TypeError: Cannot read prop ‘user’ of undefined. Compare the latest diagnostic with the changes since the previous run before retrying. Repeated failures alone do not establish a loop or its cause.',
         footer: 'injected into next user_prompt_submit',
       },
       {
@@ -358,7 +358,7 @@ export const es: T = {
     kicker: 'Funcionalidades', title: 'Observabilidad que hace algo con lo que ve',
     desc: 'Percepción en loop cerrado y colaboración entre agentes primero. Los dashboards quedan como respaldo. Un binario Go, un store de series temporales local, sin Grafana, sin YAML.',
     cards: [
-      { num: '01', title: 'Cierra el loop del agente', desc: 'TMA1 vigila fallos repetidos, vistas obsoletas y builds rotos. Cuando una regla se dispara, escribe un camino concreto de solución en el siguiente prompt del agente — no en un dashboard para que alguien lo lea mañana. <strong>Cinco hooks</strong> lo entregan. <strong>Seis reglas</strong>, cada una con una sugerencia accionable. Severidad <strong>HIGH</strong> puede bloquear <code>Stop</code> para que un build roto no se publique en silencio.' },
+      { num: '01', title: 'Cierra el loop del agente', desc: 'Cuatro reglas consultivas detectan fallos repetidos de compilación o pruebas, vistas de archivos obsoletas, cambios externos y muestras grandes de uso de entrada. Incluyen evidencia y una acción en el contexto del agente. Las reglas actuales no bloquean Stop.' },
       { num: '02', title: 'Sesiones de agentes pares', desc: 'Claude Code lee <em>palabra por palabra</em> lo que Codex dejó en el mismo archivo. Codex lee lo que Claude hizo. La skill <code>/tma1-peer</code> trae la última sesión del par en este proyecto: mensajes, herramientas usadas, archivos tocados. Por defecto un agente no ve sus propias sesiones en la lista de pares — sin cámaras de eco; pide <code>self</code> y recupera su propio historial.' },
       { num: '03', title: 'Detección de anomalías', desc: 'Un agente en un loop de reintentos puede quemar cientos de dólares. Cada vista de agente tiene una pestaña Anomalies. Haz clic en cualquiera para saltar a esa sesión y ver qué salió mal.' },
       { num: '04', title: 'Sessions', desc: 'Tu agente corrió 25 minutos. ¿Qué pasó? Abre el overlay de sesión: a la izquierda la actividad de archivos, contexto y API calls. A la derecha, el timeline completo. También puedes ver el canvas en vivo mientras tu agente trabaja.' },
@@ -373,10 +373,10 @@ export const es: T = {
     items: [
       {
         kind: 'repeated_failed_build',
-        severity: 'HIGH',
-        narrative: 'Envuelto con `tma1 build -- npm test`. El agente lo corrió tres veces, el mismo error cada vez.',
+        severity: 'MEDIUM',
+        narrative: 'Los hooks de Bash registran tres fallos de `npm test` en el mismo directorio sin una ejecución exitosa intermedia.',
         // verbatim — do not translate
-        suggestion: 'Stop retrying `npm test` and address this error first: TypeError: Cannot read prop ‘user’ of undefined',
+        suggestion: 'Latest diagnostic: TypeError: Cannot read prop ‘user’ of undefined. Compare the latest diagnostic with the changes since the previous run before retrying. Repeated failures alone do not establish a loop or its cause.',
         footer: 'injected into next user_prompt_submit',
       },
       {

@@ -42,8 +42,8 @@ TMA1 does two things.
 It feeds context to the agent. Before each turn the agent receives a
 `<tma1-context>` block: what it has done this session, which files changed
 under it, whether the build is broken, and any anomaly worth acting on.
-The `Stop` hook blocks turn completion while a HIGH-severity issue is
-unresolved. Ten MCP tools answer further queries on demand, including
+Current anomaly rules provide advisory context and do not block the `Stop`
+hook. Ten MCP tools answer further queries on demand, including
 keyword search across every session recorded on the machine.
 
 It reports to you. The dashboard covers token usage, cost, latency,
@@ -56,9 +56,11 @@ sessions: reported tokens, cache read share, tool failures, and compaction
 events. Missing usage is shown as unavailable. Input tokens include cache;
 output tokens include reasoning. Elapsed span includes idle time.
 
-Prompt rules display five optional text signals, not a quality score. Short
-acknowledgments remain unscored. Optional model assessments include source
-quotes and can abstain when conversation context is missing.
+Prompts lists requests without keyword-based scores. On-demand model reviews
+send the selected request and bounded conversation excerpts to the configured
+provider. Suggestions include source quotes, an impact, and a concrete action,
+separating request gaps from agent execution. The model can abstain when context
+is missing. AI Insights summarizes a text-only sample, not task outcomes.
 
 Cost estimates use standard short-context API list prices checked on
 2026-10-30. Unknown models show no estimate. Session costs also remain unknown
@@ -245,10 +247,9 @@ tma1 build --watch --tag dev -- npm run dev
 tma1 build --watch --tag watch -- cargo watch -x test
 ```
 
-The build sensor writes to `tma1_build_events`. Anomaly rules
-(`repeated_failed_build`, `build_broken_after_my_edit`) read this table
-to tell the agent to stop retrying the same failing command and fix the
-current error first.
+The build sensor writes to `tma1_build_events` for build status and error
+inspection. Repeated-failure detection uses completed Bash hook events,
+grouped by full command and working directory. See [anomaly rules](docs/anomalies.md).
 
 Supported flags:
 
