@@ -168,11 +168,15 @@ EOF
   return 1
 }
 
+greptime_version() {
+  "$1" --version 2>/dev/null | grep '^[[:space:]]*version:' | awk '{print $2}' || true
+}
+
 download_greptimedb() {
   local greptime_bin="${INSTALL_DIR}/greptime"
   if [ -f "$greptime_bin" ] && [ "$TMA1_FORCE" != "1" ]; then
     local installed_ver
-    installed_ver=$("$greptime_bin" --version 2>/dev/null | grep '^[[:space:]]*version:' | awk '{print $2}' || true)
+    installed_ver=$(greptime_version "$greptime_bin")
     if [ -z "$installed_ver" ]; then
       info "Cannot determine GreptimeDB version, upgrading..."
     elif [ "$TMA1_GREPTIMEDB_VERSION" = "latest" ]; then
@@ -201,19 +205,37 @@ download_greptimedb() {
   mkdir -p "$INSTALL_DIR"
   info "Downloading GreptimeDB via official install script..."
   local gdb_install_url="https://raw.githubusercontent.com/greptimeteam/greptimedb/main/scripts/install.sh"
-  local ok=0
-  # The official script installs to the current working directory.
-  # It accepts an optional version argument (default: latest).
+  # The official script installs into the current directory. If a greptime
+  # binary is already there it asks to override via /dev/tty, which a piped
+  # install cannot answer, and then exits 0 without installing. Run it in an
+  # empty directory on the same filesystem so the final mv is an atomic swap.
+  local tmp_dir
+  tmp_dir=$(mktemp -d "${INSTALL_DIR}/.greptime-download.XXXXXX")
   if [ "$TMA1_GREPTIMEDB_VERSION" != "latest" ]; then
-    (cd "$INSTALL_DIR" && curl -fsSL "$gdb_install_url" | sh -s -- "$TMA1_GREPTIMEDB_VERSION") && ok=1
+    (cd "$tmp_dir" && curl -fsSL "$gdb_install_url" | sh -s -- "$TMA1_GREPTIMEDB_VERSION") || true
   else
-    (cd "$INSTALL_DIR" && curl -fsSL "$gdb_install_url" | sh) && ok=1
+    (cd "$tmp_dir" && curl -fsSL "$gdb_install_url" | sh) || true
+  fi
+
+  # The script's exit status does not prove an install; check the binary.
+  local new_ver=""
+  [ -x "${tmp_dir}/greptime" ] && new_ver=$(greptime_version "${tmp_dir}/greptime")
+  local ok=0
+  if [ -n "$new_ver" ]; then
+    if [ "$TMA1_GREPTIMEDB_VERSION" = "latest" ]; then
+      version_lt "$new_ver" "$MIN_GREPTIMEDB_VERSION" || ok=1
+    elif [ "v${new_ver#v}" = "v${TMA1_GREPTIMEDB_VERSION#v}" ]; then
+      ok=1
+    fi
   fi
   if [ "$ok" != "1" ]; then
-    warn "GreptimeDB download failed. tma1-server will download it on first start."
+    rm -rf "$tmp_dir"
+    warn "GreptimeDB download failed${new_ver:+ (got ${new_ver})}. tma1-server will download it on first start."
     return
   fi
-  info "GreptimeDB installed to ${greptime_bin}"
+  mv -f "${tmp_dir}/greptime" "$greptime_bin"
+  rm -rf "$tmp_dir"
+  info "GreptimeDB ${new_ver} installed to ${greptime_bin}"
 }
 
 # --- Stop existing service before upgrade ---
