@@ -10,7 +10,7 @@ export interface T {
   features: { title: string; cards: Array<{ id: string; title: string; desc: string }> };
   video: string;
   context: { title: string; cards: Array<{ title: string; desc: string }> };
-  how: { title: string; label: string; manual: string; opencode: string; note: string };
+  how: { title: string; label: string; manual: string; opencode: string; note: string; otel: string };
   security: { title: string; desc: string; link: string };
   footer: { tagline: string };
   ui: { copy: string; copied: string; failed: string };
@@ -88,6 +88,7 @@ export const en: T = {
     "label": "Paste this instruction into Claude Code or Codex",
     "manual": "Manual installation",
     "opencode": "OpenCode setup →",
+    "otel": "OpenTelemetry SDKs: send OTLP/HTTP to http://localhost:14318/v1/otlp. GenAI traces use the OpenTelemetry GenAI semantic conventions.",
     "note": "OpenCode imports sessions through a plugin or an exported snapshot. Import does not install hooks or inject context. Copilot CLI session logs are discovered automatically."
   },
   "security": {
@@ -177,6 +178,7 @@ export const zh: T = {
     "label": "将这条指令粘贴到 Claude Code 或 Codex",
     "manual": "手动安装",
     "opencode": "OpenCode 接入说明 →",
+    "otel": "OpenTelemetry SDK 可将 OTLP/HTTP 数据发送到 http://localhost:14318/v1/otlp。GenAI trace 使用 OpenTelemetry GenAI 语义规范。",
     "note": "OpenCode 通过插件或导出快照导入会话，不安装 hooks，也不注入上下文。Copilot CLI 的会话日志会被自动发现。"
   },
   "security": {
@@ -266,6 +268,7 @@ export const es: T = {
     "label": "Pega esta instrucción en Claude Code o Codex",
     "manual": "Instalación manual",
     "opencode": "Configurar OpenCode →",
+    "otel": "SDKs OpenTelemetry: envía OTLP/HTTP a http://localhost:14318/v1/otlp. Los traces GenAI usan las convenciones semánticas GenAI de OpenTelemetry.",
     "note": "OpenCode importa sesiones mediante un plugin o una exportación. La importación no instala hooks ni inyecta contexto. Los logs de Copilot CLI se descubren automáticamente."
   },
   "security": {

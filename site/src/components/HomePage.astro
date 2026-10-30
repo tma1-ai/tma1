@@ -28,9 +28,15 @@ const navLinks = [
   </section>
 
   <figure class="overview">
-    <img class="theme-img" src="/screenshots/hero-light.webp"
+    <img id="hero-image" class="theme-img"
       data-light-src="/screenshots/hero-light.webp" data-dark-src="/screenshots/hero-dark.webp"
       alt={t.hero.overview} width="1440" height="1100" fetchpriority="high" />
+    <script is:inline>
+      var heroImage = document.getElementById('hero-image');
+      heroImage.src = document.documentElement.dataset.theme === 'dark'
+        ? heroImage.dataset.darkSrc : heroImage.dataset.lightSrc;
+    </script>
+    <noscript><img src="/screenshots/hero-dark.webp" alt={t.hero.overview} width="1440" height="1100" /></noscript>
     <figcaption><span>{t.hero.caption}</span><span>{t.demo}</span></figcaption>
   </figure>
 
@@ -83,6 +89,7 @@ curl -fsSL https://tma1.ai/install.sh | bash
 # Windows (PowerShell)
 irm https://tma1.ai/install.ps1 | iex</code></pre>
     </details>
+    <p class="integration-note">{t.how.otel}</p>
     <p class="integration-note">{t.how.note}</p>
     <a href={`${repo}/blob/main/docs/opencode.md`}>{t.how.opencode}</a>
   </section>
@@ -100,6 +107,7 @@ irm https://tma1.ai/install.ps1 | iex</code></pre>
 
 <style>
   .home { max-width: 1120px; padding: 0 32px; margin: auto; }
+  #hero-image:not([src]) { display: none; }
   .hero { padding: 80px 0 44px; }
   .eyebrow { color: var(--accent); font: 11px/1.5 monospace; letter-spacing: .14em; margin-bottom: 24px; }
   h1 { font-size: clamp(38px, 5.6vw, 68px); line-height: 1.08; font-weight: 550; letter-spacing: -.045em; }
@@ -157,7 +165,7 @@ irm https://tma1.ai/install.ps1 | iex</code></pre>
 </style>
 
 <script>
-  document.querySelectorAll<HTMLImageElement>('.theme-img').forEach(img => {
+  document.querySelectorAll<HTMLImageElement>('.theme-img:not(#hero-image)').forEach(img => {
     img.src = (document.documentElement.dataset.theme === 'dark' ? img.dataset.darkSrc : img.dataset.lightSrc)!;
   });
   document.querySelectorAll<HTMLButtonElement>('[data-feature]').forEach(button => {
