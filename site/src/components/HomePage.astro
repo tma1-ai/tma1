@@ -1,878 +1,182 @@
 ---
-import Lightbox from './Lightbox.astro';
 import SiteFooter from './SiteFooter.astro';
 import SiteHeader from './SiteHeader.astro';
 import type { T } from '../i18n/ui';
 
-interface Props {
-  t: T;
-}
-
+interface Props { t: T }
 const { t } = Astro.props;
-const lang = t.lang;
-const onboardingCmd = 'Read https://tma1.ai/SKILL.md and follow the instructions to install or upgrade TMA1 for your AI agent';
-const curlCmd = 'curl -fsSL https://tma1.ai/install.sh | bash';
-const psCmd = 'irm https://tma1.ai/install.ps1 | iex';
-
-// Showcase row layouts. First two rows are custom (loop scenarios, peer terminal);
-// remaining rows are standard screenshot showcases.
-type ShowcaseEntry =
-  | { kind: 'loop' }
-  | { kind: 'peer' }
-  | { kind: 'image'; dark: string; light: string; w: number; h: number; video?: string };
-
+const onboarding = 'Read https://tma1.ai/SKILL.md and follow the instructions to install or upgrade TMA1 for your AI agent';
+const repo = 'https://github.com/tma1-ai/tma1';
 const navLinks = [
   { href: '#features', label: t.nav.features },
   { href: '#how-it-works', label: t.nav.how },
   { href: '#security', label: t.nav.security },
 ];
-
-const footerLinks = [
-  { href: 'https://github.com/tma1-ai/tma1', label: 'GitHub' },
-  { href: 'https://github.com/tma1-ai/tma1/blob/main/LICENSE', label: 'Apache-2.0' },
-  { href: '#security', label: t.nav.security },
-];
-
-const showcase: ShowcaseEntry[] = [
-  { kind: 'loop' },                                                                                                                                              // 01 closes-loop
-  { kind: 'peer' },                                                                                                                                              // 02 cross-agent peer
-  { kind: 'image', dark: '/screenshots/anomaly-dark.webp',  light: '/screenshots/anomaly-light.webp',  w: 3024, h: 1706 },                                      // 03 anomalies
-  { kind: 'image', dark: '/screenshots/sessions-dark.webp', light: '/screenshots/sessions-light.webp', w: 3006, h: 1722, video: '/screenshots/session-live.mp4' }, // 04 sessions
-  { kind: 'image', dark: '/screenshots/tools-dark.webp',    light: '/screenshots/tools-light.webp',    w: 3010, h: 1706 },                                      // 05 tools
-  { kind: 'image', dark: '/screenshots/cost-dark.webp',     light: '/screenshots/cost-light.webp',     w: 3024, h: 1704 },                                      // 06 cost
-  { kind: 'image', dark: '/screenshots/security-dark.webp', light: '/screenshots/security-light.webp', w: 3010, h: 1154 },                                      // 07 security
-];
-// 08 search → renders as feature-standalone below the showcase rows.
 ---
 
-<SiteHeader lang={lang} product="tma1" links={navLinks} />
-
-<div class="container">
+<SiteHeader lang={t.lang} product="tma1" links={navLinks} />
+<main class="home">
   <section class="hero">
-    <p class="eyebrow">TMA1</p>
-    <h1>
-      {t.hero.h1_1}
-      <span class="muted">{t.hero.h1_2}</span>
-    </h1>
-    <p class="subtitle" set:html={t.hero.subtitle} />
-    <p class="hook"><span class="hook-text" data-hooks={JSON.stringify(t.hero.hooks)}>{t.hero.hooks[0]}</span><span class="hook-cursor">_</span></p>
-
-    <div class="loop-moment terminal">
-      <div class="terminal-header">
-        <span class="dot red"></span>
-        <span class="dot yellow"></span>
-        <span class="dot green"></span>
-        <span class="terminal-title">{t.hero.loop_moment.title_bar}</span>
-      </div>
-      <div class="loop-moment-body">
-        {t.hero.loop_moment.lines.map(line => (
-          line.kind === 'blank' ? (
-            <div class="loop-line"><span>&nbsp;</span></div>
-          ) : line.kind === 'comment' ? (
-            <div class="loop-line loop-comment"><span class="prompt">$</span><span># {line.text}</span></div>
-          ) : line.kind === 'cmd' ? (
-            <div class="loop-line"><span class="prompt">$</span><span>{line.text}</span></div>
-          ) : (
-            <div class="loop-line loop-tma1"><span class="tma1-tag">[tma1]</span><span>{line.text}</span></div>
-          )
-        ))}
-      </div>
+    <p class="eyebrow">TMA1 / AGENT OBSERVATORY</p>
+    <h1>{t.hero.h1_1}<br /><span>{t.hero.h1_2}</span></h1>
+    <p class="intro">{t.hero.subtitle}</p>
+    <div class="actions">
+      <a class="primary" href="#how-it-works">{t.hero.cta} <span aria-hidden="true">↗</span></a>
+      <a href={repo}>GitHub <span aria-hidden="true">↗</span></a>
     </div>
+    <p class="agents">Claude Code <span>·</span> Codex <span>·</span> Copilot CLI <span>·</span> OpenCode</p>
+  </section>
 
-    <div class="onboarding-card">
-      <p class="onboarding-label">{t.onboarding.label}</p>
-      <div class="onboarding-body">
-        <p class="onboarding-text">Read <a href="https://tma1.ai/SKILL.md">https://tma1.ai/SKILL.md</a> and follow the instructions to install or upgrade TMA1 for your AI agent</p>
-        <button class="copy-btn"
-          onclick={`navigator.clipboard.writeText('${onboardingCmd}').then(()=>{this.textContent='${t.ui.copied}';setTimeout(()=>this.textContent='${t.ui.copy}',1500)})`}>
-          {t.ui.copy}
-        </button>
-      </div>
+  <figure class="overview">
+    <img class="theme-img" src="/screenshots/hero-light.webp"
+      data-light-src="/screenshots/hero-light.webp" data-dark-src="/screenshots/hero-dark.webp"
+      alt={t.hero.overview} width="1440" height="1100" fetchpriority="high" />
+    <figcaption><span>{t.hero.caption}</span><span>{t.demo}</span></figcaption>
+  </figure>
+
+  <section id="features" class="section">
+    <h2>{t.features.title}</h2>
+    <div class="feature-picker" aria-label={t.nav.features}>
+      {t.features.cards.map((card, i) => (
+        <button type="button" data-feature={card.id} aria-pressed={i === 0 ? 'true' : 'false'} aria-controls={`feature-${card.id}`}>{card.title}</button>
+      ))}
     </div>
-
-    <details class="manual-install">
-      <summary>{t.onboarding.manual}</summary>
-      <div class="terminal install-terminal">
-        <div class="terminal-header">
-          <span class="dot red"></span>
-          <span class="dot yellow"></span>
-          <span class="dot green"></span>
-          <span class="terminal-title">terminal</span>
-        </div>
-        <div class="terminal-body">
-          <div class="line comment"># macOS / Linux</div>
-          <div class="line">
-            <span class="prompt">$</span>
-            <span class="cmd">{curlCmd}</span>
-          </div>
-          <div class="line">&nbsp;</div>
-          <div class="line comment"># Windows (PowerShell)</div>
-          <div class="line">
-            <span class="prompt">&gt;</span>
-            <span class="cmd">{psCmd}</span>
-          </div>
-        </div>
-      </div>
+    {t.features.cards.map((card, i) => (
+      <article id={`feature-${card.id}`} class="feature-panel" hidden={i !== 0}>
+        <p>{card.desc}</p>
+        <a href={`/screenshots/${card.id}-light.webp`} class="screenshot-link" aria-label={card.title}>
+          <img class="theme-img" src={`/screenshots/${card.id}-light.webp`}
+            data-light-src={`/screenshots/${card.id}-light.webp`} data-dark-src={`/screenshots/${card.id}-dark.webp`}
+            alt={card.title} width="1440" height="1000" loading="lazy" />
+        </a>
+      </article>
+    ))}
+    <details class="walkthrough">
+      <summary>{t.video}</summary>
+      <video controls playsinline preload="none" poster="/screenshots/sessions-light.webp" aria-label={t.video}>
+        <source src="/screenshots/session-live.mp4" type="video/mp4" />
+      </video>
+      <p class="media-note">{t.demo}</p>
     </details>
+  </section>
 
-    <div class="highlights">
-      {t.highlights.map(h => (
-        <div class="highlight-card">
-          <h3>{h.title}</h3>
-          <p set:html={h.desc} />
-        </div>
-      ))}
+  <section class="section context">
+    <h2>{t.context.title}</h2>
+    <div class="columns">
+      {t.context.cards.map(card => <article><h3>{card.title}</h3><p>{card.desc}</p></article>)}
     </div>
   </section>
 
-  <section id="features" class="features">
-    <p class="section-kicker">{t.features.kicker}</p>
-    <h2 class="section-title">{t.features.title}</h2>
-    <p class="section-desc">{t.features.desc}</p>
-    <div class="showcase">
-      {t.features.cards.slice(0, 7).map((c, i) => {
-        const entry = showcase[i];
-        return (
-          <div class={`showcase-row showcase-row--${entry.kind}${i % 2 === 1 ? ' flip' : ''}`}>
-            <div class="showcase-text">
-              <div class="feature-icon">{c.num}</div>
-              <h3>{c.title}</h3>
-              <p set:html={c.desc} />
-              {entry.kind === 'loop' && (
-                <div class="loop-preview showcase-frame">
-                  <div class="browser-chrome">
-                    <span class="dot red"></span>
-                    <span class="dot yellow"></span>
-                    <span class="dot green"></span>
-                    <span class="browser-url">localhost:14318</span>
-                  </div>
-                  <div class="showcase-frame__body">
-                    <img class="theme-img"
-                      data-dark-src="/screenshots/hero-dark.webp"
-                      data-light-src="/screenshots/hero-light.webp"
-                      src="/screenshots/hero-dark.webp"
-                      alt="TMA1 dashboard — cross-agent overview"
-                      loading="lazy" width={1440} height={1200} />
-                  </div>
-                </div>
-              )}
-            </div>
-            <div class="showcase-image">
-              {entry.kind === 'loop' ? (
-                <div class="loop-scenarios" aria-label="Anomaly scenarios">
-                  <p class="loop-scenarios-intro" set:html={t.loop_scenarios.intro} />
-                  <div class="loop-scenarios-grid">
-                    {t.loop_scenarios.items.map(item => (
-                      <article class="scenario-card">
-                        <div class="scenario-head">
-                          <span class="scenario-kind">{item.kind}</span>
-                          <span class={`scenario-severity scenario-severity--${item.severity.toLowerCase()}`}>{item.severity}</span>
-                        </div>
-                        <p class="scenario-narrative">{item.narrative}</p>
-                        <pre class="scenario-suggestion">{item.suggestion}</pre>
-                        <p class="scenario-footer">{item.footer}</p>
-                      </article>
-                    ))}
-                  </div>
-                </div>
-              ) : entry.kind === 'peer' ? (
-                <div class="peer-snippet">
-                  <p class="peer-snippet-intro" set:html={t.peer_demo.intro} />
-                  <div class="terminal">
-                    <div class="terminal-header">
-                      <span class="dot red"></span>
-                      <span class="dot yellow"></span>
-                      <span class="dot green"></span>
-                      <span class="terminal-title">{t.peer_demo.title_bar}</span>
-                    </div>
-                    <div class="terminal-body peer-body">
-                      {t.peer_demo.lines.map(line => (
-                        line.kind === 'blank' ? (
-                          <div class="line"><span>&nbsp;</span></div>
-                        ) : line.kind === 'prompt' ? (
-                          <div class="line"><span class="prompt">$</span><span class="peer-prompt">{line.text}</span></div>
-                        ) : (
-                          <div class="line peer-output"><span>{line.text}</span></div>
-                        )
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                <div class="showcase-frame">
-                  <div class="browser-chrome">
-                    <span class="dot red"></span>
-                    <span class="dot yellow"></span>
-                    <span class="dot green"></span>
-                    <span class="browser-url">localhost:14318</span>
-                  </div>
-                  <div class="showcase-frame__body">
-                    {entry.video ? (
-                      <div class="showcase-media-stack">
-                        <img class="theme-img showcase-still"
-                          data-dark-src={entry.dark}
-                          data-light-src={entry.light}
-                          src={entry.dark}
-                          alt={`TMA1 Dashboard — ${c.title}`}
-                          loading="lazy" width={entry.w} height={entry.h} />
-                        <video class="showcase-video" muted playsinline
-                          width={entry.w} height={entry.h}>
-                          <source src={entry.video} type="video/mp4" />
-                        </video>
-                      </div>
-                    ) : (
-                      <img class="theme-img"
-                        data-dark-src={entry.dark}
-                        data-light-src={entry.light}
-                        src={entry.dark}
-                        alt={`TMA1 Dashboard — ${c.title}`}
-                        loading="lazy" width={entry.w} height={entry.h} />
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        );
-      })}
+  <section id="how-it-works" class="section install">
+    <h2>{t.how.title}</h2>
+    <p>{t.how.label}</p>
+    <div class="install-command">
+      <p id="onboarding-command">{onboarding}</p>
+      <button type="button" id="copy-install" data-copied={t.ui.copied} data-failed={t.ui.failed}>{t.ui.copy}</button>
     </div>
-    {t.features.cards[7] && (
-      <div class="feature-standalone feature-standalone--demo">
-        <div class="feature-icon">{t.features.cards[7].num}</div>
-        <h3>{t.features.cards[7].title}</h3>
-        <p set:html={t.features.cards[7].desc} />
-        <p class="peer-snippet-intro" set:html={t.search_demo.intro} />
-        <div class="terminal">
-          <div class="terminal-header">
-            <span class="dot red"></span>
-            <span class="dot yellow"></span>
-            <span class="dot green"></span>
-            <span class="terminal-title">{t.search_demo.title_bar}</span>
-          </div>
-          <div class="terminal-body peer-body">
-            {t.search_demo.lines.map(line => (
-              line.kind === 'blank' ? (
-                <div class="line"><span>&nbsp;</span></div>
-              ) : line.kind === 'prompt' ? (
-                <div class="line"><span class="prompt">$</span><span class="peer-prompt">{line.text}</span></div>
-              ) : (
-                <div class="line peer-output"><span>{line.text}</span></div>
-              )
-            ))}
-          </div>
-        </div>
-      </div>
-    )}
+    <p id="copy-status" role="status"></p>
+    <details>
+      <summary>{t.how.manual}</summary>
+      <pre><code># macOS / Linux
+curl -fsSL https://tma1.ai/install.sh | bash
+
+# Windows (PowerShell)
+irm https://tma1.ai/install.ps1 | iex</code></pre>
+    </details>
+    <p class="integration-note">{t.how.note}</p>
+    <a href={`${repo}/blob/main/docs/opencode.md`}>{t.how.opencode}</a>
   </section>
 
-  <section id="how-it-works" class="how-it-works">
-    <p class="section-kicker">{t.how.kicker}</p>
-    <h2 class="section-title">{t.how.title}</h2>
-    <p class="section-desc">{t.how.desc}</p>
-    <div class="steps">
-      {t.how.steps.map(s => (
-        <div class="step">
-          <div class="step-num">{s.num}</div>
-          <div class="step-content">
-            <h3>{s.title}</h3>
-            <p set:html={s.desc} />
-          </div>
-        </div>
-      ))}
-    </div>
+  <section id="security" class="section privacy">
+    <h2>{t.security.title}</h2>
+    <p>{t.security.desc}</p>
+    <a href={`${repo}#supported-sources`}>{t.security.link}</a>
   </section>
-
-  <section id="security" class="security-section">
-    <p class="section-kicker">{t.security.kicker}</p>
-    <h2 class="section-title">{t.security.title}</h2>
-    <p class="section-desc">{t.security.desc}</p>
-
-    <article class="security-panel">
-      <h3 class="panel-title">{t.security.panel_title}</h3>
-      <p class="panel-body" set:html={t.security.panel_body} />
-    </article>
-
-    <div class="protection-grid">
-      {t.security.cards.map(c => (
-        <article class="protection-card">
-          <h4 class="protection-title">{c.title}</h4>
-          <p class="protection-body" set:html={c.desc} />
-        </article>
-      ))}
-    </div>
-  </section>
-
-  <section class="faq-section">
-    <p class="section-kicker">{t.faq.kicker}</p>
-    <h2 class="section-title">{t.faq.title}</h2>
-
-    <div class="faq-list">
-      {t.faq.items.map(item => (
-        <article class="faq-card">
-          <h3 class="faq-question">{item.q}</h3>
-          <p class="faq-answer" set:html={item.a} />
-        </article>
-      ))}
-    </div>
-  </section>
-
-  <Lightbox />
-</div>
-
-<SiteFooter lang={lang} product="tma1" links={footerLinks} tagline={t.footer.tagline} />
+</main>
+<SiteFooter lang={t.lang} product="tma1" links={[
+  { href: repo, label: 'GitHub' },
+  { href: `${repo}/blob/main/LICENSE`, label: 'Apache-2.0' },
+]} tagline={t.footer.tagline} />
 
 <style>
-  .container { max-width: 960px; margin: 0 auto; padding: 0 24px; }
-
-  /* Hero */
-  .hero { padding: 80px 0 48px; }
-  .hero .eyebrow {
-    font-family: "SF Mono", "Fira Code", monospace;
-    font-size: 13px; letter-spacing: 0.22em;
-    text-transform: uppercase; color: var(--accent);
-    margin-bottom: 16px;
-  }
-  .hero .hook {
-    font-family: "SF Mono", "Fira Code", monospace;
-    font-size: 14px; color: var(--text-muted);
-    max-width: 560px; line-height: 1.6;
-    margin-bottom: 32px; min-height: 3.2em;
-  }
-  .hero .hook-cursor {
-    color: var(--accent);
-    animation: blink 1.2s step-end infinite;
-  }
-  .hero h1 {
-    font-size: 56px; font-weight: 700; letter-spacing: -1.5px;
-    line-height: 1.1; margin-bottom: 20px; max-width: 16ch;
-  }
-  .hero h1 .muted { color: var(--text-muted); }
-  .hero .subtitle {
-    font-size: 18px; color: var(--text-muted);
-    max-width: 640px; line-height: 1.7; margin-bottom: 32px;
-  }
-  .hero .subtitle :global(em) {
-    font-style: normal; color: var(--accent); font-weight: 600;
-  }
-
-  /* Onboarding card */
-  .onboarding-card {
-    background: var(--bg-card); border: 1px solid var(--border);
-    border-radius: 12px; padding: 20px 24px;
-    max-width: 720px; margin-bottom: 16px;
-  }
-  .onboarding-label {
-    font-family: "SF Mono", "Fira Code", monospace;
-    font-size: 11px; letter-spacing: 0.2em;
-    color: var(--text-muted); margin-bottom: 12px;
-  }
-  .onboarding-body { display: flex; align-items: flex-start; gap: 16px; }
-  .onboarding-text {
-    font-family: "SF Mono", "Fira Code", monospace;
-    font-size: 14px; line-height: 1.6; color: var(--text); flex: 1;
-  }
-  .onboarding-text a {
-    color: var(--text); text-decoration: underline;
-    text-decoration-color: var(--text-muted); text-underline-offset: 2px;
-  }
-  .onboarding-text a:hover { text-decoration-color: var(--text); }
-  .copy-btn {
-    background: var(--bg-card); border: 1px solid var(--border);
-    border-radius: 6px; color: var(--text-muted);
-    padding: 6px 12px; cursor: pointer; font-size: 12px;
-    font-family: inherit; transition: border-color 0.15s, color 0.15s;
-    flex-shrink: 0; white-space: nowrap;
-  }
-  .copy-btn:hover { border-color: var(--text-muted); color: var(--text); }
-
-  /* Manual install */
-  .manual-install { max-width: 720px; margin-bottom: 24px; }
-  .manual-install summary {
-    font-size: 13px; color: var(--text-muted);
-    cursor: pointer; padding: 4px 0; margin-bottom: 8px;
-  }
-  .manual-install summary:hover { color: var(--text); }
-  .install-terminal { margin-top: 8px; }
-
-  /* Terminal chrome */
-  .terminal {
-    background: var(--terminal-bg); border: 1px solid var(--border);
-    border-radius: 10px; overflow: hidden;
-  }
-  .terminal-header {
-    display: flex; align-items: center; gap: 6px;
-    padding: 10px 14px; background: var(--terminal-header);
-    border-bottom: 1px solid var(--border);
-  }
-  .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; }
-  .dot.red { background: #ff5f57; }
-  .dot.yellow { background: #febc2e; }
-  .dot.green { background: #28c840; }
-  .terminal-title {
-    font-family: "SF Mono", "Fira Code", monospace;
-    font-size: 11px; color: var(--comment); margin-left: 6px;
-  }
-  .terminal-body {
-    padding: 16px 20px; font-family: "SF Mono", "Fira Code", monospace;
-    font-size: 14px; line-height: 1.7;
-  }
-  .terminal-body .line {
-    display: flex; align-items: baseline; gap: 8px; white-space: nowrap;
-  }
-  .terminal-body .prompt { color: var(--comment); user-select: none; flex-shrink: 0; }
-  .terminal-body .cmd { color: var(--accent); }
-  .terminal-body .arg { color: var(--purple); }
-  .terminal-body .url { color: var(--blue); }
-  .terminal-body .comment { color: var(--comment); font-style: italic; }
-
-  /* Hero loop-moment terminal — the "this is what TMA1 does" demo */
-  .loop-moment {
-    max-width: 720px;
-    margin: 8px 0 32px;
-  }
-  .loop-moment-body {
-    padding: 16px 20px;
-    font-family: "SF Mono", "Fira Code", monospace;
-    font-size: 14px; line-height: 1.7;
-  }
-  .loop-moment .loop-line {
-    display: flex; align-items: baseline; gap: 8px;
-    white-space: normal;
-    min-height: 1.7em;
-  }
-  .loop-moment .loop-line .prompt {
-    color: var(--comment);
-    user-select: none;
-    flex-shrink: 0;
-  }
-  .loop-moment .loop-comment { color: var(--comment); font-style: italic; }
-  .loop-moment .loop-tma1 { color: var(--text); }
-  .loop-moment .loop-tma1 .tma1-tag {
-    color: var(--accent); font-weight: 600;
-    flex-shrink: 0; user-select: none;
-  }
-  @media (prefers-reduced-motion: no-preference) {
-    .loop-moment .loop-line {
-      opacity: 0; transform: translateY(2px);
-      transition: opacity 0.4s ease-out, transform 0.4s ease-out;
-    }
-    .loop-moment.revealed .loop-line { opacity: 1; transform: none; }
-  }
-
-  /* Loop scenarios (inside feature row 01 — closes-loop) */
-  .loop-scenarios { display: flex; flex-direction: column; gap: 16px; }
-  .loop-scenarios-intro {
-    font-size: 14px; color: var(--text-muted);
-    line-height: 1.6; margin: 0;
-  }
-  .loop-scenarios-grid { display: flex; flex-direction: column; gap: 16px; }
-  .scenario-card {
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 20px;
-    background: var(--bg-card);
-    transition: border-color 0.2s, box-shadow 0.2s;
-  }
-  .scenario-card:hover {
-    border-color: var(--accent-border);
-    box-shadow: 0 0 12px var(--accent-shadow);
-  }
-  .scenario-head {
-    display: flex; justify-content: space-between; align-items: center;
-    margin-bottom: 10px; gap: 12px;
-  }
-  .scenario-kind {
-    font-family: "SF Mono", "Fira Code", monospace;
-    font-size: 12px; color: var(--text-muted);
-    letter-spacing: 0.04em; word-break: break-all;
-  }
-  .scenario-severity {
-    font-family: "SF Mono", "Fira Code", monospace;
-    font-size: 10px; font-weight: 700; letter-spacing: 0.12em;
-    padding: 2px 8px; border-radius: 4px;
-    border: 1px solid var(--border);
-    flex-shrink: 0;
-  }
-  .scenario-severity--high { color: var(--accent); border-color: var(--accent-border); }
-  .scenario-severity--medium { color: var(--text-muted); }
-  .scenario-narrative {
-    font-size: 14px; color: var(--text);
-    line-height: 1.5; margin: 0 0 12px;
-  }
-  .scenario-suggestion {
-    font-family: "SF Mono", "Fira Code", monospace;
-    font-size: 13px;
-    background: var(--code-bg);
-    border-left: 2px solid var(--accent);
-    padding: 12px 14px;
-    margin: 0 0 12px;
-    color: var(--text);
-    line-height: 1.55;
-    white-space: pre-wrap;
-    word-break: break-word;
-    border-radius: 0 4px 4px 0;
-    overflow-x: auto;
-  }
-  .scenario-footer {
-    font-family: "SF Mono", "Fira Code", monospace;
-    font-size: 11px; color: var(--text-muted);
-    margin: 0; letter-spacing: 0.04em;
-  }
-
-  /* Peer-sessions snippet (inside feature row 02 — cross-agent peer) */
-  .peer-snippet { display: flex; flex-direction: column; gap: 16px; }
-  .peer-snippet-intro {
-    font-size: 14px; color: var(--text-muted);
-    line-height: 1.6; margin: 0;
-  }
-  .peer-body .line { white-space: normal; }
-  .peer-body .peer-prompt { color: var(--accent); font-weight: 500; }
-  .peer-body .peer-output { color: var(--text); }
-
-  /* Custom showcase rows align top (skip default text padding) */
-  .showcase-row--loop .showcase-text,
-  .showcase-row--peer .showcase-text { padding-top: 0; }
-
-  /* Highlights */
-  .highlights { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
-  .highlight-card {
-    background: var(--bg-card); border: 1px solid var(--border);
-    border-radius: 10px; padding: 20px;
-    transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s;
-  }
-  .highlight-card:hover {
-    border-color: var(--accent-border);
-    box-shadow: 0 0 12px var(--accent-shadow);
-    transform: translateY(-1px);
-  }
-  .highlight-card h3 { font-size: 15px; margin-bottom: 6px; letter-spacing: -0.02em; }
-  .highlight-card p { font-size: 14px; color: var(--text-muted); line-height: 1.5; }
-
-  /* Shared section */
-  .section-kicker {
-    font-family: "SF Mono", "Fira Code", monospace;
-    font-size: 12px; letter-spacing: 0.22em;
-    text-transform: uppercase; color: var(--accent); margin-bottom: 12px;
-  }
-  .section-kicker::before { content: "> "; }
-  .section-title {
-    font-size: 36px; font-weight: 700; letter-spacing: -0.8px;
-    line-height: 1.15; margin-bottom: 12px;
-  }
-  .section-desc {
-    font-size: 16px; color: var(--text-muted);
-    line-height: 1.6; max-width: 640px; margin-bottom: 32px;
-  }
-
-  /* Browser-chrome shared by showcase frames */
-  .browser-chrome {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 10px 14px;
-    background: var(--terminal-header);
-    border-bottom: 1px solid var(--border);
-  }
-  .browser-url {
-    font-family: "SF Mono", "Fira Code", monospace;
-    font-size: 11px;
-    color: var(--comment);
-    margin-left: 8px;
-    background: var(--bg);
-    padding: 2px 10px;
-    border-radius: 4px;
-    border: 1px solid var(--border);
-  }
-
-  /* Features */
-  .features { padding: 60px 0; border-top: 1px solid var(--border); }
-  .feature-icon {
-    font-family: "SF Mono", "Fira Code", monospace;
-    font-size: 13px; color: var(--accent); margin-bottom: 12px;
-  }
-
-  /* Showcase Rows */
-  .showcase .showcase-row:first-child { padding-top: 16px; }
-  .showcase-row {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 48px;
-    align-items: start;
-    padding: 48px 0;
-    border-bottom: 1px solid var(--border);
-  }
-  .showcase-row:last-of-type { border-bottom: none; }
-  .showcase-row.flip .showcase-text { order: 2; }
-  .showcase-row.flip .showcase-image { order: 1; }
-  .showcase-text {
-    padding-top: 48px;
-  }
-  .showcase-text h3 {
-    font-size: 22px; font-weight: 700;
-    letter-spacing: -0.03em; margin-bottom: 12px;
-  }
-  .showcase-text p {
-    font-size: 15px; color: var(--text-muted); line-height: 1.65;
-  }
-  /* Dashboard preview tucked under the row-01 description, filling the
-     empty left half that would otherwise leave the loop-scenarios on
-     the right looking unbalanced. */
-  .loop-preview { margin-top: 28px; }
-
-  /* Screenshot frame */
-  .showcase-frame {
-    border-radius: 10px;
-    overflow: hidden;
-    border: 1px solid var(--border);
-    box-shadow: 0 4px 24px var(--shadow);
-    transition: box-shadow 0.3s, border-color 0.3s;
-  }
-  .showcase-frame:hover {
-    border-color: var(--accent-border);
-    box-shadow: 0 4px 24px var(--shadow), 0 0 0 1px var(--accent-border);
-  }
-  .showcase-frame .browser-chrome { padding: 8px 12px; }
-  .showcase-frame .browser-url { font-size: 10px; }
-  .showcase-frame__body { line-height: 0; }
-  .showcase-frame__body img, .showcase-frame__body video {
-    width: 100%; height: auto; display: block;
-  }
-  .showcase-media-stack { position: relative; }
-  .showcase-media-stack .showcase-video {
-    position: absolute; inset: 0; opacity: 0;
-    transition: opacity 0.8s ease;
-    /* Video sits on top of the still image with inset:0, so without
-       pointer-events:none it catches every click and the lightbox
-       handler (bound to .showcase-frame img) never fires. The video
-       is decorative — clicks belong to the underlying screenshot. */
-    pointer-events: none;
-  }
-  .showcase-media-stack .showcase-video.active { opacity: 1; }
-  .showcase-frame--padded .showcase-frame__body {
-    display: flex;
-    align-items: center;
-    aspect-ratio: 2938 / 1200;
-    background: var(--bg);
-  }
-
-  /* Standalone feature card (Full-text search) */
-  .feature-standalone--demo {
-    max-width: 860px;
-  }
-
-  .feature-standalone--demo .peer-snippet-intro,
-  .feature-standalone--demo .terminal {
-    text-align: left;
-  }
-
-  .feature-standalone--demo .peer-snippet-intro {
-    margin-top: 24px;
-  }
-
-  .feature-standalone {
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 32px;
-    margin-top: 48px;
-    padding-top: 48px;
-    text-align: center;
-    max-width: 560px;
-    margin-left: auto;
-    margin-right: auto;
-    transition: border-color 0.2s, box-shadow 0.2s;
-  }
-  .feature-standalone:hover {
-    border-color: var(--accent-border);
-    box-shadow: 0 0 12px var(--accent-shadow);
-  }
-  .feature-standalone h3 {
-    font-size: 18px; font-weight: 700;
-    letter-spacing: -0.02em; margin-bottom: 8px;
-  }
-  .feature-standalone p {
-    font-size: 15px; color: var(--text-muted); line-height: 1.55;
-  }
-
-  /* How it works */
-  .how-it-works { padding: 60px 0; border-top: 1px solid var(--border); }
-  .steps { display: flex; flex-direction: column; gap: 24px; max-width: 640px; }
-  .step { display: flex; gap: 16px; align-items: flex-start; }
-  .step-num {
-    font-family: "SF Mono", "Fira Code", monospace;
-    font-size: 15px; font-weight: 700; color: var(--accent);
-    flex-shrink: 0; line-height: 1.6;
-  }
-  .step-content h3 { font-size: 15px; margin-bottom: 4px; }
-  .step-content p { font-size: 14px; color: var(--text-muted); line-height: 1.5; }
-
-  /* Security */
-  .security-section { padding: 60px 0; border-top: 1px solid var(--border); }
-  .security-panel {
-    background: var(--bg-card); border: 1px solid var(--border);
-    border-radius: 10px; padding: 24px; margin-bottom: 20px;
-  }
-  .panel-title { font-size: 18px; font-weight: 700; margin-bottom: 10px; letter-spacing: -0.02em; }
-  .panel-body { font-size: 15px; color: var(--text-muted); line-height: 1.65; }
-  .protection-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
-  .protection-card {
-    background: var(--bg-card); border: 1px solid var(--border);
-    border-radius: 10px; padding: 20px;
-    transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s;
-  }
-  .protection-card:hover {
-    border-color: var(--accent-border);
-    box-shadow: 0 0 12px var(--accent-shadow);
-    transform: translateY(-1px);
-  }
-  .protection-title { font-size: 15px; font-weight: 700; margin-bottom: 8px; letter-spacing: -0.02em; }
-  .protection-body { font-size: 14px; color: var(--text-muted); line-height: 1.55; }
-
-  /* FAQ */
-  .faq-section { padding: 60px 0; border-top: 1px solid var(--border); }
-  .faq-list { display: flex; flex-direction: column; gap: 16px; }
-  .faq-card {
-    background: var(--bg-card); border: 1px solid var(--border);
-    border-radius: 10px; padding: 24px;
-    transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s;
-  }
-  .faq-card:hover {
-    border-color: var(--accent-border);
-    box-shadow: 0 0 12px var(--accent-shadow);
-    transform: translateY(-1px);
-  }
-  .faq-question { font-size: 16px; font-weight: 700; margin-bottom: 8px; letter-spacing: -0.02em; }
-  .faq-answer { font-size: 15px; color: var(--text-muted); line-height: 1.65; }
-
-  /* Responsive */
-  @media (max-width: 768px) {
-    /* Fluid below 400px: at a fixed 40px the longest Spanish headline word
-       is wider than the content box and pushes the page sideways. 10vw
-       reaches the 40px cap at 400px, so nothing changes above that. */
-    .hero h1 { font-size: clamp(28px, 10vw, 40px); max-width: 100%; }
-    .highlights { grid-template-columns: 1fr; }
-    .showcase-row {
-      grid-template-columns: 1fr;
-      gap: 24px;
-      padding: 32px 0;
-    }
-    .showcase .showcase-row:first-child { padding-top: 0; }
-    .showcase-row.flip .showcase-text { order: 1; }
-    .showcase-row.flip .showcase-image { order: 2; }
-    .showcase-text { padding-top: 0; }
-    .showcase-text h3 { font-size: 18px; }
-    .protection-grid { grid-template-columns: 1fr; }
-    .onboarding-card { max-width: 100%; }
-    .onboarding-body { flex-direction: column; gap: 12px; }
-    .manual-install { max-width: 100%; }
-    .terminal-body { overflow-x: auto; }
-    .terminal-body .line { min-width: 0; }
+  .home { max-width: 1120px; padding: 0 32px; margin: auto; }
+  .hero { padding: 80px 0 44px; }
+  .eyebrow { color: var(--accent); font: 11px/1.5 monospace; letter-spacing: .14em; margin-bottom: 24px; }
+  h1 { font-size: clamp(38px, 5.6vw, 68px); line-height: 1.08; font-weight: 550; letter-spacing: -.045em; }
+  h1 span { color: var(--text-muted); }
+  .intro { max-width: 670px; font-size: 18px; margin: 24px 0; color: var(--text-muted); }
+  .actions { display: flex; align-items: center; gap: 26px; font-size: 14px; }
+  .actions a { color: var(--text); }
+  .actions .primary { color: var(--bg); background: var(--accent); padding: 11px 18px; border-radius: 5px; text-decoration: none; }
+  .primary span { margin-left: 18px; }
+  .agents { font-size: 13px; color: var(--text-muted); margin-top: 32px; }
+  .agents span { padding: 0 9px; }
+  img, video { display: block; width: 100%; height: auto; border: 1px solid var(--border); border-radius: 8px; }
+  figcaption { display: flex; justify-content: space-between; gap: 12px; font-size: 11px; color: var(--text-muted); margin-top: 12px; }
+  .section { padding: 54px 0; border-bottom: 1px solid var(--border); scroll-margin-top: 64px; }
+  h2 { font-size: clamp(24px, 3vw, 30px); line-height: 1.3; letter-spacing: -.025em; font-weight: 550; margin-bottom: 24px; }
+  h3 { font-size: 16px; font-weight: 600; margin-bottom: 10px; }
+  .section p { color: var(--text-muted); font-size: 15px; }
+  .feature-picker { display: flex; flex-wrap: wrap; gap: 4px 18px; border-bottom: 1px solid var(--border); }
+  button { font: inherit; cursor: pointer; }
+  .feature-picker button { border: 0; border-bottom: 2px solid transparent; background: none; color: var(--text-muted); padding: 10px 0; font-size: 14px; }
+  .feature-picker button[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); }
+  .feature-panel p { max-width: 780px; min-height: 72px; padding: 20px 0; }
+  .feature-panel[hidden] { display: none; }
+  .screenshot-link { display: block; cursor: zoom-in; }
+  .walkthrough { margin-top: 22px; }
+  summary { cursor: pointer; font-size: 14px; padding: 8px 0; }
+  .walkthrough video { margin-top: 16px; }
+  .section .media-note { font-size: 11px; margin-top: 10px; }
+  .columns { display: grid; grid-template-columns: 1fr 1fr; gap: 48px; }
+  .install-command { display: flex; align-items: center; gap: 24px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 6px; padding: 18px 20px; margin-top: 16px; }
+  .install-command p { font: 13px/1.7 monospace; overflow-wrap: anywhere; }
+  .install-command button { border: 1px solid var(--border); border-radius: 4px; background: var(--bg); color: var(--text); padding: 7px 12px; flex-shrink: 0; font-size: 12px; }
+  #copy-status:empty { display: none; }
+  #copy-status { margin-top: 8px; }
+  .install details { margin-top: 12px; }
+  .integration-note { max-width: 760px; margin: 24px 0 10px; }
+  .privacy p { max-width: 760px; margin-bottom: 16px; }
+  .section > a { font-size: 14px; }
+  :global(html[data-product="tma1"]) { --bg: #111713; --bg-card: #19211c; --border: #303c33; --text: #e7ebe5; --text-muted: #a0aea2; --accent: #8bc4a0; --terminal-header: #19211c; --code-bg: #19211c; --blue: #8bc4a0; }
+  :global(html[data-product="tma1"][data-theme="light"]) { --bg: #fafbf7; --bg-card: #f0f3ec; --border: #d6ded1; --text: #233129; --text-muted: #657368; --accent: #306d4e; --terminal-header: #f0f3ec; --code-bg: #f0f3ec; --blue: #306d4e; }
+  :global([data-product="tma1"] .site-nav), :global([data-product="tma1"] .product-bar-inner) { max-width: 1120px; padding-left: 32px; padding-right: 32px; }
+  :global([data-product="tma1"] .cursor), :global([data-product="tma1"] .tab-cursor) { display: none; }
+  @media (max-width: 600px) {
+    .home { padding: 0 20px; }
+    .hero { padding-top: 48px; }
+    .intro { font-size: 16px; }
+    .agents { line-height: 2; }
+    .agents span { padding: 0 4px; }
+    figcaption { flex-direction: column; gap: 4px; }
+    .section { padding: 36px 0; }
+    .columns { grid-template-columns: 1fr; gap: 24px; }
+    .install-command { align-items: flex-start; flex-direction: column; gap: 12px; }
+    :global([data-product="tma1"] .site-nav), :global([data-product="tma1"] .product-bar-inner) { padding-left: 20px; padding-right: 20px; }
   }
 </style>
 
-<script is:inline>
-(function() {
-  // Reveal hero loop-moment lines sequentially when scrolled into view.
-  var loopMoment = document.querySelector('.loop-moment');
-  if (loopMoment) {
-    var loopLines = loopMoment.querySelectorAll('.loop-line');
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      loopMoment.classList.add('revealed');
-    } else {
-      loopLines.forEach(function(line, idx) {
-        line.style.transitionDelay = (120 * idx) + 'ms';
-      });
-      var loopObserver = new IntersectionObserver(function(entries) {
-        if (entries[0].isIntersecting) {
-          loopMoment.classList.add('revealed');
-          loopObserver.disconnect();
-        }
-      }, { threshold: 0.25 });
-      loopObserver.observe(loopMoment);
-    }
-  }
-
-  // Screenshot → Video → Screenshot loop, triggered when scrolled into view.
-  document.querySelectorAll('.showcase-media-stack').forEach(function(stack) {
-    var video = stack.querySelector('.showcase-video');
-    if (!video) return;
-    var started = false;
-    // 6s hold lets a reader take in the static screenshot (context-
-    // window breakdown, waterfall, KPI strip) before the live canvas
-    // animation pulls focus. 3s was too tight for the detail view.
-    var stillHoldMs = 6000;
-    function cycle() {
-      setTimeout(function() {
-        video.currentTime = 0;
-        video.play();
-        video.classList.add('active');
-        video.addEventListener('ended', function onEnd() {
-          video.removeEventListener('ended', onEnd);
-          video.classList.remove('active');
-          cycle();
-        });
-      }, stillHoldMs);
-    }
-    var observer = new IntersectionObserver(function(entries) {
-      if (entries[0].isIntersecting && !started) {
-        started = true;
-        observer.disconnect();
-        cycle();
-      }
-    }, { threshold: 0.3 });
-    observer.observe(stack);
+<script>
+  document.querySelectorAll<HTMLImageElement>('.theme-img').forEach(img => {
+    img.src = (document.documentElement.dataset.theme === 'dark' ? img.dataset.darkSrc : img.dataset.lightSrc)!;
   });
-
-  // Typing effect for hero hook — cycles through hooks[] indefinitely.
-  // Each cycle: type → hold → erase → next. Cursor stays visible (no
-  // fade-out) because the cycle never finishes. prefers-reduced-motion
-  // skips the animation and shows the first hook statically.
-  var hookText = document.querySelector('.hook-text');
-  if (hookText) {
-    var hooks;
-    try { hooks = JSON.parse(hookText.getAttribute('data-hooks') || '[]'); } catch (e) { hooks = []; }
-    if (!hooks.length) { hooks = [hookText.textContent || '']; }
-
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      hookText.textContent = hooks[0];
-    } else {
-      var typeSpeed = 60;
-      var eraseSpeed = 25;
-      var holdAfterType = 3500;
-      var holdBeforeErase = 400;
-      var initialDelay = 800;
-      var idx = 0;
-      hookText.textContent = '';
-
-      function typeNext() {
-        var text = hooks[idx];
-        var i = 0;
-        var typeId = setInterval(function () {
-          hookText.textContent = text.slice(0, ++i);
-          if (i >= text.length) {
-            clearInterval(typeId);
-            setTimeout(function () {
-              eraseAndAdvance(text);
-            }, holdAfterType);
-          }
-        }, typeSpeed);
-      }
-
-      function eraseAndAdvance(text) {
-        var len = text.length;
-        var eraseId = setInterval(function () {
-          len--;
-          hookText.textContent = text.slice(0, len);
-          if (len <= 0) {
-            clearInterval(eraseId);
-            idx = (idx + 1) % hooks.length;
-            setTimeout(typeNext, holdBeforeErase);
-          }
-        }, eraseSpeed);
-      }
-
-      setTimeout(typeNext, initialDelay);
+  document.querySelectorAll<HTMLButtonElement>('[data-feature]').forEach(button => {
+    button.addEventListener('click', () => {
+      document.querySelectorAll('[data-feature]').forEach(item => item.setAttribute('aria-pressed', String(item === button)));
+      document.querySelectorAll<HTMLElement>('.feature-panel').forEach(panel => { panel.hidden = panel.id !== button.getAttribute('aria-controls'); });
+    });
+  });
+  document.querySelectorAll<HTMLAnchorElement>('.screenshot-link').forEach(link => {
+    link.addEventListener('click', () => { link.href = link.querySelector('img')!.src; });
+  });
+  const copy = document.querySelector<HTMLButtonElement>('#copy-install')!;
+  copy.addEventListener('click', async () => {
+    const status = document.querySelector('#copy-status')!;
+    try {
+      await navigator.clipboard.writeText(document.querySelector('#onboarding-command')!.textContent!.trim());
+      status.textContent = copy.dataset.copied!;
+    } catch {
+      status.textContent = copy.dataset.failed!;
     }
-  }
-})();
+  });
 </script>
