@@ -301,7 +301,7 @@ const pricingTableDDL = `CREATE TABLE IF NOT EXISTS tma1_model_pricing (
 );`
 
 // PricingVersion identifies the built-in catalog independently of the binary version.
-const PricingVersion = "2026-10-30.1"
+const PricingVersion = "2026-10-30.2"
 
 // Standard, short-context API rates in USD per million tokens. These are
 // estimates, not invoices; cache writes, service tiers and regional premiums
@@ -353,6 +353,11 @@ func SeedPricing(httpPort int, logger *slog.Logger) error {
 	sqlURL := fmt.Sprintf("http://localhost:%d/v1/sql", httpPort)
 	if err := execSQL(sqlURL, pricingTableDDL); err != nil {
 		return fmt.Errorf("ensure pricing table: %w", err)
+	}
+	// Rows use a fixed 2024 timestamp. With the inherited database TTL,
+	// compaction deletes the whole catalog shortly after seeding.
+	if err := execSQL(sqlURL, "ALTER TABLE tma1_model_pricing SET 'ttl'='forever'"); err != nil {
+		return fmt.Errorf("keep pricing table: %w", err)
 	}
 
 	count, err := queryScalarInt(sqlURL, "SELECT COUNT(*) FROM tma1_model_pricing")

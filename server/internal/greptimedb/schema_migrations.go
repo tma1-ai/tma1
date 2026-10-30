@@ -148,6 +148,11 @@ func RunSchemaMigrations(httpPort int, logger *slog.Logger) error {
 			return fmt.Errorf("create tma1_schema_version: %w", err)
 		}
 	}
+	// Tables without their own ttl inherit the public database TTL, so an
+	// expired ledger would replay every migration. UNSET would keep inheriting.
+	if err := execSQL(sqlURL, "ALTER TABLE tma1_schema_version SET 'ttl'='forever'"); err != nil {
+		return fmt.Errorf("keep tma1_schema_version: %w", err)
+	}
 
 	current, err := currentSchemaVersion(sqlURL)
 	if err != nil {

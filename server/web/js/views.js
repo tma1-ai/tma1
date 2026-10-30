@@ -65,7 +65,7 @@ async function detectDataSources() {
       if (!result.hasCodex) {
         try {
           var codexTraceRes = await query(
-            "SELECT 1 FROM opentelemetry_traces WHERE service_name = 'codex_cli_rs' LIMIT 1"
+            "SELECT 1 FROM opentelemetry_traces WHERE " + codexTraceServiceWhere() + " LIMIT 1"
           );
           result.hasCodex = (rows(codexTraceRes) || []).length > 0;
         } catch { /* ignore */ }

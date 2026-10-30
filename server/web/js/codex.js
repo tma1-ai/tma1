@@ -130,7 +130,7 @@ async function cdx_loadCards() {
   try {
     var latencySQL = "SELECT ROUND(AVG(duration_nano) / 1000000.0, 2) AS v " +
       "FROM opentelemetry_traces WHERE timestamp > NOW() - INTERVAL '" + intervalSQL() + "' " +
-      "  AND service_name = 'codex_cli_rs' AND span_name = 'stream_request'";
+      "  AND " + codexTraceServiceWhere() + " AND span_name = 'run_sampling_request'";
     var ttftSQL = cdx_hasMetricTable('codex_turn_ttft_duration_ms_milliseconds_sum') &&
         cdx_hasMetricTable('codex_turn_ttft_duration_ms_milliseconds_count')
       ? "SELECT ROUND(SUM(s.greptime_value) / NULLIF(SUM(c.greptime_value), 0), 2) AS v " +
@@ -332,7 +332,7 @@ async function cdx_loadLatencyChart() {
       "ROUND(APPROX_PERCENTILE_CONT(duration_nano / 1000000.0, 0.95), 0) AS p95_ms " +
       "FROM opentelemetry_traces " +
       "WHERE timestamp > NOW() - INTERVAL '" + intervalSQL() + "' " +
-      "  AND service_name = 'codex_cli_rs' AND span_name = 'stream_request' " +
+      "  AND " + codexTraceServiceWhere() + " AND span_name = 'run_sampling_request' " +
       "GROUP BY t ORDER BY t"
     );
     var data = rowsToObjects(res);
@@ -462,7 +462,7 @@ async function cdx_loadSpanDistribution() {
       "SELECT span_name, COUNT(*) AS cnt " +
       "FROM opentelemetry_traces " +
       "WHERE timestamp > NOW() - INTERVAL '" + intervalSQL() + "' " +
-      "  AND service_name = 'codex_cli_rs' " +
+      "  AND " + codexTraceServiceWhere() + " " +
       "GROUP BY span_name ORDER BY cnt DESC LIMIT 12"
     );
     var data = rowsToObjects(res);
