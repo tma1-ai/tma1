@@ -113,10 +113,12 @@ function overviewActivity(data) {
     )
       svg +=
         '<text x="' +
-        (i * step + step / 2) +
+        (i === 0 ? 0 : i === entries.length - 1 ? width : i * step + step / 2) +
         '" y="' +
         (height + 23) +
-        '" text-anchor="middle" fill="var(--text-muted)" font-size="11">' +
+        '" text-anchor="' +
+        (i === 0 ? "start" : i === entries.length - 1 ? "end" : "middle") +
+        '" fill="var(--text-muted)" font-size="11">' +
         escapeHTML(
           bucketMs === 86400000
             ? new Date(entry[0]).toLocaleDateString([], {
@@ -251,11 +253,11 @@ async function overviewLoad() {
         '"></span></div><p>' +
         fmtNum(Number(a.sessions)) +
         " " +
-        t("overview.sessions") +
+        t(Number(a.sessions) === 1 ? "overview.session" : "overview.sessions") +
         " · " +
         fmtNum(Number(a.failures)) +
         " " +
-        t("overview.failures") +
+        t(Number(a.failures) === 1 ? "overview.failure" : "overview.failures") +
         "</p></div>";
     });
     html +=
