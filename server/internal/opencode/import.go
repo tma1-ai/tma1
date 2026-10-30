@@ -50,6 +50,9 @@ type Snapshot struct {
 			SessionID string `json:"sessionID"`
 			MessageID string `json:"messageID"`
 			Type      string `json:"type"`
+			Time      struct {
+				Start int64 `json:"start"`
+			} `json:"time"`
 			Text      string `json:"text"`
 			Synthetic bool   `json:"synthetic"`
 			Ignored   bool   `json:"ignored"`
@@ -137,7 +140,11 @@ func records(snapshot Snapshot) ([]record, error) {
 				if p.Type == "reasoning" {
 					kind = "thinking"
 				}
-				values := strings.Join([]string{stamp(m.Time.Created), q(m.Role), q(kind), q(p.Text), q(m.ModelID)}, ",")
+				partTime := m.Time.Created
+				if p.Time.Start > 0 {
+					partTime = p.Time.Start
+				}
+				values := strings.Join([]string{stamp(partTime), q(m.Role), q(kind), q(p.Text), q(m.ModelID)}, ",")
 				if err := add("tma1_messages", p.ID, `ts,"role",message_type,content,model`, values); err != nil {
 					return nil, err
 				}
@@ -195,30 +202,37 @@ func (i *Importer) Import(ctx context.Context, snapshot Snapshot) (int, error) {
 	defer i.mu.Unlock()
 	inserted := 0
 	for _, table := range []string{"tma1_messages", "tma1_hook_events"} {
-		body, err := i.query(ctx, "SELECT source_record_id FROM "+table+" WHERE session_id='"+sqlutil.Escape("oc:"+snapshot.Info.ID)+"' AND source_record_id IS NOT NULL")
-		if err != nil {
-			return inserted, fmt.Errorf("read imported records: %w", err)
-		}
-		var response struct {
-			Output []struct {
-				Records struct {
-					Rows [][]string `json:"rows"`
-				} `json:"records"`
-			} `json:"output"`
-		}
-		if err := json.Unmarshal(body, &response); err != nil {
-			return inserted, fmt.Errorf("decode imported records: %w", err)
-		}
-		if len(response.Output) != 1 {
-			return inserted, fmt.Errorf("missing imported record query result")
-		}
 		existing := map[string]bool{}
-		for _, row := range response.Output[0].Records.Rows {
-			if len(row) != 1 {
-				return inserted, fmt.Errorf("invalid imported record row")
+		// Bound each result below the SQL client's response cap for long sessions.
+		for offset := 0; ; offset += 1000 {
+			body, err := i.query(ctx, "SELECT source_record_id FROM "+table+" WHERE session_id='"+sqlutil.Escape("oc:"+snapshot.Info.ID)+"' AND source_record_id IS NOT NULL ORDER BY source_record_id LIMIT 1000 OFFSET "+strconv.Itoa(offset))
+			if err != nil {
+				return inserted, fmt.Errorf("read imported records: %w", err)
 			}
-			existing[row[0]] = true
+			var response struct {
+				Output []struct {
+					Records struct {
+						Rows [][]string `json:"rows"`
+					} `json:"records"`
+				} `json:"output"`
+			}
+			if err := json.Unmarshal(body, &response); err != nil {
+				return inserted, fmt.Errorf("decode imported records: %w", err)
+			}
+			if len(response.Output) != 1 {
+				return inserted, fmt.Errorf("missing imported record query result")
+			}
+			for _, row := range response.Output[0].Records.Rows {
+				if len(row) != 1 {
+					return inserted, fmt.Errorf("invalid imported record row")
+				}
+				existing[row[0]] = true
+			}
+			if len(response.Output[0].Records.Rows) < 1000 {
+				break
+			}
 		}
+
 		for _, r := range data {
 			if r.table != table || existing[r.id] {
 				continue

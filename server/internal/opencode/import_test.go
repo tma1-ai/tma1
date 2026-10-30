@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -51,6 +52,18 @@ func TestNormalizeOpenCodeUsage(t *testing.T) {
 	if usage != 1 || failures != 1 || starts != 1 {
 		t.Fatalf("usage=%d failures=%d starts=%d", usage, failures, starts)
 	}
+	timed := fixture(t)
+	timed.Messages[1].Parts[2].Time.Start = 1793280000090
+	timedRecords, err := records(timed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range timedRecords {
+		if r.id == "prt_answer" && !strings.Contains(r.values, ".09Z") {
+			t.Fatalf("part source time lost: %s", r.values)
+		}
+	}
+
 	s := fixture(t)
 	s.Messages[1].Info.Time.Completed = 0
 	pending, err := records(s)
@@ -118,5 +131,42 @@ func TestImportResumesCommittedRecords(t *testing.T) {
 	restarted := New(importer.query)
 	if n, err := restarted.Import(context.Background(), s); err != nil || n != 0 {
 		t.Fatalf("replay n=%d err=%v", n, err)
+	}
+}
+
+func TestImportPagesSourceIdentities(t *testing.T) {
+	snapshot := fixture(t)
+	data, err := records(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pages := 0
+	importer := New(func(_ context.Context, sql string) ([]byte, error) {
+		if !strings.HasPrefix(sql, "SELECT") {
+			t.Fatalf("existing record inserted: %s", sql)
+		}
+		table := "tma1_messages"
+		if strings.Contains(sql, "tma1_hook_events") {
+			table = "tma1_hook_events"
+		}
+		rows := [][]string{}
+		if strings.Contains(sql, "OFFSET 0") {
+			for n := 0; n < 1000; n++ {
+				rows = append(rows, []string{fmt.Sprintf("old-%04d", n)})
+			}
+		} else if strings.Contains(sql, "OFFSET 1000") {
+			for _, r := range data {
+				if r.table == table {
+					rows = append(rows, []string{r.id})
+				}
+			}
+		} else {
+			t.Fatalf("unexpected page: %s", sql)
+		}
+		pages++
+		return json.Marshal(map[string]any{"output": []any{map[string]any{"records": map[string]any{"rows": rows}}}})
+	})
+	if count, err := importer.Import(context.Background(), snapshot); err != nil || count != 0 || pages != 4 {
+		t.Fatalf("count=%d pages=%d error=%v", count, pages, err)
 	}
 }
