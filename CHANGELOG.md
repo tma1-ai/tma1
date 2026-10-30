@@ -1,5 +1,48 @@
 # Changelog
 
+## v0.3.0-beta1 — Cross-agent observatory
+
+First beta. The dashboard is rebuilt around comparing agents, and the
+numbers it shows are now either measured or explicitly unknown.
+
+- **Redesigned dashboard.** A cross-agent Overview (activity, agent mix,
+  recent sessions, tool failures), light/dark themes, responsive layouts,
+  and side-by-side session comparison: tokens, cache-read share, tool
+  failures, and compaction events.
+- **OpenCode support.** `POST /api/import/opencode` accepts the official
+  OpenCode v1 session export; `integrations/opencode/tma1.js` imports on
+  every `session.idle`. Reimports skip persisted records, including across
+  restarts. No hooks or context injection; snapshots over 20 MiB are
+  rejected. See `docs/opencode.md`.
+- **OpenClaw removed** — its scanner, dashboard view, and skill.
+- **Pricing.** 36 built-in model prices, matched by exact model ID or a
+  dated snapshot suffix instead of substring. Unknown models, and session
+  costs that would need missing cache rates, stay unknown instead of
+  falling back to Sonnet rates. Character-count cost estimates are gone.
+  The catalog has its own version and reseeds on change, dev builds
+  included.
+- **Prompt review.** Keyword and session-behaviour scores are replaced by
+  an LLM assessment of the request and preceding prompts. Every score
+  must quote the source; dimensions without enough context abstain
+  instead of scoring zero. The default Anthropic model is
+  `claude-sonnet-5`. Saved insights record their rubric version.
+- **Advisory anomalies.** Four rules: `stale_file_view`,
+  `repeated_failed_build`, `external_modified_during_session`, and
+  `context_pressure`. Build failures are grouped by full command and
+  directory. No current rule blocks `Stop`; `build_broken_after_my_edit`
+  and `test_stuck` no longer emit. See `docs/anomalies.md`.
+- **Transcript fixes.** Claude Code streaming usage is recorded as
+  per-response deltas rather than once per content block. Messages keep
+  their source timestamps instead of ingestion time. Codex records
+  `thread_spawn` parents, compaction events, cache-write tokens, and
+  input-only responses, and no longer repeats usage from quota updates.
+- **Schema migrations 5–6** add `source_record_id` to `tma1_messages` and
+  `tma1_hook_events`, and `rubric_version` to `tma1_prompt_insights`.
+  Existing telemetry is not rewritten.
+- **GreptimeDB pinned to v1.3.0.**
+- **Website** rewritten around the new dashboard, with OpenCode and
+  OpenTelemetry setup.
+
 ## v0.2.0-alpha16 — Database supervision
 
 - **GreptimeDB is supervised.** The child process was started and never
