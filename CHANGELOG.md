@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.3.0-beta2
+
+- **Sidebar credits GreptimeDB.** The dashboard sidebar footer now reads
+  "Powered by GreptimeDB", linking to the GreptimeDB repository.
+
 ## v0.3.0-beta1 — Cross-agent observatory
 
 First beta. The dashboard is rebuilt around comparing agents, and the
