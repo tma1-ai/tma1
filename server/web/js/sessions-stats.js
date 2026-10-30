@@ -234,20 +234,46 @@ function extractAllFilePaths(toolName, inputStr) {
 
 // ── Pricing / formatting helpers ──────────────────────────────────────
 
-function sess_lookupPrice(model) {
-  if (!model || !modelPricing || !modelPricing.length) return { input: null, output: null };
+function sess_lookupPrice(model, tier) {
+  if (!model || !tier || !modelPricing || !modelPricing.length) return null;
   for (var i = 0; i < modelPricing.length; i++) {
-    if (new RegExp(modelPricePattern(modelPricing[i].p)).test(model)) {
-      return { input: modelPricing[i].i, output: modelPricing[i].o };
-    }
+    var m = modelPricing[i];
+    if (m.tier === tier && new RegExp(modelPricePattern(m.p)).test(model)) return m;
   }
-  return { input: null, output: null };
+  return null;
 }
 
-function sess_usageCost(price, input, output, cached, written) {
-  // The catalog has no cache rates. Do not price cached tokens as fresh input.
-  if (price.input == null || price.output == null || cached > 0 || written > 0) return null;
-  return (input * price.input + output * price.output) / 1000000;
+// Normalizes stored usage. inputIncludesCache is true for OpenAI-style counts,
+// where input_tokens already contains cache reads and writes. A null
+// cache_creation_long_tokens means the write duration was not reported.
+function sess_usage(inputTokens, outputTokens, cacheRead, cacheWrite, cacheWriteLong, inputIncludesCache) {
+  var input = Number(inputTokens) || 0;
+  var read = Number(cacheRead) || 0;
+  var write = Number(cacheWrite) || 0;
+  var long = cacheWriteLong == null ? null : Number(cacheWriteLong) || 0;
+  return {
+    fresh: inputIncludesCache ? Math.max(input - read - write, 0) : input,
+    output: Number(outputTokens) || 0,
+    cacheRead: read,
+    writeShort: long == null ? 0 : Math.max(write - long, 0),
+    writeLong: long == null ? 0 : long,
+    writeUnsplit: long == null ? write : 0,
+    totalInput: inputIncludesCache ? input : input + read + write,
+  };
+}
+
+// Returns null unless every token class in u has a catalog price.
+function sess_usageCost(price, u) {
+  if (!price || (price.maxInput != null && u.totalInput > price.maxInput) || u.writeUnsplit > 0) return null;
+  var parts = [[u.fresh, price.i], [u.output, price.o], [u.cacheRead, price.cacheRead],
+    [u.writeShort, price.writeShort], [u.writeLong, price.writeLong]];
+  var total = 0;
+  for (var i = 0; i < parts.length; i++) {
+    if (!parts[i][0]) continue;
+    if (parts[i][1] == null) return null;
+    total += parts[i][0] * parts[i][1];
+  }
+  return total / 1000000;
 }
 
 function fmtDurSec(sec) {
@@ -313,16 +339,19 @@ function sess_parseCodexOTel(rows, conversationIds) {
     // Reasoning is a subset of output tokens.
     var reasoningTok = Number(a.reasoning_token_count) || 0;
     var model = a.model || '';
-    var price = sess_lookupPrice(model);
+    var cachedTok = Number(a.cached_token_count) || 0;
+    var writeTok = Number(a.cache_write_token_count) || 0;
+    // The attribute mirrors the request; Codex omits it for the default tier.
+    var tier = normalizeServiceTier(a.service_tier == null ? 'default' : a.service_tier);
     calls.push({
       ts: tsToMs(rows[i].timestamp),
       model: model,
       inputTokens: inputTok,
       outputTokens: outputTok,
       reasoningTokens: reasoningTok,
-      cacheTokens: Number(a.cached_token_count) || 0,
-      cacheCreationTokens: 0,
-      cost: sess_usageCost(price, inputTok, outputTok, Number(a.cached_token_count) || 0, 0),
+      cacheTokens: cachedTok,
+      cacheCreationTokens: writeTok,
+      cost: sess_usageCost(sess_lookupPrice(model, tier), sess_usage(inputTok, outputTok, cachedTok, writeTok, null, true)),
       inputIncludesCache: true,
       durationMs: parseFloat(a.duration_ms) || 0,
     });

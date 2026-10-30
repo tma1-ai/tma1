@@ -428,9 +428,7 @@ func main() {
 
 	// Step 3.5: refresh the derived pricing catalog independently of dev builds.
 	// No version file (old == "") covers both fresh install and old-version upgrade;
-	// we cannot distinguish the two, so we always attempt truncate+reseed.
-	// On fresh install the table doesn't exist yet — TruncatePricing returns a
-	// benign "table not found" error, which we ignore (SeedPricing creates it).
+	// we cannot distinguish the two, so we always drop and reseed the catalog.
 	versionFile := filepath.Join(cfg.DataDir, ".pricing-version")
 	upgraded := false
 	var upgradeErr error
@@ -440,13 +438,9 @@ func main() {
 		if old != "" {
 			logger.Info("pricing catalog update", "from", old, "to", greptimedb.PricingVersion)
 		}
-		if err := onUpgrade(cfg.GreptimeDBHTTPPort, logger); err != nil {
-			if greptimedb.IsTableNotFound(err) {
-				logger.Info("pricing table does not exist yet (fresh install), skipping truncate")
-			} else {
-				upgradeErr = err
-				logger.Warn("truncate pricing on upgrade failed, will retry next start", "err", err)
-			}
+		if err := greptimedb.ResetPricing(cfg.GreptimeDBHTTPPort); err != nil {
+			upgradeErr = err
+			logger.Warn("reset pricing on upgrade failed, will retry next start", "err", err)
 		}
 	}
 
@@ -1066,11 +1060,6 @@ func reportStaleAssets(logger *slog.Logger) {
 			"stale_files", len(d.StalePaths),
 			"fix", d.FixCommand)
 	}
-}
-
-func onUpgrade(httpPort int, logger *slog.Logger) error {
-	// Clear stale pricing so SeedPricing re-inserts with latest data.
-	return greptimedb.TruncatePricing(httpPort)
 }
 
 // initFlowsWithRetry attempts to create flow aggregations up to 10 times

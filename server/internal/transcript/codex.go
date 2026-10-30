@@ -391,7 +391,10 @@ type codexFileContext struct {
 	// can stamp model into tma1_messages alongside the assistant payload
 	// — without it, the dashboard's per-call cost lookup can't price
 	// rollout-derived inference rows.
-	model          string
+	model string
+	// serviceTier is the tier requests are sent with, from thread settings.
+	// Empty until a thread_settings_applied event is seen.
+	serviceTier    string
 	lastTotalUsage string
 	live           bool // true after initial backfill completes (first EOF)
 }
@@ -508,6 +511,10 @@ func (w *Watcher) processCodexLine(sessionID, line string, seen map[string]struc
 			CallID  string          `json:"call_id"`
 			Query   string          `json:"query"`
 			Action  json.RawMessage `json:"action"`
+			// Codex omits service_tier from requests when the setting is null.
+			ThreadSettings *struct {
+				ServiceTier *string `json:"service_tier"`
+			} `json:"thread_settings"`
 		}
 		if err := json.Unmarshal(ev.Payload, &eventMsg); err != nil {
 			return
@@ -541,6 +548,13 @@ func (w *Watcher) processCodexLine(sessionID, line string, seen map[string]struc
 			w.insertCodexHookEvent(sid, ts, "PreToolUse", "web_search", toolInput, eventMsg.CallID, "", fctx)
 			w.insertCodexTypedMessage(sid, ts, "tool_use", "assistant", toolInput, fctx.model, "web_search", eventMsg.CallID, seen)
 			w.insertCodexHookEvent(sid, ts, "PostToolUse", "web_search", "", eventMsg.CallID, "", fctx)
+		case "thread_settings_applied":
+			if eventMsg.ThreadSettings != nil {
+				fctx.serviceTier = "default"
+				if tier := eventMsg.ThreadSettings.ServiceTier; tier != nil && *tier != "" {
+					fctx.serviceTier = *tier
+				}
+			}
 		case "token_count":
 			// Codex emits token_count after each response with the
 			// per-call usage in info.last_token_usage. This is the
@@ -575,7 +589,7 @@ func (w *Watcher) processCodexLine(sessionID, line string, seen map[string]struc
 				if usage.InputTokens > 0 || usage.OutputTokens > 0 || usage.ReasoningOutputTokens > 0 {
 					w.insertCodexUsageMessage(sid, ts, fctx.model,
 						usage.InputTokens, usage.OutputTokens,
-						usage.CachedInputTokens, usage.CacheWriteInputTokens, usage.ReasoningOutputTokens, seen)
+						usage.CachedInputTokens, usage.CacheWriteInputTokens, usage.ReasoningOutputTokens, fctx.serviceTier, seen)
 				}
 			}
 		case "user_message":
@@ -952,7 +966,7 @@ func (w *Watcher) insertCodexTypedMessage(sessionID string, ts time.Time, messag
 //
 // NOT gated by codexLiveGate — tma1_messages is never written by
 // the live hook handler, so there's no double-write to suppress.
-func (w *Watcher) insertCodexUsageMessage(sessionID string, ts time.Time, model string, input, output, cachedInput, cacheWrite, reasoning int64, seen map[string]struct{}) {
+func (w *Watcher) insertCodexUsageMessage(sessionID string, ts time.Time, model string, input, output, cachedInput, cacheWrite, reasoning int64, serviceTier string, seen map[string]struct{}) {
 	key := fmt.Sprintf("usage:%d:%d:%d:%d:%d:%d", ts.UnixMilli(), input, output, cachedInput, cacheWrite, reasoning)
 	if seen != nil {
 		if _, ok := seen[key]; ok {
@@ -965,8 +979,8 @@ func (w *Watcher) insertCodexUsageMessage(sessionID string, ts time.Time, model 
 
 	sql := fmt.Sprintf(
 		"INSERT INTO tma1_messages (ts, session_id, message_type, \"role\", content, model, tool_name, tool_use_id, "+
-			"input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, reasoning_tokens) "+
-			"VALUES (%d, '%s', 'usage', 'assistant', '', '%s', '', '', %d, %d, %d, %d, %d)",
+			"input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, reasoning_tokens, service_tier) "+
+			"VALUES (%d, '%s', 'usage', 'assistant', '', '%s', '', '', %d, %d, %d, %d, %d, %s)",
 		msTs,
 		escapeSQLString(sessionID),
 		escapeSQLString(model),
@@ -975,6 +989,7 @@ func (w *Watcher) insertCodexUsageMessage(sessionID string, ts time.Time, model 
 		cachedInput,
 		cacheWrite,
 		reasoning,
+		nullableString(serviceTier),
 	)
 	go func() {
 		insertSem <- struct{}{}

@@ -1,5 +1,5 @@
 /* Agent Canvas — real-time + replay agent orchestration animation. */
-/* globals: query, rows, rowsToObjects, tsToMs, escapeSQLString, escapeHTML, t, sessTimelineData, sessCurrentStats, fmtCost, loadPricing, sess_usageCost, sess_lookupPrice */
+/* globals: query, rows, rowsToObjects, tsToMs, escapeSQLString, escapeHTML, t, sessTimelineData, sessCurrentStats, fmtCost, loadPricing, sess_usageCost, sess_lookupPrice, normalizeServiceTier */
 
 var AgentCanvas = (function () {
   // ── Constants ────────────────────────────────────────────────
@@ -777,20 +777,45 @@ var AgentCanvas = (function () {
     costTotal = null;
     // For global live (no sessionId), we'll start polling once we see a session from SSE.
     if (!sessionId) return;
+    var sid = escapeSQLString(sessionId);
+    // Codex counts cache reads and writes inside input_tokens.
+    var inputIncludesCache = query("SELECT agent_source FROM tma1_hook_events WHERE session_id = '" + sid + "' " +
+      "AND agent_source IS NOT NULL LIMIT 1").then(function (res) {
+      return (rows(res)?.[0]?.[0]) === 'codex';
+    });
     function updateCost() {
-      var sql = "SELECT model, SUM(input_tokens) AS inp, SUM(output_tokens) AS outp, " +
-        "SUM(cache_read_tokens) AS cached, SUM(cache_creation_tokens) AS written " +
-        "FROM tma1_messages WHERE session_id = '" + escapeSQLString(sessionId) + "' " +
-        "AND (input_tokens IS NOT NULL OR output_tokens IS NOT NULL) GROUP BY model";
-      loadPricing().then(function () { return query(sql); }).then(function (res) {
-        var data = rowsToObjects(res);
-        var total = data.length ? 0 : null;
-        data.forEach(function (row) {
-          var cost = sess_usageCost(sess_lookupPrice(row.model), Number(row.inp) || 0,
-            Number(row.outp) || 0, Number(row.cached) || 0, Number(row.written) || 0);
-          total = total == null || cost == null ? null : total + cost;
+      Promise.all([loadPricing(), inputIncludesCache]).then(function (r) {
+        var includesCache = r[1];
+        var promptTokens = includesCache ? "input_tokens" :
+          "input_tokens + COALESCE(cache_read_tokens, 0) + COALESCE(cache_creation_tokens, 0)";
+        // Cost is linear in each counter; only the prompt-size limit needs the
+        // largest single request.
+        return query("SELECT model, service_tier, SUM(input_tokens) AS inp, SUM(output_tokens) AS outp, " +
+          "SUM(cache_read_tokens) AS cached, SUM(cache_creation_tokens) AS written, " +
+          "SUM(cache_creation_long_tokens) AS written_long, " +
+          "SUM(CASE WHEN cache_creation_long_tokens IS NULL THEN cache_creation_tokens ELSE 0 END) AS written_unsplit, " +
+          "MAX(" + promptTokens + ") AS max_prompt " +
+          "FROM tma1_messages WHERE session_id = '" + sid + "' " +
+          "AND (input_tokens IS NOT NULL OR output_tokens IS NOT NULL) GROUP BY model, service_tier").then(function (res) {
+          var data = rowsToObjects(res);
+          var total = data.length ? 0 : null;
+          data.forEach(function (row) {
+            var input = Number(row.inp) || 0, read = Number(row.cached) || 0, written = Number(row.written) || 0;
+            var long = Number(row.written_long) || 0, unsplit = Number(row.written_unsplit) || 0;
+            var u = {
+              fresh: includesCache ? Math.max(input - read - written, 0) : input,
+              output: Number(row.outp) || 0,
+              cacheRead: read,
+              writeShort: Math.max(written - unsplit - long, 0),
+              writeLong: long,
+              writeUnsplit: unsplit,
+              totalInput: Number(row.max_prompt) || 0,
+            };
+            var cost = sess_usageCost(sess_lookupPrice(row.model, normalizeServiceTier(row.service_tier)), u);
+            total = total == null || cost == null ? null : total + cost;
+          });
+          costTotal = total;
         });
-        costTotal = total;
       }).catch(function () { costTotal = null; });
     }
     updateCost();

@@ -26,10 +26,10 @@ async function gcp_loadCards() {
       query("SELECT COUNT(DISTINCT session_id) AS v " + gcp_hookWhere()),
       // Cost estimate from messages
       query(
-        "SELECT model, " +
+        "SELECT model, service_tier, " +
         "SUM(COALESCE(output_tokens, 0)) AS out_tok, " +
-        "SUM(input_tokens) AS est_in_tok, SUM(cache_read_tokens) AS cached, SUM(cache_creation_tokens) AS written " +
-        gcp_msgWhere() + " AND model != '' GROUP BY model"
+        "SUM(input_tokens) AS est_in_tok, SUM(cache_read_tokens) AS cached, SUM(cache_creation_tokens) AS written, SUM(cache_creation_long_tokens) AS written_long " +
+        gcp_msgWhere() + " AND model != '' GROUP BY model, service_tier"
       ),
       // Per-session timestamp bounds (duration computed in JS via tsToMs).
       query(
@@ -64,10 +64,10 @@ async function gcp_loadCards() {
     if (costRows.length) totalCost = 0;
     for (var i = 0; i < costRows.length; i++) {
       var cr = costRows[i];
-      var price = sess_lookupPrice(cr.model);
+      var price = sess_lookupPrice(cr.model, normalizeServiceTier(cr.service_tier));
       var estIn = Number(cr.est_in_tok) || 0;
       var out = Number(cr.out_tok) || 0;
-      var cost = cr.est_in_tok == null ? null : sess_usageCost(price, estIn, out, Number(cr.cached) || 0, Number(cr.written) || 0);
+      var cost = cr.est_in_tok == null ? null : sess_usageCost(price, sess_usage(estIn, out, cr.cached, cr.written, cr.written_long, false));
       totalCost = totalCost == null || cost == null ? null : totalCost + cost;
     }
 
@@ -120,10 +120,10 @@ async function gcp_loadCostChart() {
   try {
     var res = await query(
       "SELECT date_bin('" + chartBucket() + "'::INTERVAL, ts) AS t, " +
-      "model, " +
+      "model, service_tier, " +
       "SUM(COALESCE(output_tokens, 0)) AS out_tok, " +
-      "SUM(input_tokens) AS est_in_tok, SUM(cache_read_tokens) AS cached, SUM(cache_creation_tokens) AS written " +
-      gcp_msgWhere() + " AND model != '' GROUP BY t, model ORDER BY t"
+      "SUM(input_tokens) AS est_in_tok, SUM(cache_read_tokens) AS cached, SUM(cache_creation_tokens) AS written, SUM(cache_creation_long_tokens) AS written_long " +
+      gcp_msgWhere() + " AND model != '' GROUP BY t, model, service_tier ORDER BY t"
     );
     var rawData = rowsToObjects(res);
     if (!rawData.length) { el.innerHTML = '<div class="chart-empty">No cost data yet</div>'; return; }
@@ -134,8 +134,8 @@ async function gcp_loadCostChart() {
       var d = rawData[i];
       var key = String(d.t);
       if (!buckets[key]) buckets[key] = { t: d.t, cost: 0 };
-      var price = sess_lookupPrice(d.model);
-      var cost = d.est_in_tok == null ? null : sess_usageCost(price, Number(d.est_in_tok), Number(d.out_tok) || 0, Number(d.cached) || 0, Number(d.written) || 0);
+      var price = sess_lookupPrice(d.model, normalizeServiceTier(d.service_tier));
+      var cost = d.est_in_tok == null ? null : sess_usageCost(price, sess_usage(d.est_in_tok, d.out_tok, d.cached, d.written, d.written_long, false));
       buckets[key].cost = buckets[key].cost == null || cost == null ? null : buckets[key].cost + cost;
     }
     var data = Object.values(buckets).sort(function(a, b) { return String(a.t) < String(b.t) ? -1 : 1; });
@@ -216,19 +216,19 @@ async function gcp_loadCostByModel() {
   await loadPricing();
   try {
     var res = await query(
-      "SELECT model, " +
+      "SELECT model, service_tier, " +
       "SUM(COALESCE(output_tokens, 0)) AS out_tok, " +
       "COUNT(*) AS msgs, " +
-      "SUM(input_tokens) AS est_in_tok, SUM(cache_read_tokens) AS cached, SUM(cache_creation_tokens) AS written " +
-      gcp_msgWhere() + " AND model != '' GROUP BY model ORDER BY out_tok DESC"
+      "SUM(input_tokens) AS est_in_tok, SUM(cache_read_tokens) AS cached, SUM(cache_creation_tokens) AS written, SUM(cache_creation_long_tokens) AS written_long " +
+      gcp_msgWhere() + " AND model != '' GROUP BY model, service_tier ORDER BY out_tok DESC"
     );
     var data = rowsToObjects(res);
     if (!data.length) { tbody.innerHTML = '<tr><td colspan="4" class="loading">No cost data</td></tr>'; return; }
     tbody.innerHTML = data.map(function(d) {
-      var price = sess_lookupPrice(d.model);
+      var price = sess_lookupPrice(d.model, normalizeServiceTier(d.service_tier));
       var estIn = Number(d.est_in_tok) || 0;
       var out = Number(d.out_tok) || 0;
-      var cost = d.est_in_tok == null ? null : sess_usageCost(price, estIn, out, Number(d.cached) || 0, Number(d.written) || 0);
+      var cost = d.est_in_tok == null ? null : sess_usageCost(price, sess_usage(estIn, out, d.cached, d.written, d.written_long, false));
       return '<tr><td>' + escapeHTML(d.model) + '</td>' +
         '<td>' + fmtNum(out) + '</td>' +
         '<td>' + fmtNum(Number(d.msgs) || 0) + '</td>' +

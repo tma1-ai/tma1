@@ -191,6 +191,14 @@ func TestValidTTL(t *testing.T) {
 	}
 }
 
+func TestBuildCostCaseSQLLeavesLongPromptsUnpriced(t *testing.T) {
+	prices := []modelPrice{{Pattern: "gpt-x", InputPrice: 1, OutputPrice: 2, MaxInputTokens: maxInput(272000)}}
+	result := buildCostCaseSQL(prices, "m", "i", "o")
+	if !strings.Contains(result, "regexp_like(m, '^gpt-x") || !strings.Contains(result, "AND CAST(i AS BIGINT) <= 272000 THEN") {
+		t.Fatalf("long prompts must fall through to NULL: %s", result)
+	}
+}
+
 func TestDefaultPricing(t *testing.T) {
 	// Verify seed data is well-formed.
 	if len(defaultPricing) == 0 {
@@ -199,18 +207,24 @@ func TestDefaultPricing(t *testing.T) {
 
 	seen := make(map[string]bool)
 	for _, p := range defaultPricing {
+		key := p.Pattern + "/" + p.Tier
 		if p.Pattern == "" {
 			t.Error("empty pattern")
 		}
-		if seen[p.Pattern] {
-			t.Errorf("duplicate pattern: %s", p.Pattern)
+		if p.Tier != pricingTierStandard && p.Tier != pricingTierPriority {
+			t.Errorf("%s: unknown tier", key)
 		}
-		seen[p.Pattern] = true
-		if p.InputPrice <= 0 {
-			t.Errorf("pattern %s: input_price should be > 0", p.Pattern)
+		if seen[key] {
+			t.Errorf("duplicate catalog row: %s", key)
 		}
-		if p.OutputPrice <= 0 {
-			t.Errorf("pattern %s: output_price should be > 0", p.Pattern)
+		seen[key] = true
+		if p.InputPrice <= 0 || p.OutputPrice <= 0 {
+			t.Errorf("%s: input and output prices must be positive", key)
+		}
+	}
+	for _, p := range defaultPricing {
+		if p.Tier == pricingTierPriority && !seen[p.Pattern+"/"+pricingTierStandard] {
+			t.Errorf("%s has a priority row but no standard row", p.Pattern)
 		}
 	}
 }

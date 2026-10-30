@@ -187,17 +187,29 @@ function escapeSQLString(s) {
 var modelPricing = [];
 var pricingLoaded = false;
 
+function pricingNumber(v) {
+  return v == null ? null : Number(v);
+}
+
 async function loadPricing() {
   if (pricingLoaded) return;
   try {
     var res = await query(
-      "SELECT model_pattern, input_price, output_price " +
+      "SELECT model_pattern, service_tier, input_price, output_price, cache_read_price, " +
+      "cache_write_short_price, cache_write_long_price, max_input_tokens " +
       "FROM tma1_model_pricing ORDER BY priority"
     );
     var data = rowsToObjects(res);
     if (data.length) {
       modelPricing = data.map(function(d) {
-        return { p: d.model_pattern, i: Number(d.input_price), o: Number(d.output_price) };
+        return {
+          p: d.model_pattern, tier: d.service_tier,
+          i: Number(d.input_price), o: Number(d.output_price),
+          cacheRead: pricingNumber(d.cache_read_price),
+          writeShort: pricingNumber(d.cache_write_short_price),
+          writeLong: pricingNumber(d.cache_write_long_price),
+          maxInput: pricingNumber(d.max_input_tokens),
+        };
       });
       pricingLoaded = true;
     }
@@ -210,11 +222,48 @@ function modelPricePattern(model) {
   return '^' + model.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(-[0-9]{8}|-[0-9]{4}-[0-9]{2}-[0-9]{2})?$';
 }
 
+// Maps a reported service tier onto catalog tiers. Missing or unrecognized
+// tiers return null so the usage stays unpriced.
+function normalizeServiceTier(tier) {
+  if (tier == null || tier === '') return null;
+  tier = String(tier).toLowerCase();
+  if (tier === 'default' || tier === 'auto' || tier === 'standard') return 'standard';
+  if (tier === 'priority' || tier === 'fast') return 'priority';
+  return null;
+}
+
+// Standard-tier list price for input and output only. Used where usage has no
+// tier or cache counters (GenAI traces).
 function costCaseSQL(modelExpr, inputExpr, outputExpr) {
-  var parts = modelPricing.map(function(m) {
-    return "WHEN regexp_like(" + modelExpr + ", '" + modelPricePattern(m.p).replace(/'/g, "''") + "') THEN " +
+  var parts = modelPricing.filter(function(m) { return m.tier === 'standard'; }).map(function(m) {
+    var cond = "regexp_like(" + modelExpr + ", '" + modelPricePattern(m.p).replace(/'/g, "''") + "')";
+    if (m.maxInput != null) cond += " AND CAST(" + inputExpr + " AS BIGINT) <= " + m.maxInput;
+    return "WHEN " + cond + " THEN " +
       "CAST(" + inputExpr + " AS DOUBLE)*" + m.i + "/1000000.0+" +
       "CAST(" + outputExpr + " AS DOUBLE)*" + m.o + "/1000000.0";
+  });
+  if (!parts.length) return "CAST(NULL AS DOUBLE)";
+  return "(CASE " + parts.join(" ") + " ELSE CAST(NULL AS DOUBLE) END)";
+}
+
+// Per-request cost with cache pricing. e holds SQL expressions:
+// model, tier (catalog tier or NULL), fresh (uncached input), output, cacheRead,
+// writeShort, writeLong, writeUnsplit (writes of unknown duration), totalInput.
+// A token class without a price, unsplit writes, or a prompt over the
+// catalog limit makes the result NULL.
+function usageCostSQL(e) {
+  function term(tokens, price) {
+    if (price == null) return "(CASE WHEN " + tokens + " > 0 THEN CAST(NULL AS DOUBLE) ELSE 0 END)";
+    return "CAST(" + tokens + " AS DOUBLE)*" + price + "/1000000.0";
+  }
+  var parts = modelPricing.map(function(m) {
+    var cond = "regexp_like(" + e.model + ", '" + modelPricePattern(m.p).replace(/'/g, "''") + "') AND " +
+      e.tier + " = '" + m.tier + "'";
+    if (m.maxInput != null) cond += " AND " + e.totalInput + " <= " + m.maxInput;
+    return "WHEN " + cond + " THEN " + [
+      term(e.fresh, m.i), term(e.output, m.o), term(e.cacheRead, m.cacheRead),
+      term(e.writeShort, m.writeShort), term(e.writeLong, m.writeLong), term(e.writeUnsplit, null),
+    ].join("+");
   });
   if (!parts.length) return "CAST(NULL AS DOUBLE)";
   return "(CASE " + parts.join(" ") + " ELSE CAST(NULL AS DOUBLE) END)";
