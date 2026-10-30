@@ -1,5 +1,5 @@
 /* Agent Canvas — real-time + replay agent orchestration animation. */
-/* globals: query, rows, rowsToObjects, tsToMs, escapeSQLString, escapeHTML, t, sessTimelineData, sessCurrentStats, fmtCost, loadPricing, modelPricing */
+/* globals: query, rows, rowsToObjects, tsToMs, escapeSQLString, escapeHTML, t, sessTimelineData, sessCurrentStats, fmtCost, loadPricing, sess_usageCost, sess_lookupPrice */
 
 var AgentCanvas = (function () {
   // ── Constants ────────────────────────────────────────────────
@@ -38,7 +38,7 @@ var AgentCanvas = (function () {
   var eventSource = null;
 
   // Cost ticker.
-  var costTotal = 0, costFinal = 0, costPollTimer = null;
+  var costTotal = null, costFinal = null, costPollTimer = null;
 
   // Replay mode.
   var replayEvents = [], replayIdx = 0, replayTimer = null;
@@ -521,14 +521,10 @@ var AgentCanvas = (function () {
     ctx.fillText(infoLabel, 16, 16);
 
     // B1: Cost ticker (top-left, below session info).
-    var displayCost = costTotal;
-    if (mode === 'replay' && costFinal > 0 && replayEndTs > replayStartTs) {
-      var progress = Math.max(0, Math.min(1, (replayCurrentTs - replayStartTs) / (replayEndTs - replayStartTs)));
-      displayCost = costFinal * progress;
-    }
-    if (displayCost > 0) {
+    var displayCost = mode === 'replay' ? costFinal : costTotal;
+    if (displayCost != null) {
       ctx.fillStyle = '#66ffaa'; ctx.font = 'bold 14px system-ui,sans-serif';
-      ctx.fillText('$' + displayCost.toFixed(4), 16, 34);
+      ctx.fillText('Est. $' + displayCost.toFixed(4), 16, 34);
     }
 
     // Anomaly count badge (top-right). Reads "⚠ N high · M med · K low"
@@ -778,40 +774,27 @@ var AgentCanvas = (function () {
 
   // B1: Cost ticker.
   function startCostPoll(sessionId) {
-    costTotal = 0;
+    costTotal = null;
     // For global live (no sessionId), we'll start polling once we see a session from SSE.
     if (!sessionId) return;
     function updateCost() {
-      var sql = "SELECT " +
-        "SUM(CASE WHEN message_type IN ('user','tool_result','tool_use') THEN LENGTH(COALESCE(content,''))/4 ELSE 0 END) AS input_tok, " +
-        "SUM(CASE WHEN message_type IN ('assistant','thinking') THEN LENGTH(COALESCE(content,''))/4 ELSE 0 END) AS output_tok, " +
-        "MAX(model) AS model " +
-        "FROM tma1_messages WHERE session_id = '" + escapeSQLString(sessionId) + "'";
-      Promise.resolve(typeof loadPricing === 'function' ? loadPricing() : null).then(function () {
-        return query(sql);
-      }).then(function (res) {
-        var r = rows(res);
-        if (!r.length) return;
-        var inputTok = Number(r[0][0]) || 0;
-        var outputTok = Number(r[0][1]) || 0;
-        var price = canvasLookupPrice(r[0][2] || '');
-        costTotal = inputTok * price.input / 1000000 + outputTok * price.output / 1000000;
-      }).catch(function () { /* ignore */ });
+      var sql = "SELECT model, SUM(input_tokens) AS inp, SUM(output_tokens) AS outp, " +
+        "SUM(cache_read_tokens) AS cached, SUM(cache_creation_tokens) AS written " +
+        "FROM tma1_messages WHERE session_id = '" + escapeSQLString(sessionId) + "' " +
+        "AND (input_tokens IS NOT NULL OR output_tokens IS NOT NULL) GROUP BY model";
+      loadPricing().then(function () { return query(sql); }).then(function (res) {
+        var data = rowsToObjects(res);
+        var total = data.length ? 0 : null;
+        data.forEach(function (row) {
+          var cost = sess_usageCost(sess_lookupPrice(row.model), Number(row.inp) || 0,
+            Number(row.outp) || 0, Number(row.cached) || 0, Number(row.written) || 0);
+          total = total == null || cost == null ? null : total + cost;
+        });
+        costTotal = total;
+      }).catch(function () { costTotal = null; });
     }
     updateCost();
     costPollTimer = setInterval(updateCost, 5000);
-  }
-
-  function canvasLookupPrice(model) {
-    if (!model || typeof modelPricing === 'undefined' || !modelPricing || !modelPricing.length) {
-      return { input: 3, output: 15 };
-    }
-    for (var i = 0; i < modelPricing.length; i++) {
-      if (model.indexOf(modelPricing[i].p) !== -1) {
-        return { input: modelPricing[i].i, output: modelPricing[i].o };
-      }
-    }
-    return { input: 3, output: 15 };
   }
 
   // ── Replay Mode ──────────────────────────────────────────────
@@ -1091,7 +1074,7 @@ var AgentCanvas = (function () {
     window.removeEventListener('resize', resize);
     window.removeEventListener('keydown', onKey);
 
-    mode = m; globalTime = 0; costTotal = 0;
+    mode = m; globalTime = 0; costTotal = null;
     cam = { x: 0, y: 0, zoom: 1 };
     var overlay = document.getElementById('agent-canvas-overlay');
     overlay.style.display = 'flex';
@@ -1121,8 +1104,8 @@ var AgentCanvas = (function () {
     if (m === 'live') {
       startLive(opts.sessionId);
     } else {
-      // Replay: accumulate cost proportionally as timeline progresses.
-      costFinal = (typeof sessCurrentStats !== 'undefined' && sessCurrentStats) ? sessCurrentStats.cost || 0 : 0;
+      // Replay shows the session total; timestamps cannot allocate billed cost.
+      costFinal = (typeof sessCurrentStats !== 'undefined' && sessCurrentStats) ? sessCurrentStats.cost : null;
       startReplay(opts.timelineData || [], opts.speed);
     }
     // Anomalies overlay both modes — the same SessionID drives them, so

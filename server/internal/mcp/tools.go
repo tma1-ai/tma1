@@ -164,7 +164,7 @@ func (t PeerSessionsTool) Definition() Tool {
 			Properties: map[string]Property{
 				"agent_source": {
 					Type:        "string",
-					Description: "Agent to list: claude_code / codex / copilot_cli, or \"self\" for your own sessions. Aliases: cc | claude → claude_code, copilot → copilot_cli, me | mine → self. Empty = all peers except you (top N per agent).",
+					Description: "Agent to list: claude_code / codex / copilot_cli / opencode, or \"self\" for your own sessions. Aliases: cc | claude → claude_code, copilot → copilot_cli, me | mine → self. Empty = all peers except you (top N per agent).",
 				},
 				"detail": {
 					Type:        "string",
@@ -282,7 +282,7 @@ func (t SearchSessionsTool) Definition() Tool {
 				},
 				"agent_source": {
 					Type:        "string",
-					Description: "Restrict to one agent: claude_code / codex / copilot_cli, or \"self\". Empty = every agent, including you.",
+					Description: "Restrict to one agent: claude_code / codex / copilot_cli / opencode, or \"self\". Empty = every agent, including you.",
 				},
 				"project": {
 					Type:        "string",

@@ -65,6 +65,7 @@ type PeerMessage struct {
 var validPeerAgents = map[string]bool{
 	"claude_code": true,
 	"codex":       true,
+	"opencode":    true,
 	"copilot_cli": true,
 }
 
@@ -580,7 +581,7 @@ func (b *Bundler) resolveAgentAlias(agentSource string) (string, error) {
 		return b.Caller, nil
 	}
 	if agent != "" && !validPeerAgents[agent] {
-		return "", fmt.Errorf("invalid agent_source %q (valid: claude_code, codex, copilot_cli, self, or empty for all peers)", agentSource)
+		return "", fmt.Errorf("invalid agent_source %q (valid: claude_code, codex, copilot_cli, opencode, self, or empty for all peers)", agentSource)
 	}
 	return agent, nil
 }

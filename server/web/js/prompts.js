@@ -5,12 +5,9 @@
 var prPage = 0;
 var prPageSize = 50;
 var prHasNext = false;
-var prSort = 'time'; // 'time' | 'score' | 'cost'
+var prSort = 'time'; // 'time' | 'score'
 var prScoreFilter = 'all'; // 'all' | 'poor' | 'fair' | 'good' | 'excellent'
 var prPromptData = []; // cached scored prompts for current page
-var prSessionStats = {}; // session_id → {turns, totalInput, totalOutput, cacheRead, model}
-var prToolStats = {};    // session_id → {ok, fail}
-var prToolSequences = {}; // session_id → [{tool, ok, inputPrefix}, ...]
 var prAllScores = [];    // all composite scores for distribution
 var prLLMAvailable = null; // null = unchecked, true/false
 var prExpandedIdx = -1;
@@ -90,194 +87,27 @@ function pr_reload() {
 // Scoring Engine
 // ============================================================
 
-var PR_FILE_EXTS = /\.(go|ts|tsx|js|jsx|rs|py|java|rb|cpp|c|h|css|html|sql|yaml|yml|json|toml|md|sh|bash|zsh|proto|graphql)\b/i;
-var PR_PATH_PATTERN = /(?:^|\s|['"`])[.~]?\/[\w\-./]+/g;
-var PR_PATH_PATTERN_TEST = /(?:^|\s|['"`])[.~]?\/[\w\-./]+/;
-var PR_IDENT_PATTERN = /\b[a-z][a-zA-Z0-9]{3,}\b|\b[A-Z][a-zA-Z0-9]{3,}\b|\b[a-z]+_[a-z_]{2,}\b/g;
-var PR_ERROR_KEYWORDS = /\b(error|failed|failure|panic|exception|traceback|stacktrace|crash|segfault|ENOENT|EPERM|EACCES|404|500|502|503)\b/i;
-var PR_BACKTICK = /`[^`]{2,}`/g;
-var PR_LINE_REF = /\b(?:line\s*\d+|L\d+|:\d{2,})\b/i;
-var PR_CODE_BLOCK = /```[\s\S]*?```/g;
-var PR_STACK_TRACE = /^\s+at\s+/m;
-var PR_TRACEBACK = /Traceback|File ".*", line \d+/;
-var PR_BEHAVIOR_KEYWORDS = /\b(expected|actual|should|want|instead|currently|but\s+(?:it|the|I|we)|rather|supposed\s+to)\b/i;
-var PR_BEHAVIOR_KEYWORDS_G = /\b(expected|actual|should|want|instead|currently|but\s+(?:it|the|I|we)|rather|supposed\s+to)\b/gi;
-var PR_QUOTED_STRINGS = /"[^"]{15,}"|'[^']{15,}'/g;
+var PR_VERBS = ['fix', 'add', 'implement', 'refactor', 'debug', 'explain', 'update', 'remove', 'test', 'review', 'create', 'change', 'optimize', 'migrate', 'upgrade', 'configure', 'write', 'build', 'check', 'find', 'search', 'read', 'show'];
 
-var PR_EXPLORATION_TOOLS = ['Read', 'Grep', 'Glob', 'Search', 'Agent'];
-var PR_EDIT_TOOLS = ['Edit', 'Write', 'NotebookEdit'];
-var PR_FILE_PATH_IN_JSON = /"file_path"\s*:\s*"([^"]+)"/;
-
-var PR_VERBS = ['fix', 'add', 'implement', 'refactor', 'debug', 'explain', 'update', 'remove', 'test', 'review', 'create', 'change', 'move', 'rename', 'optimize', 'migrate', 'upgrade', 'setup', 'configure', 'deploy', 'write', 'build', 'run', 'check', 'find', 'search', 'read', 'show', 'list', 'help'];
-
-// --- Behavior Pattern Detection (Layer 3) ---
-
-function pr_detectPatterns(toolSeq, sessionTokens) {
-  if (!toolSeq || toolSeq.length === 0) return { patterns: [], stats: {} };
-
-  var patterns = [];
-
-  // 1. Exploration loop: >=4 consecutive exploration tool calls
-  var maxExplRun = 0, explRun = 0;
-  toolSeq.forEach(function(t) {
-    if (PR_EXPLORATION_TOOLS.indexOf(t.tool) !== -1) explRun++;
-    else { maxExplRun = Math.max(maxExplRun, explRun); explRun = 0; }
-  });
-  maxExplRun = Math.max(maxExplRun, explRun);
-  if (maxExplRun >= 4) patterns.push({ type: 'exploration_loop', count: maxExplRun });
-
-  // 2. Edit retry: same file edited >2 times
-  var editFiles = {};
-  toolSeq.forEach(function(t) {
-    if (PR_EDIT_TOOLS.indexOf(t.tool) !== -1 && t.inputPrefix) {
-      var m = t.inputPrefix.match(PR_FILE_PATH_IN_JSON);
-      var path = m ? m[1] : null;
-      if (path) editFiles[path] = (editFiles[path] || 0) + 1;
-    }
-  });
-  var editVals = Object.values(editFiles);
-  var maxEdits = editVals.length > 0 ? Math.max.apply(null, editVals) : 0;
-  if (maxEdits > 2) patterns.push({ type: 'edit_retry', count: maxEdits });
-
-  // 3. Consecutive failures: >=3 in a row
-  var maxFailRun = 0, failRun = 0;
-  toolSeq.forEach(function(t) {
-    if (!t.ok) failRun++;
-    else { maxFailRun = Math.max(maxFailRun, failRun); failRun = 0; }
-  });
-  maxFailRun = Math.max(maxFailRun, failRun);
-  if (maxFailRun >= 3) patterns.push({ type: 'consecutive_failures', count: maxFailRun });
-
-  // 4. High absolute cost
-  if (sessionTokens > 100000) patterns.push({ type: 'high_cost', tokens: sessionTokens });
-
-  // Stats for dimension scoring
-  var explCount = toolSeq.filter(function(t) { return PR_EXPLORATION_TOOLS.indexOf(t.tool) !== -1; }).length;
-  return {
-    patterns: patterns,
-    stats: {
-      explorationRatio: toolSeq.length > 0 ? explCount / toolSeq.length : 0,
-      maxExplRun: maxExplRun,
-      maxEdits: maxEdits,
-      maxFailRun: maxFailRun,
-    },
+// These are text signals, not a calibrated measure of prompt quality.
+function pr_scorePrompt(content) {
+  var text = (content || '').trim();
+  var followup = /^(?:ok(?:ay)?|yes|no|thanks?|continue|go ahead|do it|lgtm|好的?|可以|继续|执行|同意|谢谢|没问题)[.!。！\s]*$/i.test(text);
+  var signals = {
+    specificity: /\b(?:fix|add|implement|refactor|debug|explain|update|remove|test|review|create|change|optimize|migrate|upgrade|configure|write|build|check|find|search|compare|summari[sz]e)\b|修复|添加|实现|重构|解释|更新|删除|测试|审查|创建|修改|优化|迁移|升级|配置|编写|检查|查找|调查|比较|总结/i.test(text),
+    context: /```|`[^`]+`|https?:\/\/|\b(?:currently|observed|actual|because|error|failed)\b|当前|目前|现状|报错|错误|原因|因为|参考/i.test(text),
+    clarity: /\b(?:should|expect|return|produce|display|output|result|so that)\b|应该|预期|返回|输出|结果|显示|希望|目标|使得/i.test(text),
+    constraints: /\b(?:must|without|preserve|only|avoid|do not|don't|limit|compatible)\b|必须|不要|不得|保持|保留|只|避免|限制|兼容/i.test(text),
+    verification: /\b(?:test|verify|validate|acceptance|assert|reproduce|example|check)\b|测试|验证|验收|断言|复现|示例|检查/i.test(text),
   };
-}
-
-// --- Dimension Scoring (refined, count-based) ---
-
-function pr_scoreSpecificity(content) {
-  var score = 0;
-  // File paths: count matches
-  var paths = (content.match(PR_PATH_PATTERN) || []);
-  if (PR_FILE_EXTS.test(content)) paths.push('ext'); // add 1 for file extension mention
-  if (paths.length >= 3) score += 25;
-  else if (paths.length >= 1) score += 15;
-
-  // Identifiers: count unique
-  var idents = content.match(PR_IDENT_PATTERN) || [];
-  var uniqueIdents = new Set(idents).size;
-  if (uniqueIdents >= 3) score += 20;
-  else if (uniqueIdents >= 1) score += 10;
-
-  // Error/log info
-  if (PR_ERROR_KEYWORDS.test(content)) score += 10;
-  if ((content.match(PR_QUOTED_STRINGS) || []).length > 0) score += 10;
-
-  // Line references
-  if (PR_LINE_REF.test(content)) score += 15;
-
-  // Backtick code spans: count
-  var ticks = (content.match(PR_BACKTICK) || []).length;
-  if (ticks >= 3) score += 20;
-  else if (ticks >= 1) score += 10;
-
-  return Math.min(score, 100);
-}
-
-function pr_scoreContext(content, behaviorStats) {
-  var score = 0;
-  // Code blocks: count and size
-  var blocks = content.match(PR_CODE_BLOCK) || [];
-  if (blocks.length > 0) {
-    var codeLen = blocks.reduce(function(a, b) { return a + b.length; }, 0);
-    score += codeLen > 200 ? 30 : 20;
-  }
-
-  // Stack trace / error log
-  if (PR_STACK_TRACE.test(content) || PR_TRACEBACK.test(content)) score += 15;
-
-  // Behavioral spec: count keyword hits
-  var behaviorHits = (content.match(PR_BEHAVIOR_KEYWORDS_G) || []).length;
-  score += Math.min(behaviorHits * 7, 20);
-
-  // Length: smoother curve
-  if (content.length > 100) score += 5;
-  if (content.length > 250) score += 5;
-  if (content.length > 500) score += 5;
-  if (content.length > 1000) score += 5;
-  if (content.length > 3000) score -= 10; // likely pasted whole file
-
-  // Behavior signal: high exploration ratio = insufficient context provided
-  if (behaviorStats && behaviorStats.explorationRatio > 0.6) score -= 15;
-  else if (behaviorStats && behaviorStats.explorationRatio > 0.4) score -= 8;
-
-  return Math.max(0, Math.min(score, 100));
-}
-
-function pr_scoreClarity(turns, toolFailures, detection) {
-  var score;
-  if (turns <= 1) score = 100;
-  else if (turns <= 2) score = 85;
-  else if (turns <= 3) score = 70;
-  else if (turns <= 5) score = 50;
-  else score = Math.max(15, 60 - turns * 6);
-
-  score -= Math.min((toolFailures || 0) * 4, 20);
-
-  // Behavior pattern penalties
-  if (detection && detection.patterns) {
-    detection.patterns.forEach(function(p) {
-      if (p.type === 'exploration_loop') score -= 10;
-      if (p.type === 'edit_retry') score -= 8;
-    });
-  }
-
-  return Math.max(0, Math.min(100, score));
-}
-
-// allTokensSorted must be pre-sorted ascending.
-function pr_scoreCostEfficiency(sessionTokens, allTokensSorted) {
-  if (!allTokensSorted || allTokensSorted.length === 0) return 50;
-  var rank = 0;
-  for (var i = 0; i < allTokensSorted.length; i++) {
-    if (allTokensSorted[i] <= sessionTokens) rank = i;
-  }
-  var relativeScore = Math.round(100 - (rank / allTokensSorted.length * 100));
-
-  // Absolute penalty for expensive sessions
-  if (sessionTokens > 200000) relativeScore -= 20;
-  else if (sessionTokens > 100000) relativeScore -= 10;
-
-  return Math.max(0, relativeScore);
-}
-
-function pr_scoreToolEfficiency(ok, fail) {
-  if (ok + fail === 0) return 70;
-  return Math.round(ok / (ok + fail) * 100);
-}
-
-function pr_scoreComposite(dims) {
-  return Math.round(
-    dims.specificity * 0.20 +
-    dims.context * 0.15 +
-    dims.clarity * 0.30 +
-    dims.costEfficiency * 0.20 +
-    dims.toolEfficiency * 0.15
-  );
+  var dims = {_patterns: [], _stats: {}, followup: followup, evidence: signals};
+  Object.keys(signals).forEach(function(key) { dims[key] = followup ? null : (signals[key] ? 100 : 0); });
+  dims.composite = followup || !text ? null : Object.values(signals).filter(Boolean).length * 20;
+  return dims;
 }
 
 function pr_scoreTier(score) {
+  if (score == null) return 'unscored';
   if (score >= 90) return 'excellent';
   if (score >= 70) return 'good';
   if (score >= 40) return 'fair';
@@ -285,88 +115,20 @@ function pr_scoreTier(score) {
 }
 
 function pr_tierColor(tier) {
-  switch (tier) {
-    case 'excellent': return 'var(--green)';
-    case 'good': return 'var(--blue)';
-    case 'fair': return 'var(--yellow)';
-    default: return 'var(--red)';
-  }
+  return {excellent:'var(--green)',good:'var(--blue)',fair:'var(--yellow)',poor:'var(--text-muted)',unscored:'var(--text-muted)'}[tier];
 }
 
-function pr_scorePrompt(content, sess, tools, toolSeq, allTokensSorted) {
-  var turns = sess ? sess.turns : 1;
-  var totalTokens = sess ? (sess.totalInput + sess.totalOutput) : 0;
-  var toolOk = tools ? tools.ok : 0;
-  var toolFail = tools ? tools.fail : 0;
-
-  // Detect behavioral patterns once, reuse across dimensions
-  var detection = pr_detectPatterns(toolSeq, totalTokens);
-
-  var dims = {
-    specificity: pr_scoreSpecificity(content),
-    context: pr_scoreContext(content, detection.stats),
-    clarity: pr_scoreClarity(turns, toolFail, detection),
-    costEfficiency: pr_scoreCostEfficiency(totalTokens, allTokensSorted),
-    toolEfficiency: pr_scoreToolEfficiency(toolOk, toolFail),
-  };
-  dims.composite = pr_scoreComposite(dims);
-  dims._patterns = detection.patterns; // attached for suggestion generation
-  dims._stats = detection.stats;
-  return dims;
+function pr_mean(values) {
+  var known = values.filter(function(value) { return Number.isFinite(value); });
+  return known.length ? known.reduce(function(a,b) { return a+b; },0)/known.length : null;
 }
 
-// ============================================================
-// Suggestion Rules
-// ============================================================
-
-function pr_getSuggestions(content, dims, sess, tools) {
+function pr_getSuggestions(content, dims) {
+  if (dims.followup) return [t('pr.sug.followup')];
   var suggestions = [];
-  var turns = sess ? sess.turns : 1;
-  var toolFail = tools ? tools.fail : 0;
-  var cacheRead = sess ? sess.cacheRead : 0;
-  var totalInput = sess ? sess.totalInput : 0;
-
-  // Behavior pattern suggestions (highest signal)
-  if (dims._patterns) {
-    dims._patterns.forEach(function(p) {
-      if (p.type === 'exploration_loop') {
-        suggestions.push(t('pr.sug.exploration_loop').replace('{N}', p.count));
-      } else if (p.type === 'edit_retry') {
-        suggestions.push(t('pr.sug.edit_retry').replace('{N}', p.count));
-      } else if (p.type === 'consecutive_failures') {
-        suggestions.push(t('pr.sug.consec_fail').replace('{N}', p.count));
-      } else if (p.type === 'high_cost') {
-        suggestions.push(t('pr.sug.high_cost').replace('{N}', Math.round(p.tokens / 1000)));
-      }
-    });
-  }
-
-  // Content-based suggestions
-  if (dims.specificity < 40 && !PR_PATH_PATTERN_TEST.test(content) && !PR_FILE_EXTS.test(content)) {
-    suggestions.push(t('pr.sug.no_paths'));
-  }
-  if (content.length < 50 && dims.specificity < 30) {
-    suggestions.push(t('pr.sug.vague'));
-  }
-  if (content.length > 3000) {
-    suggestions.push(t('pr.sug.too_long').replace('{N}', content.length));
-  }
-  if (dims.clarity < 40 && !(dims._patterns && dims._patterns.some(function(p) { return p.type === 'exploration_loop'; }))) {
-    suggestions.push(t('pr.sug.high_turns').replace('{N}', turns));
-  }
-  if (dims.context < 30) {
-    suggestions.push(t('pr.sug.no_code'));
-  }
-  if (dims.toolEfficiency < 50 && toolFail > 0) {
-    suggestions.push(t('pr.sug.tool_fails').replace('{N}', toolFail));
-  }
-  if (!PR_BEHAVIOR_KEYWORDS.test(content)) {
-    suggestions.push(t('pr.sug.no_behavior'));
-  }
-  if (totalInput > 0 && cacheRead / totalInput < 0.1) {
-    suggestions.push(t('pr.sug.cache_low'));
-  }
-  return suggestions.slice(0, 5); // max 5 (raised from 4)
+  if (/\[(?:TODO|TBD|insert [^\]]+|file path)\]|<insert[^>]*>/i.test(content)) suggestions.push(t('pr.sug.placeholder'));
+  if (dims.evidence.specificity && !dims.evidence.clarity && !dims.evidence.verification) suggestions.push(t('pr.sug.acceptance'));
+  return suggestions;
 }
 
 // ============================================================
@@ -394,6 +156,7 @@ async function pr_loadCards() {
     if (prTotalPrompts === 0) return false;
 
     document.getElementById('pr-val-prompts').textContent = fmtNum(prTotalPrompts);
+    document.getElementById('pr-val-cost').textContent = fmtNum(totalSessions);
     document.getElementById('pr-val-turns').textContent = totalSessions > 0 ? (prTotalPrompts / totalSessions).toFixed(1) : '\u2014';
 
     return true;
@@ -405,7 +168,7 @@ async function pr_loadCards() {
 async function pr_loadData() {
   // Return cached data if time range hasn't changed.
   if (prDataCache && prDataCache.range === currentTimeRange) {
-    prAllScores = prDataCache.data.map(function(s) { return s.dims.composite; });
+    prAllScores = prDataCache.data.map(function(s) { return s.dims.composite; }).filter(Number.isFinite);
     return prDataCache.data;
   }
 
@@ -420,110 +183,15 @@ async function pr_loadData() {
   var prompts = rowsToObjects(promptRes);
   if (!prompts || prompts.length === 0) return [];
 
-  // Unique session IDs
-  var sidSet = {};
-  prompts.forEach(function(p) { sidSet[p.session_id] = true; });
-  var sids = Object.keys(sidSet);
-  var sidList = sids.map(function(s) { return "'" + escapeSQLString(s) + "'"; }).join(',');
-
-  // Q2 + Q3 + Q4 in parallel
-  var results = await Promise.all([
-    query(
-      "SELECT session_id, " +
-      "SUM(CASE WHEN message_type = 'user' THEN 1 ELSE 0 END) AS user_turns, " +
-      "SUM(COALESCE(input_tokens, 0)) AS total_input, " +
-      "SUM(COALESCE(output_tokens, 0)) AS total_output, " +
-      "SUM(COALESCE(cache_read_tokens, 0)) AS total_cache_read, " +
-      "MAX(model) AS model " +
-      "FROM tma1_messages WHERE session_id IN (" + sidList + ") GROUP BY session_id"
-    ),
-    query(
-      "SELECT session_id, " +
-      "SUM(CASE WHEN event_type = 'PostToolUse' THEN 1 ELSE 0 END) AS tool_ok, " +
-      "SUM(CASE WHEN event_type IN ('PostToolUseFailure','ToolError') THEN 1 ELSE 0 END) AS tool_fail " +
-      "FROM tma1_hook_events WHERE session_id IN (" + sidList + ") GROUP BY session_id"
-    ).catch(function() { return null; }),
-    // Q4: Tool call sequence for behavioral pattern detection.
-    // Include PreToolUse (Codex stores tool_name/input there). Pair via tool_use_id.
-    query(
-      "SELECT session_id, tool_name, event_type, tool_use_id, " +
-      "LEFT(tool_input, 200) AS tool_input_prefix " +
-      "FROM tma1_hook_events WHERE session_id IN (" + sidList + ") " +
-      "AND event_type IN ('PreToolUse','PostToolUse','PostToolUseFailure') " +
-      "ORDER BY session_id, ts LIMIT 8000"
-    ).catch(function() { return null; }),
-  ]);
-
-  // Build lookup maps
-  prSessionStats = {};
-  rowsToObjects(results[0]).forEach(function(r) {
-    prSessionStats[r.session_id] = {
-      turns: Number(r.user_turns) || 1,
-      totalInput: Number(r.total_input) || 0,
-      totalOutput: Number(r.total_output) || 0,
-      cacheRead: Number(r.total_cache_read) || 0,
-      model: r.model || '',
-    };
-  });
-
-  prToolStats = {};
-  if (results[1]) {
-    rowsToObjects(results[1]).forEach(function(r) {
-      prToolStats[r.session_id] = {
-        ok: Number(r.tool_ok) || 0,
-        fail: Number(r.tool_fail) || 0,
-      };
-    });
-  }
-
-  // Build tool sequence map for behavioral analysis.
-  // Pair PreToolUse with PostToolUse/Failure by tool_use_id (handles interleaved/concurrent calls).
-  prToolSequences = {};
-  if (results[2]) {
-    var pendingPre = {}; // tool_use_id → {tool, inputPrefix}
-    rowsToObjects(results[2]).forEach(function(r) {
-      var sid = r.session_id;
-      var tuid = r.tool_use_id || '';
-      if (r.event_type === 'PreToolUse') {
-        if (tuid) pendingPre[tuid] = { tool: r.tool_name || '', inputPrefix: r.tool_input_prefix || '' };
-      } else {
-        // PostToolUse or PostToolUseFailure — pair with Pre by tool_use_id.
-        if (!prToolSequences[sid]) prToolSequences[sid] = [];
-        var pre = tuid ? pendingPre[tuid] : null;
-        prToolSequences[sid].push({
-          tool: r.tool_name || (pre ? pre.tool : '') || '',
-          ok: r.event_type === 'PostToolUse',
-          inputPrefix: r.tool_input_prefix || (pre ? pre.inputPrefix : '') || '',
-        });
-        if (tuid) delete pendingPre[tuid];
-      }
-    });
-  }
-
-  // Precompute sorted token list once for cost efficiency ranking.
-  var allTokensSorted = Object.values(prSessionStats)
-    .map(function(s) { return s.totalInput + s.totalOutput; })
-    .sort(function(a, b) { return a - b; });
-
-  // Score all prompts
   var scored = prompts.map(function(p) {
-    var sess = prSessionStats[p.session_id];
-    var tools = prToolStats[p.session_id];
-    var toolSeq = prToolSequences[p.session_id] || null;
-    var dims = pr_scorePrompt(p.content || '', sess, tools, toolSeq, allTokensSorted);
-    return {
-      sessionId: p.session_id,
-      ts: p.ts,
-      content: p.content || '',
-      model: p.model || (sess ? sess.model : ''),
-      dims: dims,
-      sess: sess,
-      tools: tools,
-      toolSeq: toolSeq,
-    };
+    var earlier = prompts.filter(function(other) {
+      return other.session_id === p.session_id && tsToMs(other.ts) < tsToMs(p.ts);
+    }).slice(0, 4).reverse().map(function(other) { return other.content || ''; });
+    return {sessionId:p.session_id, ts:p.ts, content:p.content || '', model:p.model || '',
+      dims:pr_scorePrompt(p.content || ''), previousPrompts:earlier};
   });
 
-  prAllScores = scored.map(function(s) { return s.dims.composite; });
+  prAllScores = scored.map(function(s) { return s.dims.composite; }).filter(Number.isFinite);
   prDataCache = { range: currentTimeRange, data: scored };
   prDataGeneration++;
   return scored;
@@ -544,18 +212,8 @@ async function pr_loadOverview() {
   }
 
   // Update KPI: avg score
-  var avgScore = Math.round(prAllScores.reduce(function(a, b) { return a + b; }, 0) / prAllScores.length);
+  var avgScore = pr_mean(prAllScores);
   document.getElementById('pr-val-score').innerHTML = pr_renderScoreRing(avgScore, 44);
-
-  // Avg cost per session
-  await loadPricing();
-  var sessionCosts = Object.entries(prSessionStats).map(function(entry) {
-    var s = entry[1];
-    var price = lookupPrice(s.model);
-    return (s.totalInput * price.i + s.totalOutput * price.o) / 1e6;
-  });
-  var avgCost = sessionCosts.length > 0 ? sessionCosts.reduce(function(a, b) { return a + b; }, 0) / sessionCosts.length : 0;
-  document.getElementById('pr-val-cost').textContent = fmtCost(avgCost);
 
   // Score distribution (4 buckets)
   var buckets = [0, 0, 0, 0]; // poor, fair, good, excellent
@@ -584,7 +242,7 @@ async function pr_loadOverview() {
 function pr_renderDistribution(buckets) {
   var el = document.getElementById('pr-chart-distribution');
   var labels = [t('pr.tier.poor'), t('pr.tier.fair'), t('pr.tier.good'), t('pr.tier.excellent')];
-  var colors = ['var(--red)', 'var(--yellow)', 'var(--blue)', 'var(--green)'];
+  var colors = ['var(--text-muted)', 'var(--yellow)', 'var(--blue)', 'var(--green)'];
   var max = Math.max.apply(null, buckets) || 1;
 
   var html = '<div class="bar-chart">';
@@ -606,7 +264,7 @@ function pr_renderTrend(scored) {
   scored.forEach(function(s) {
     var day = new Date(tsToMs(s.ts)).toISOString().slice(0, 10);
     if (!dayMap[day]) dayMap[day] = [];
-    dayMap[day].push(s.dims.composite);
+    if (s.dims.composite != null) dayMap[day].push(s.dims.composite);
   });
 
   var days = Object.keys(dayMap).sort();
@@ -618,7 +276,7 @@ function pr_renderTrend(scored) {
   var timestamps = days.map(function(d) { return new Date(d).getTime() / 1000; });
   var avgs = days.map(function(d) {
     var arr = dayMap[d];
-    return Math.round(arr.reduce(function(a, b) { return a + b; }, 0) / arr.length);
+    return pr_mean(arr);
   });
 
   el.innerHTML = '';
@@ -644,7 +302,7 @@ function pr_renderTopSuggestions(scored) {
   // Count suggestion frequency
   var counts = {};
   scored.forEach(function(s) {
-    var suggestions = pr_getSuggestions(s.content, s.dims, s.sess, s.tools);
+    var suggestions = pr_getSuggestions(s.content, s.dims);
     suggestions.forEach(function(sug) {
       counts[sug] = (counts[sug] || 0) + 1;
     });
@@ -673,13 +331,12 @@ function pr_renderTopSuggestions(scored) {
 
 function pr_renderDimensionBreakdown(scored) {
   var el = document.getElementById('pr-chart-dimensions');
-  var dims = ['specificity', 'context', 'clarity', 'costEfficiency', 'toolEfficiency'];
+  var dims = ['specificity', 'context', 'clarity', 'constraints', 'verification'];
   var labels = [t('pr.dim.spec'), t('pr.dim.ctx'), t('pr.dim.clarity'), t('pr.dim.cost'), t('pr.dim.tool')];
   var descs = [t('pr.dim.spec_desc'), t('pr.dim.ctx_desc'), t('pr.dim.clarity_desc'), t('pr.dim.cost_desc'), t('pr.dim.tool_desc')];
 
   var avgs = dims.map(function(d) {
-    var sum = scored.reduce(function(a, s) { return a + s.dims[d]; }, 0);
-    return Math.round(sum / scored.length);
+    return pr_mean(scored.map(function(s) { return s.dims[d]; }));
   });
 
   var html = '';
@@ -689,9 +346,9 @@ function pr_renderDimensionBreakdown(scored) {
     html += '<div class="pr-dim-card">' +
       '<div class="pr-dim-card-head">' +
         '<span class="pr-dim-card-label">' + labels[i] + '</span>' +
-        '<span class="pr-dim-card-val" style="color:' + color + '">' + avgs[i] + ' / 100</span>' +
+        '<span class="pr-dim-card-val" style="color:' + color + '">' + (avgs[i] == null ? '—' : Math.round(avgs[i])) + ' / 100</span>' +
       '</div>' +
-      '<div class="bar-track" style="height:6px;border-radius:3px"><div class="bar-fill" style="width:' + avgs[i] + '%;background:' + color + ';border-radius:3px"></div></div>' +
+      '<div class="bar-track" style="height:6px;border-radius:3px"><div class="bar-fill" style="width:' + (avgs[i] || 0) + '%;background:' + color + ';border-radius:3px"></div></div>' +
       '<div class="pr-dim-card-desc">' + escapeHTML(descs[i]) + '</div>' +
     '</div>';
   }
@@ -703,7 +360,7 @@ function pr_renderDimensionBreakdown(scored) {
 // ============================================================
 
 async function pr_loadPrompts() {
-  var scored = await pr_loadData();
+  var scored = (await pr_loadData()).slice();
   if (!scored || scored.length === 0) {
     document.getElementById('pr-prompt-list').innerHTML = '<div class="chart-empty">' + t('empty.waiting') + '</div>';
     return;
@@ -716,13 +373,9 @@ async function pr_loadPrompts() {
 
   // Sort
   if (prSort === 'score') {
-    scored.sort(function(a, b) { return a.dims.composite - b.dims.composite; });
-  } else if (prSort === 'cost') {
-    scored.sort(function(a, b) {
-      var ca = (a.sess ? a.sess.totalInput + a.sess.totalOutput : 0);
-      var cb = (b.sess ? b.sess.totalInput + b.sess.totalOutput : 0);
-      return cb - ca;
-    });
+    scored.sort(function(a, b) { return (a.dims.composite == null ? Infinity : a.dims.composite) - (b.dims.composite == null ? Infinity : b.dims.composite); });
+  } else {
+    scored.sort(function(a,b) { return tsToMs(b.ts)-tsToMs(a.ts); });
   }
   // else time (already sorted by ts DESC)
 
@@ -750,24 +403,13 @@ function pr_renderPromptCards(pageData, startIdx) {
     var tier = pr_scoreTier(p.dims.composite);
     var expanded = prExpandedIdx === idx;
     var relTime = pr_relativeTime(p.ts);
-    var turns = p.sess ? p.sess.turns : 1;
-    var cost = 0;
-    if (p.sess) {
-      var price = lookupPrice(p.model);
-      cost = (p.sess.totalInput * price.i + p.sess.totalOutput * price.o) / 1e6;
-    }
-
     html += '<div class="pr-card' + (expanded ? ' expanded' : '') + '" data-idx="' + idx + '" onclick="pr_toggleCard(' + idx + ')">';
     html += '<div class="pr-card-header">';
-    html += '<div class="pr-score-dot ' + tier + '">' + p.dims.composite + '</div>';
+    html += '<div class="pr-score-dot ' + tier + '">' + (p.dims.composite == null ? '—' : p.dims.composite) + '</div>';
     html += '<div class="pr-card-meta">';
     html += '<span>' + escapeHTML(relTime) + '</span>';
     html += '<span class="pr-sep">\u00b7</span>';
-    html += '<span>' + escapeHTML(p.model || t('pr.unknown_model')) + '</span>';
-    html += '<span class="pr-sep">\u00b7</span>';
-    html += '<span>' + turns + ' ' + (turns === 1 ? t('pr.turn') : t('pr.turns')) + '</span>';
-    html += '<span class="pr-sep">\u00b7</span>';
-    html += '<span>' + fmtCost(cost) + '</span>';
+    html += '<span title="' + escapeHTML(p.sessionId) + '">' + escapeHTML(p.sessionId.slice(0, 12)) + '</span>';
     html += '</div></div>';
     html += '<div class="pr-card-content">' + escapeHTML(p.content) + '</div>';
 
@@ -782,8 +424,8 @@ function pr_renderPromptCards(pageData, startIdx) {
 
 function pr_renderDetail(p) {
   var dims = p.dims;
-  var suggestions = pr_getSuggestions(p.content, dims, p.sess, p.tools);
-  var dimNames = ['specificity', 'context', 'clarity', 'costEfficiency', 'toolEfficiency'];
+  var suggestions = pr_getSuggestions(p.content, dims);
+  var dimNames = ['specificity', 'context', 'clarity', 'constraints', 'verification'];
   var dimLabels = [t('pr.dim.spec'), t('pr.dim.ctx'), t('pr.dim.clarity'), t('pr.dim.cost'), t('pr.dim.tool')];
 
   var html = '<div class="pr-detail">';
@@ -796,8 +438,8 @@ function pr_renderDetail(p) {
     var color = pr_tierColor(tier);
     html += '<div class="pr-dim-row">' +
       '<div class="pr-dim-label">' + dimLabels[i] + '</div>' +
-      '<div class="pr-dim-track"><div class="pr-dim-fill" style="width:' + val + '%;background:' + color + '"></div></div>' +
-      '<div class="pr-dim-val">' + val + '</div></div>';
+      '<div class="pr-dim-track"><div class="pr-dim-fill" style="width:' + (val || 0) + '%;background:' + color + '"></div></div>' +
+      '<div class="pr-dim-val">' + (val == null ? '—' : val) + '</div></div>';
   }
   html += '</div>';
 
@@ -862,83 +504,13 @@ function pr_onScoreFilterChange(val) {
 
 async function pr_loadPatterns() {
   var scored = await pr_loadData();
-  if (!scored || scored.length === 0) {
-    document.getElementById('pr-pattern-content').innerHTML = '<div class="chart-empty">' + t('empty.waiting') + '</div>';
-    return;
-  }
-
-  // Extract verb from prompt content
-  var patterns = {};
-  scored.forEach(function(s) {
-    var verb = pr_extractVerb(s.content);
-    if (!patterns[verb]) patterns[verb] = { count: 0, scores: [], costs: [], turns: [] };
-    patterns[verb].count++;
-    patterns[verb].scores.push(s.dims.composite);
-    var cost = 0;
-    if (s.sess) {
-      var price = lookupPrice(s.model);
-      cost = (s.sess.totalInput * price.i + s.sess.totalOutput * price.o) / 1e6;
-    }
-    patterns[verb].costs.push(cost);
-    patterns[verb].turns.push(s.sess ? s.sess.turns : 1);
+  var groups = {};
+  scored.forEach(function(p) { var verb = pr_extractVerb(p.content); groups[verb] = (groups[verb] || 0) + 1; });
+  var html = '<p class="panel-caption">' + t('pr.signal_note') + '</p><table><thead><tr><th>' + t('pr.pattern') + '</th><th>' + t('pr.count') + '</th></tr></thead><tbody>';
+  Object.entries(groups).sort(function(a,b) { return b[1]-a[1]; }).forEach(function(row) {
+    html += '<tr><td>' + escapeHTML(row[0]) + '</td><td>' + row[1] + '</td></tr>';
   });
-
-  var sorted = Object.entries(patterns).sort(function(a, b) { return b[1].count - a[1].count; }).slice(0, 12);
-  var maxCount = sorted[0] ? sorted[0][1].count : 1;
-
-  // Bar chart
-  var barHtml = '<div class="bar-chart">';
-  sorted.forEach(function(entry) {
-    var pct = entry[1].count / maxCount * 100;
-    barHtml += '<div class="bar-row">' +
-      '<div class="bar-label">' + escapeHTML(entry[0]) + '</div>' +
-      '<div class="bar-track"><div class="bar-fill" style="width:' + pct + '%;background:var(--blue)"></div></div>' +
-      '<div class="bar-value">' + entry[1].count + '</div></div>';
-  });
-  barHtml += '</div>';
-
-  // Table
-  var tableHtml = '<table><thead><tr>' +
-    '<th>' + t('pr.pattern') + '</th><th>' + t('pr.count') + '</th><th>' + t('pr.avg_score') + '</th><th>' + t('pr.avg_cost') + '</th><th>' + t('pr.avg_turns') + '</th>' +
-    '</tr></thead><tbody>';
-
-  sorted.forEach(function(entry) {
-    var p = entry[1];
-    var avgScore = Math.round(p.scores.reduce(function(a, b) { return a + b; }, 0) / p.scores.length);
-    var avgCost = p.costs.reduce(function(a, b) { return a + b; }, 0) / p.costs.length;
-    var avgTurns = (p.turns.reduce(function(a, b) { return a + b; }, 0) / p.turns.length).toFixed(1);
-    var tier = pr_scoreTier(avgScore);
-
-    tableHtml += '<tr>' +
-      '<td><strong>' + escapeHTML(entry[0]) + '</strong></td>' +
-      '<td>' + p.count + '</td>' +
-      '<td><span class="pr-score-dot-sm ' + tier + '">' + avgScore + '</span></td>' +
-      '<td>' + fmtCost(avgCost) + '</td>' +
-      '<td>' + avgTurns + '</td></tr>';
-  });
-  tableHtml += '</tbody></table>';
-
-  // Insight
-  var worstPattern = sorted.reduce(function(worst, entry) {
-    var avg = entry[1].scores.reduce(function(a, b) { return a + b; }, 0) / entry[1].scores.length;
-    if (!worst || avg < worst.avg) return { name: entry[0], avg: avg, cost: entry[1].costs.reduce(function(a, b) { return a + b; }, 0) / entry[1].costs.length };
-    return worst;
-  }, null);
-
-  var insightHtml = '';
-  if (worstPattern && worstPattern.avg < 60) {
-    insightHtml = '<div class="pr-insight">' +
-      t('pr.insight').replace('{pattern}', '<strong>' + escapeHTML(worstPattern.name) + '</strong>')
-        .replace('{score}', Math.round(worstPattern.avg))
-        .replace('{cost}', fmtCost(worstPattern.cost)) +
-      '</div>';
-  }
-
-  document.getElementById('pr-pattern-content').innerHTML =
-    '<div style="font-size:13px;color:var(--text-muted);margin-bottom:16px;line-height:1.5">' + t('pr.pattern_desc') + '</div>' +
-    '<div class="chart-container"><h3>' + t('pr.pattern_distribution') + '</h3>' + barHtml + '</div>' +
-    '<div class="chart-container"><h3>' + t('pr.pattern_table') + '</h3>' + tableHtml + '</div>' +
-    insightHtml;
+  document.getElementById('pr-pattern-content').innerHTML = html + '</tbody></table>';
 }
 
 function pr_extractVerb(content) {
@@ -981,15 +553,8 @@ async function pr_evaluate(idx) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         prompt: p.content,
-        context: {
-          turns: p.sess ? p.sess.turns : 1,
-          tool_failures: p.tools ? p.tools.fail : 0,
-          total_tokens: p.sess ? (p.sess.totalInput + p.sess.totalOutput) : 0,
-          tools_used: p.toolSeq ? pr_summarizeTools(p.toolSeq) : [],
-          tool_summary: p.toolSeq ? pr_toolSequenceSummary(p.toolSeq) : '',
-          exploration_ratio: p.dims._stats ? p.dims._stats.explorationRatio : 0,
-          patterns: p.dims._patterns ? p.dims._patterns.map(function(p) { return p.type; }) : [],
-        },
+        context: {previous_prompts:p.previousPrompts || []},
+        lang: currentLocale || 'en',
       }),
     });
     var data = await resp.json();
@@ -1015,17 +580,18 @@ function pr_renderLLMResult(el, data) {
       html += '<div class="pr-ai-summary" style="margin-bottom:10px;font-style:italic">' + escapeHTML(data.reasoning) + '</div>';
     }
     html += '<div style="font-size:13px;font-weight:600;margin-bottom:8px;color:var(--text)">' +
-      escapeHTML(data.total + '/20') + '</div>';
+      escapeHTML(data.total == null ? t('pr.unscored') : data.total + '/' + data.max_total) + '</div>';
     Object.entries(data.points).forEach(function(entry) {
       var dim = entry[0], detail = entry[1];
-      var pct = detail.score / 5 * 100;
+      var pct = detail.score == null ? null : detail.score / 5 * 100;
       var tier = pr_scoreTier(pct);
       var color = pr_tierColor(tier);
       html += '<div class="pr-dim-card" style="margin-bottom:6px">' +
         '<div class="pr-dim-card-head">' +
           '<span class="pr-dim-card-label">' + escapeHTML(dim) + '</span>' +
-          '<span class="pr-dim-card-val" style="color:' + color + '">' + detail.score + '/5</span>' +
+          '<span class="pr-dim-card-val" style="color:' + color + '">' + (detail.score == null ? '—' : detail.score + '/5') + '</span>' +
         '</div>';
+      (detail.evidence || []).forEach(function(quote) { html += '<blockquote>' + escapeHTML(quote) + '</blockquote>'; });
       if (detail.awarded && detail.awarded.length > 0) {
         html += '<div style="font-size:11px;color:var(--text-muted);margin-top:4px">';
         detail.awarded.forEach(function(a) {
@@ -1045,8 +611,8 @@ function pr_renderLLMResult(el, data) {
       var color = pr_tierColor(tier);
       html += '<div class="pr-dim-row">' +
         '<div class="pr-dim-label">' + escapeHTML(entry[0]) + '</div>' +
-        '<div class="pr-dim-track"><div class="pr-dim-fill" style="width:' + val + '%;background:' + color + '"></div></div>' +
-        '<div class="pr-dim-val">' + val + '</div></div>';
+        '<div class="pr-dim-track"><div class="pr-dim-fill" style="width:' + (val || 0) + '%;background:' + color + '"></div></div>' +
+        '<div class="pr-dim-val">' + (val == null ? '—' : val) + '</div></div>';
     });
     html += '</div>';
   }
@@ -1073,25 +639,6 @@ function pr_renderLLMResult(el, data) {
   el.innerHTML = html;
 }
 
-// Helper: summarize tool names from sequence
-function pr_summarizeTools(toolSeq) {
-  var names = {};
-  toolSeq.forEach(function(t) { names[t.tool] = true; });
-  return Object.keys(names);
-}
-
-// Helper: compact tool sequence summary like "Read(5) → Grep(3) → Edit(1)"
-function pr_toolSequenceSummary(toolSeq) {
-  if (!toolSeq || toolSeq.length === 0) return '';
-  var runs = [], last = '', count = 0;
-  toolSeq.forEach(function(t) {
-    if (t.tool === last) { count++; }
-    else { if (last) runs.push(last + '(' + count + ')'); last = t.tool; count = 1; }
-  });
-  if (last) runs.push(last + '(' + count + ')');
-  return runs.join(' \u2192 ');
-}
-
 // ============================================================
 // AI Insights (Sampled Summary)
 // ============================================================
@@ -1099,33 +646,9 @@ function pr_toolSequenceSummary(toolSeq) {
 var prAIInsightsCache = {};
 
 function pr_samplePrompts(scored) {
-  var tiers = { poor: [], fair: [], good: [], excellent: [] };
-  scored.forEach(function(s) {
-    tiers[pr_scoreTier(s.dims.composite)].push(s);
-  });
-
-  var targets = [
-    { tier: 'poor', n: 5 },
-    { tier: 'fair', n: 4 },
-    { tier: 'good', n: 3 },
-    { tier: 'excellent', n: 2 },
-  ];
-
-  var sample = [];
-  var surplus = 0;
-  targets.forEach(function(t) {
-    var pool = tiers[t.tier].slice(); // clone to avoid mutating original
-    var take = Math.min(t.n + surplus, pool.length);
-    // Shuffle and pick
-    for (var i = pool.length - 1; i > 0; i--) {
-      var j = Math.floor(Math.random() * (i + 1));
-      var tmp = pool[i]; pool[i] = pool[j]; pool[j] = tmp;
-    }
-    for (var k = 0; k < take; k++) sample.push(pool[k]);
-    surplus = Math.max(0, (t.n + surplus) - pool.length);
-  });
-
-  return sample;
+  var ordered = scored.slice().sort(function(a,b) { return tsToMs(a.ts)-tsToMs(b.ts); });
+  if (ordered.length <= 14) return ordered;
+  return Array.from({length:14}, function(_,i) { return ordered[Math.floor(i*(ordered.length-1)/13)]; });
 }
 
 async function pr_loadAIInsights() {
@@ -1140,12 +663,8 @@ async function pr_loadAIInsights() {
   if (btn) { btn.disabled = true; btn.textContent = t('pr.ai_generating'); }
   el.innerHTML = '<div class="loading">' + t('pr.ai_generating') + '</div>';
 
-  // Ensure data is loaded
-  if (!prPromptData || prPromptData.length === 0) {
-    prPromptData = await pr_loadData();
-  }
-
-  var sample = pr_samplePrompts(prPromptData);
+  var dataset = await pr_loadData();
+  var sample = pr_samplePrompts(dataset);
   if (sample.length === 0) {
     el.innerHTML = '<div class="chart-empty">' + t('pr.no_prompts') + '</div>';
     if (btn) { btn.disabled = false; btn.textContent = t('pr.generate_insights'); }
@@ -1153,21 +672,20 @@ async function pr_loadAIInsights() {
   }
 
   // Snapshot stats before async LLM call (globals may change while awaiting).
-  var snapshotTotal = prAllScores.length;
+  var snapshotTotal = dataset.length;
   var snapshotRange = currentTimeRange;
-  var avgScore = snapshotTotal > 0
-    ? Math.round(prAllScores.reduce(function(a, b) { return a + b; }, 0) / snapshotTotal) : 0;
+  var avgScore = pr_mean(dataset.map(function(p) { return p.dims.composite; }));
+  if (avgScore != null) avgScore = Math.round(avgScore);
 
   var payload = {
     prompts: sample.map(function(s) {
       return {
-        content: s.content.slice(0, 200),
+        content: s.content,
         score: s.dims.composite,
-        turns: s.sess ? s.sess.turns : 1,
-        cost_tokens: s.sess ? (s.sess.totalInput + s.sess.totalOutput) : 0,
+        previous_prompts: s.previousPrompts || [],
       };
     }),
-    total_prompts: prAllScores.length,
+    total_prompts: snapshotTotal,
     avg_score: avgScore,
     lang: currentLocale || 'en',
   };
@@ -1280,7 +798,8 @@ async function pr_saveInsight(data) {
         model: data.model || '',
         sample_size: data._sampleSize || 0,
         total_prompts: data._totalSize || 0,
-        avg_score: data._avgScore || 0,
+        avg_score: data._avgScore,
+        rubric_version: "text-signals-v3",
         sample_prompts: sampleForSave,
         time_range: data._timeRange || currentTimeRange,
       }),
@@ -1320,7 +839,7 @@ function pr_renderHistoryPanel(items) {
   var html = '<div class="pr-ai-history-panel">';
   items.forEach(function(item) {
     var id = item.insight_id || '';
-    var score = Number(item.avg_score) || 0;
+    var score = item.avg_score == null ? null : Number(item.avg_score);
     var tier = pr_scoreTier(score);
     var sampleSize = Number(item.sample_size) || 0;
     var total = Number(item.total_prompts) || 0;
@@ -1332,7 +851,8 @@ function pr_renderHistoryPanel(items) {
     html += '<div class="pr-ai-history-card' + active + '" data-insight-id="' + escapeHTML(id) + '" onclick="pr_loadHistoryDetail(\'' + escapeJSString(id) + '\')">';
     html += '<div class="pr-ai-history-date">' + escapeHTML(ts) + '</div>';
     html += '<div class="pr-ai-history-meta">';
-    html += '<span class="pr-score-dot-sm ' + tier + '">' + score + '</span>';
+    html += '<span class="pr-score-dot-sm ' + tier + '">' + (score == null ? '—' : score) + '</span>';
+    if (item.rubric_version !== 'text-signals-v3') html += '<span>Legacy rubric</span>';
     html += '<span>\u00b7</span>';
     html += '<span>' + sampleSize + ' / ' + total + ' ' + t('pr.ai_prompts_label') + '</span>';
     if (range) html += '<span>\u00b7</span><span>' + escapeHTML(range) + '</span>';
@@ -1367,7 +887,7 @@ async function pr_loadHistoryDetail(insightId) {
       _sampleSize: Number(obj.sample_size) || 0,
       _totalSize: Number(obj.total_prompts) || 0,
       _sample: JSON.parse(obj.sample_prompts || '[]').map(function(s) {
-        return { content: s.content || '', dims: { composite: s.score || 0 } };
+        return { content: s.content || '', dims: { composite: s.score == null ? null : s.score } };
       }),
     };
     prActiveInsightId = insightId;
@@ -1396,6 +916,8 @@ function pr_onTabChange(tab) {
 // ============================================================
 
 function pr_renderScoreRing(score, size) {
+  if (score == null) return '<span class="pr-score-num">—</span>';
+  score = Math.round(score);
   var tier = pr_scoreTier(score);
   var color = pr_tierColor(tier);
   var r = (size - 6) / 2;
@@ -1419,12 +941,4 @@ function pr_relativeTime(ts) {
   if (diff < 3600000) return Math.floor(diff / 60000) + 'm ' + t('pr.time.ago');
   if (diff < 86400000) return Math.floor(diff / 3600000) + 'h ' + t('pr.time.ago');
   return Math.floor(diff / 86400000) + 'd ' + t('pr.time.ago');
-}
-
-function lookupPrice(model) {
-  if (!model || !window.modelPricing) return { i: 0, o: 0 };
-  for (var i = 0; i < modelPricing.length; i++) {
-    if (model.match(modelPricing[i].p)) return { i: modelPricing[i].i, o: modelPricing[i].o };
-  }
-  return { i: 3, o: 15 }; // fallback: mid-range pricing
 }

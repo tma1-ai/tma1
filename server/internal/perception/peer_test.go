@@ -255,11 +255,12 @@ func TestPeerAgentListExcludesCaller(t *testing.T) {
 		caller string
 		want   []string
 	}{
-		{"claude_code", []string{"codex", "copilot_cli"}},
-		{"codex", []string{"claude_code", "copilot_cli"}},
-		{"copilot_cli", []string{"claude_code", "codex"}},
-		{"", []string{"claude_code", "codex", "copilot_cli"}},
-		{"unknown_agent", []string{"claude_code", "codex", "copilot_cli"}},
+		{"claude_code", []string{"codex", "copilot_cli", "opencode"}},
+		{"codex", []string{"claude_code", "copilot_cli", "opencode"}},
+		{"copilot_cli", []string{"claude_code", "codex", "opencode"}},
+		{"opencode", []string{"claude_code", "codex", "copilot_cli"}},
+		{"", []string{"claude_code", "codex", "copilot_cli", "opencode"}},
+		{"unknown_agent", []string{"claude_code", "codex", "copilot_cli", "opencode"}},
 	}
 	for _, c := range cases {
 		b := &Bundler{Caller: c.caller}

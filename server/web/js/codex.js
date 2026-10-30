@@ -39,7 +39,7 @@ function cdx_estimatedCostExpr() {
   var modelExpr = "COALESCE(json_get_string(log_attributes, 'model'), 'unknown')";
   var inputExpr = "COALESCE(json_get_int(log_attributes, 'input_token_count'), 0)";
   var outputExpr = "COALESCE(json_get_int(log_attributes, 'output_token_count'), 0)";
-  return costCaseSQL(modelExpr, inputExpr, outputExpr);
+  return "CASE WHEN COALESCE(json_get_int(log_attributes, 'cached_token_count'), 0) > 0 THEN NULL ELSE " + costCaseSQL(modelExpr, inputExpr, outputExpr) + " END";
 }
 
 function cdx_resetEventsPaging() {
@@ -142,7 +142,7 @@ async function cdx_loadCards() {
         "WHERE s.greptime_timestamp > NOW() - INTERVAL '" + intervalSQL() + "'"
       : "SELECT NULL AS v";
     var results = await Promise.all([
-      query("SELECT ROUND(SUM(" + estCost + "), 4) AS v " + base + " AND " + reqPred),
+      query("SELECT ROUND(" + sumKnownCostSQL(estCost) + ", 4) AS v " + base + " AND " + reqPred),
       query("SELECT SUM(COALESCE(json_get_int(log_attributes, 'input_token_count'), 0) + " +
         "COALESCE(json_get_int(log_attributes, 'output_token_count'), 0)) AS v " + base + " AND " + reqPred),
       // Card display: request count (logs with input_token_count)
@@ -253,7 +253,7 @@ async function cdx_loadCostChart() {
     var estCost = cdx_estimatedCostExpr();
     var res = await query(
       "SELECT date_bin('" + chartBucket() + "'::INTERVAL, timestamp) AS t, " +
-      "SUM(" + estCost + ") AS cost " +
+      sumKnownCostSQL(estCost) + " AS cost " +
       cdx_logsFromWhere() + " AND " + cdx_requestPredicate() + " " +
       "GROUP BY t ORDER BY t"
     );
@@ -668,7 +668,7 @@ async function cdx_loadCostByModel() {
     var estCost = cdx_estimatedCostExpr();
     var res = await query(
       "SELECT COALESCE(json_get_string(log_attributes, 'model'), 'unknown') AS model, " +
-      "SUM(" + estCost + ") AS total_cost " +
+      sumKnownCostSQL(estCost) + " AS total_cost " +
       cdx_logsFromWhere() + " AND " + cdx_requestPredicate() + " " +
       "GROUP BY model ORDER BY total_cost DESC"
     );

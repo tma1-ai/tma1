@@ -135,7 +135,7 @@ canonical name) returns your own past sessions on this project.
 
 | Arg | Type | Default | Description |
 |-----|------|---------|-------------|
-| `agent_source` | string | "" (all peers except caller) | `claude_code` / `codex` / `copilot_cli` / `self`. Aliases: `cc` / `claude` → `claude_code`, `copilot` → `copilot_cli`, `me` / `mine` → `self` |
+| `agent_source` | string | "" (all peers except caller) | `claude_code` / `codex` / `copilot_cli` / `opencode` / `self`. Aliases: `cc` / `claude` → `claude_code`, `copilot` → `copilot_cli`, `me` / `mine` → `self` |
 | `detail` | string | `preview` | `summary` = no messages; `preview` = 3 recent messages at 240 chars; `full` = 40 recent messages at 1200 chars |
 | `limit` | integer | 1 | Sessions per agent, clamped to `[1, 5]`. With empty `agent_source`, applied per peer agent, not globally |
 | `since_min` | integer | 1440 | Lookback window in minutes (default 24h) |

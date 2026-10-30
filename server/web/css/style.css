@@ -989,7 +989,7 @@ tr.active-trace td { background: var(--bg-hover); }
   font-size: 11px; font-weight: 700; color: #fff;
   flex-shrink: 0;
 }
-.pr-score-dot.poor { background: var(--red); }
+.pr-score-dot.poor, .pr-score-dot.unscored { background: var(--text-muted); }
 .pr-score-dot.fair { background: var(--yellow); color: #000; }
 .pr-score-dot.good { background: var(--blue-bright); }
 .pr-score-dot.excellent { background: var(--green-bar); }
@@ -1000,7 +1000,7 @@ tr.active-trace td { background: var(--bg-hover); }
   width: 28px; height: 20px; border-radius: 10px;
   font-size: 11px; font-weight: 600; color: #fff;
 }
-.pr-score-dot-sm.poor { background: var(--red); }
+.pr-score-dot-sm.poor, .pr-score-dot-sm.unscored { background: var(--text-muted); }
 .pr-score-dot-sm.fair { background: var(--yellow); color: #000; }
 .pr-score-dot-sm.good { background: var(--blue-bright); }
 .pr-score-dot-sm.excellent { background: var(--green-bar); }

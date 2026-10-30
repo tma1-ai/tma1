@@ -571,10 +571,8 @@ func (w *Watcher) processCodexLine(sessionID, line string, seen map[string]struc
 					fctx.lastTotalUsage = total
 				}
 				usage := tc.Info.LastTokenUsage
-				// Skip zero-usage events (handshake / no-op turns).
-				// Output OR reasoning > 0 is the marker that the
-				// API actually answered.
-				if usage.OutputTokens > 0 || usage.ReasoningOutputTokens > 0 {
+				// Input-only responses still consume tokens.
+				if usage.InputTokens > 0 || usage.OutputTokens > 0 || usage.ReasoningOutputTokens > 0 {
 					w.insertCodexUsageMessage(sid, ts, fctx.model,
 						usage.InputTokens, usage.OutputTokens,
 						usage.CachedInputTokens, usage.CacheWriteInputTokens, usage.ReasoningOutputTokens, seen)

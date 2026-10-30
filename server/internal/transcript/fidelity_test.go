@@ -1,6 +1,7 @@
 package transcript
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -116,5 +117,39 @@ func TestCodexPreservesSourceTimeAcrossSessions(t *testing.T) {
 	sql := waitForSQL(t, ch)
 	if !strings.Contains(sql, "1793181600000") {
 		t.Fatalf("source time shifted by unrelated session: %s", sql)
+	}
+}
+
+func TestClaudeRepeatedRequestsKeepIdentityAndOriginalStart(t *testing.T) {
+	ch := make(chan string, 8)
+	srv := httptest.NewServer(httpTestHandler(ch))
+	defer srv.Close()
+	w := &Watcher{sqlURL: srv.URL, logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	seen, usage := map[string]struct{}{}, map[string]msgUsage{}
+	line := `{"timestamp":"2026-10-28T10:00:00Z","uuid":"first","type":"user","message":{"role":"user","content":"continue"}}`
+	w.processLine("session", line, seen, usage)
+	start := waitForSQL(t, ch)
+	if !strings.Contains(start, "1793181600000") {
+		t.Fatalf("backfill start uses ingestion time: %s", start)
+	}
+	waitForSQL(t, ch)
+	w.processLine("session", strings.Replace(line, `"first"`, `"second"`, 1), seen, usage)
+	waitForSQL(t, ch)
+	w.processLine("session", line, seen, usage)
+	select {
+	case sql := <-ch:
+		t.Fatalf("replayed prompt inserted: %s", sql)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+func TestStoppedWatcherDoesNotStopReplacement(t *testing.T) {
+	old, replacement := &sessionWatch{}, &sessionWatch{}
+	w := &Watcher{sessions: map[string]*sessionWatch{"session": replacement}}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	w.tailFile(ctx, "session", t.TempDir()+"/missing.jsonl", old)
+	if replacement.stopped {
+		t.Fatal("old watcher marked its replacement as stopped")
 	}
 }

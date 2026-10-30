@@ -16,6 +16,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
+	"github.com/tma1-ai/tma1/server/internal/opencode"
 	"github.com/tma1-ai/tma1/server/internal/perception"
 	"github.com/tma1-ai/tma1/server/internal/sensor/git"
 	"github.com/tma1-ai/tma1/server/internal/sensor/project"
@@ -25,6 +26,7 @@ import (
 
 // Server holds shared state for all HTTP handlers.
 type Server struct {
+	openCodeImporter  *opencode.Importer
 	greptimeHTTPPort  int
 	tma1Port          string
 	logger            *slog.Logger
@@ -119,6 +121,7 @@ func New(greptimeHTTPPort int, tma1Port string, webFS http.FileSystem, logger *s
 	if bundler != nil {
 		bundler.Detector().SetSubmit(writeSem.Go)
 	}
+	srv.openCodeImporter = opencode.New(srv.querySQL)
 	return srv
 }
 
@@ -190,6 +193,7 @@ func (s *Server) Router() http.Handler {
 	// Prompt evaluation (LLM-as-judge) — origin-checked to prevent CSRF.
 	r.HandleFunc("/api/evaluate", s.requireLocalOrigin(s.handleEvaluate))
 	r.Post("/api/evaluate/summary", s.requireLocalOrigin(s.handleEvaluateSummary))
+	r.Post("/api/import/opencode", s.requireLocalOrigin(s.handleOpenCodeImport))
 
 	// Settings (read/write server-side configuration) — origin-checked.
 	r.Get("/api/settings", s.handleGetSettings)

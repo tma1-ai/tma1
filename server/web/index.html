@@ -916,6 +916,7 @@
           <option value="claude_code" data-i18n="sessions.source_cc">Claude Code</option>
           <option value="codex" data-i18n="sessions.source_codex">Codex</option>
           <option value="copilot_cli" data-i18n="sessions.source_copilot_cli">Copilot CLI</option>
+<option value="opencode">OpenCode</option>
         </select>
         <input class="filter-input" id="sess-keyword-filter" type="text"
                placeholder="Filter by tool or keyword..."
@@ -1000,6 +1001,7 @@
 
   <!-- ========================= PROMPTS VIEW ========================= -->
   <div id="view-prompts" style="display:none">
+    <p class="panel-caption" style="padding:20px 32px 0" data-i18n="pr.signal_note"></p>
     <div class="cards">
       <div class="card">
         <div class="label" data-i18n="pr.card.prompts">Total Prompts</div>
@@ -1028,6 +1030,7 @@
         <option value="claude_code" data-i18n="sessions.source_cc">Claude Code</option>
         <option value="codex" data-i18n="sessions.source_codex">Codex</option>
         <option value="copilot_cli" data-i18n="sessions.source_copilot_cli">Copilot CLI</option>
+<option value="opencode">OpenCode</option>
       </select>
     </div>
 
@@ -1070,10 +1073,10 @@
         <select class="filter-select" onchange="pr_onSortChange(this.value)">
           <option value="time" data-i18n="pr.sort.time">Sort: Time</option>
           <option value="score" data-i18n="pr.sort.score">Sort: Score (worst first)</option>
-          <option value="cost" data-i18n="pr.sort.cost">Sort: Cost (highest first)</option>
         </select>
         <select class="filter-select" onchange="pr_onScoreFilterChange(this.value)">
-          <option value="all" data-i18n="pr.filter.all">Score: All</option>
+          <option value="all" data-i18n="pr.filter.all">Coverage: All</option>
+          <option value="unscored" data-i18n="pr.unscored">Unscored</option>
           <option value="poor" data-i18n="pr.filter.poor">Poor (0-39)</option>
           <option value="fair" data-i18n="pr.filter.fair">Fair (40-69)</option>
           <option value="good" data-i18n="pr.filter.good">Good (70-89)</option>

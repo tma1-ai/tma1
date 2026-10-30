@@ -164,7 +164,8 @@ async function sess_loadList() {
     var shortCwd = cwd.length > 40 ? '\u2026' + cwd.slice(-39) : cwd;
     var agentSrc = d.agent_source || '';
     var sourceBadge;
-    if (agentSrc === 'codex') sourceBadge = '<span class="badge badge-codex">Codex</span>';
+    if (agentSrc === 'opencode') sourceBadge = '<span class="badge">OpenCode</span>';
+    else if (agentSrc === 'codex') sourceBadge = '<span class="badge badge-codex">Codex</span>';
     else if (agentSrc === 'copilot_cli') sourceBadge = '<span class="badge badge-copilot">GH</span>';
     else sourceBadge = '<span class="badge badge-cc">CC</span>';
     var usage = sessionUsage(usageMap[sid] ? [usageMap[sid]] : [], agentSrc);
@@ -387,15 +388,13 @@ async function sess_loadDetail(sessionId, agentSource) {
     }
 
   } else {
-    // CC: prefer message-level usage data, fallback to OTel logs.
+    // Prefer normalized transcript usage. Only Claude Code has this OTel fallback.
     var hasUsageInMessages = messages.some(function(m) {
       return m.input_tokens != null || m.output_tokens != null;
     });
 
     if (hasUsageInMessages) {
-      // CC fronts Anthropic models; thinking is already inside
-      // output_tokens, so reasoning is not surfaced as a separate
-      // column on the dashboard.
+      // Stored output includes reasoning for every adapter.
       for (var ui = 0; ui < messages.length; ui++) {
         var um = messages[ui];
         if (um.input_tokens == null && um.output_tokens == null) continue;
@@ -407,12 +406,13 @@ async function sess_loadDetail(sessionId, agentSource) {
         apiCalls.push({
           ts: tsToMs(um.ts), model: um.model || '',
           inputTokens: inTok, outputTokens: outTok,
+          reasoningTokens: Number(um.reasoning_tokens) || 0,
           cacheTokens: cacheRead, cacheCreationTokens: cacheCreate,
           cost: sess_usageCost(mPrice, inTok, outTok, cacheRead, cacheCreate),
           durationMs: 0, toolUseIds: [], usageRecord: true,
         });
       }
-    } else if (timeline.length > 0) {
+    } else if (agentSource === 'claude_code' && timeline.length > 0) {
       var trBetween = "timestamp BETWEEN '" + new Date(timeline[0].ts - 60000).toISOString() + "' AND '" + new Date(timeline[timeline.length - 1].ts + 60000).toISOString() + "'";
       var ccOtelRes = await query(
         "SELECT timestamp, log_attributes FROM opentelemetry_logs " +
@@ -427,7 +427,7 @@ async function sess_loadDetail(sessionId, agentSource) {
     }
 
     // CC errors.
-    if (timeline.length > 0) {
+    if (agentSource === 'claude_code' && timeline.length > 0) {
       var errBetween = "timestamp BETWEEN '" + new Date(timeline[0].ts - 60000).toISOString() + "' AND '" + new Date(timeline[timeline.length - 1].ts + 60000).toISOString() + "'";
       var errRes = await query(
         "SELECT timestamp, log_attributes FROM opentelemetry_logs " +

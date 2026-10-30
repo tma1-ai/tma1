@@ -100,11 +100,11 @@ async function loadMetrics() {
     // [0] Cost — needs model + token columns
     if (hasModel && hasInputTok && hasOutputTok) {
       queries.push(query(
-        "SELECT ROUND(SUM(" + costCaseSQL(
+        "SELECT ROUND(" + sumKnownCostSQL(costCaseSQL(
           '"span_attributes.gen_ai.request.model"',
           '"span_attributes.gen_ai.usage.input_tokens"',
           '"span_attributes.gen_ai.usage.output_tokens"'
-        ) + "), 4) AS total " +
+        )) + ", 4) AS total " +
         "FROM opentelemetry_traces " +
         "WHERE " + genaiWhere + " " +
         "AND timestamp > NOW() - INTERVAL '" + iv + "'"

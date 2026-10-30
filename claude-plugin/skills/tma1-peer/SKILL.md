@@ -24,9 +24,9 @@ copy-pasting between terminals". Naming yourself is also allowed.
 /tma1-peer codex --since 6h         # widen the time window
 ```
 
-Agent names: `codex`, `copilot` (= `copilot_cli`), `claude`
+Agent names: `opencode`, `codex`, `copilot` (= `copilot_cli`), `claude`
 (= `claude_code`), `self` (= you), `all` / omitted (= every peer but you).
-Anything else: reply `unknown agent "<X>"; available: codex, copilot, claude, self, all`
+Anything else: reply `unknown agent "<X>"; available: codex, copilot, opencode, claude, self, all`
 and STOP — do not call the tool with an unrecognised name.
 
 ## Flags

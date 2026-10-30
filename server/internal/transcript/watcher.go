@@ -143,7 +143,7 @@ func (w *Watcher) Watch(sessionID, transcriptPath string) {
 	sw := &sessionWatch{cancel: cancel, seen: seen, ccUsage: usage}
 	w.sessions[sessionID] = sw
 
-	go w.tailFile(ctx, sessionID, transcriptPath, seen, usage)
+	go w.tailFile(ctx, sessionID, transcriptPath, sw)
 	w.logger.Info("started watching transcript", "session", sessionID, "path", transcriptPath)
 }
 
@@ -174,11 +174,12 @@ func (w *Watcher) StopAll() {
 	}
 }
 
-func (w *Watcher) tailFile(ctx context.Context, sessionID, filePath string, seen map[string]struct{}, usage map[string]msgUsage) {
+func (w *Watcher) tailFile(ctx context.Context, sessionID, filePath string, watch *sessionWatch) {
+	seen, usage := watch.seen, watch.ccUsage
 	// Mark as stopped on exit — preserves seen map so Watch() can retry without re-inserting.
 	defer func() {
 		w.mu.Lock()
-		if sw, ok := w.sessions[sessionID]; ok {
+		if sw := w.sessions[sessionID]; sw == watch {
 			sw.stopped = true
 		}
 		w.mu.Unlock()
@@ -294,10 +295,15 @@ func (w *Watcher) processLine(sessionID, line string, seen map[string]struct{}, 
 		return
 	}
 
+	ts, err := time.Parse(time.RFC3339Nano, entry.Timestamp)
+	if err != nil {
+		ts = time.Now()
+	}
+
 	// Emit SessionStart on the first valid entry processed for this session
 	// unless it has already been recorded in seen.
 	if _, ok := seen[sessionStartKey]; !ok {
-		if err := w.insertCCSessionStart(sessionID, entry.CWD); err != nil {
+		if err := w.insertCCSessionStart(sessionID, entry.CWD, ts); err != nil {
 			w.logger.Warn("failed to insert SessionStart, will retry on next line",
 				"session", sessionID, "error", err)
 			// Don't set flag — retry on next processLine call.
@@ -319,13 +325,10 @@ func (w *Watcher) processLine(sessionID, line string, seen map[string]struct{}, 
 		return
 	}
 
-	// Dedup helper: hash (messageType, role, content_prefix) to detect context compression replays.
+	// UUID distinguishes repeated user requests from replayed entries. Hash
+	// the full content so two long messages with a common prefix remain distinct.
 	isDup := func(msgType, content string) bool {
-		prefix := content
-		if len(prefix) > 200 {
-			prefix = prefix[:200]
-		}
-		h := sha256.Sum256([]byte(msgType + "|" + role + "|" + prefix))
+		h := sha256.Sum256([]byte(entry.UUID + "|" + msgType + "|" + role + "|" + content))
 		key := hex.EncodeToString(h[:16])
 		if _, ok := seen[key]; ok {
 			return true
@@ -358,11 +361,6 @@ func (w *Watcher) processLine(sessionID, line string, seen map[string]struct{}, 
 				usage = nil
 			}
 		}
-	}
-
-	ts, err := time.Parse(time.RFC3339Nano, entry.Timestamp)
-	if err != nil {
-		ts = time.Now()
 	}
 
 	// Try as string first.
@@ -557,11 +555,11 @@ func (w *Watcher) broadcastHookEvent(sessionID, eventType, toolName, toolInput, 
 // even if CC HTTP hooks are not configured.
 // Runs synchronously so the caller can retry on failure.
 // Acquires insertSem to respect the concurrency limit shared with other inserts.
-func (w *Watcher) insertCCSessionStart(sessionID, cwd string) error {
+func (w *Watcher) insertCCSessionStart(sessionID, cwd string, ts time.Time) error {
 	insertSem <- struct{}{}
 	defer func() { <-insertSem }()
 
-	msTs := time.Now().UnixMilli()
+	msTs := ts.UnixMilli()
 
 	stmt := fmt.Sprintf(
 		"INSERT INTO tma1_hook_events "+

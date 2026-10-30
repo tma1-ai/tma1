@@ -7,6 +7,8 @@ const context = vm.createContext({
   tsToMs: (v) => Date.parse(v),
   sess_parseAttrs: (v) => v,
 });
+vm.runInContext(readFileSync(new URL("../js/core.js", import.meta.url), "utf8"), context);
+context.modelPricing = [{ p: "known", i: 2, o: 8 }];
 vm.runInContext(
   readFileSync(new URL("../js/sessions-stats.js", import.meta.url), "utf8"),
   context,
@@ -75,4 +77,11 @@ test("transcript usage records are not labeled as API requests", () => {
   assert.ok(!html.includes('sessions.api_calls'));
   assert.ok(html.includes('<td>1000</td>'));
   assert.ok(!html.includes('$0'));
+});
+test('transcript characters never become measured usage or billed cost',()=>{
+ const stats=context.sess_computeStats([], [{model:'known',message_type:'assistant',content:'answer '.repeat(1000)}], [], [], []);
+ assert.equal(stats.totalInputTokens,null);
+ assert.equal(stats.totalOutputTokens,null);
+ assert.equal(stats.cost,null);
+ assert.equal(context.fmtTokens(null),'—');
 });

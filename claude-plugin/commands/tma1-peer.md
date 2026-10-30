@@ -12,9 +12,9 @@ rules for the explicit-invocation path.
 ## Parse `$ARGUMENTS`
 
 - First token, if it isn't a flag → agent name:
-  `codex` · `copilot` → `copilot_cli` · `claude` / `cc` → `claude_code` ·
+  `opencode` · `codex` · `copilot` → `copilot_cli` · `claude` / `cc` → `claude_code` ·
   `self` / `me` → yourself · `all` / `*` / absent → `""` (every peer but you).
-  Anything else → reply `unknown agent "<X>"; available: codex, copilot, claude, self, all` and **STOP**.
+  Anything else → reply `unknown agent "<X>"; available: codex, copilot, opencode, claude, self, all` and **STOP**.
 - `--summary` → `detail: "summary"` · `--full` → `detail: "full"` · neither → omit (server defaults to preview).
 - `--limit N` → `limit` (1-5, default 1; per agent when no agent is named).
 - `--since 2h` / `--since 90m` / `--since 30` → `since_min` in minutes (default 1440).

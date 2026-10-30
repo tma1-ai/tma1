@@ -88,10 +88,10 @@ Browser dashboard (served by tma1-server)
     │   ├── Anomalies panel inside session detail (reads /api/anomalies?session_id=…)
     │   ├── Replay mode: replay past sessions as agent orchestration animation
     │   └── Live mode: real-time SSE streaming of hook events → canvas visualization
-    ├── Prompts view: Prompt evaluation & improvement (heuristic scoring + optional LLM-as-judge)
+    ├── Prompts view: Prompt evaluation & improvement (text signal coverage + optional evidence-based model assessment)
     │   ├── Overview: score distribution, trend, top suggestions, dimension breakdown
     │   ├── Prompts: card-based list with per-prompt scoring, suggestions, optional LLM deep eval
-    │   └── Patterns: verb-based grouping (fix/add/implement/debug/...) with avg score/cost/turns
+    │   └── Patterns: verb-based grouping (fix/add/implement/debug/...) with counts
     └── Anomalies view: cross-session anomaly list, severity filter, 10 s auto-refresh; budget +
         follow-rate validation endpoints back the Phase 1.7 quality gates
 ```
@@ -155,6 +155,17 @@ Additionally, Codex session logs at `~/.codex/sessions/YYYY/MM/DD/rollout-*.json
 | `tma1_messages` | Conversation content | user / assistant / thinking messages with `output_tokens` (session_id LIKE 'cp:%') |
 
 Copilot CLI session logs at `~/.copilot/session-state/<sessionId>/events.jsonl` are auto-discovered and parsed by tma1-server. Session IDs are stored as `cp:<sessionId>`; when a JSONL file contains multiple logical sessions (Copilot CLI appends across restarts), each `session.start` rolls over the in-memory session ID so they're persisted as distinct DB rows. Parses 11 event types: `session.start`, `session.shutdown`, `session.model_change`, `session.task_complete`, `user.message`, `assistant.message` (content + reasoningText → thinking), `tool.execution_start`, `tool.execution_complete` (success=false → `PostToolUseFailure`), `subagent.started`, `subagent.completed`, `skill.invoked`. Timestamps handle both RFC3339 and Copilot CLI's `MM/DD/YYYY HH:mm:ss` UTC format. No hook configuration needed.
+
+### OpenCode → official v1 snapshots
+
+`POST /api/import/opencode` accepts the official `{info, messages}` export.
+The idle-event plugin and manual export commands are documented in
+[OpenCode integration](opencode.md). Sessions use `oc:<session-id>` and
+`agent_source = 'opencode'`. Migration 5 adds source record IDs to messages
+and hook events. The importer serializes snapshots and checks persisted IDs
+before appending records. Completed assistant messages own token usage;
+step-finish counters are not added again. OpenCode reasoning is added to
+output once; input excludes separately stored cache reads and writes.
 
 ### Other agents (GenAI SDK) → OTel traces
 

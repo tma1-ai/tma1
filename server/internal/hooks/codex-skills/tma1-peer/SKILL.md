@@ -32,11 +32,12 @@ this project, or typed explicitly:
 | `claude`, `cc`    | `claude_code`                      |
 | `claude_code`     | `claude_code`                      |
 | `copilot`         | `copilot_cli`                      |
+| `opencode`        | `opencode`                         |
 | `self`, `me`      | `self` (the server resolves it)    |
 | `all`, `*`, empty | `""` (every peer except you)       |
 
 Any other value: reply
-`unknown agent "<X>"; available: claude, copilot, self, all`
+`unknown agent "<X>"; available: claude, copilot, opencode, self, all`
 and STOP — do not call the tool with an unrecognised name.
 
 ## Flags

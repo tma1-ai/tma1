@@ -56,6 +56,15 @@ sessions: reported tokens, cache read share, tool failures, and compaction
 events. Missing usage is shown as unavailable. Input tokens include cache;
 output tokens include reasoning. Elapsed span includes idle time.
 
+Prompt rules display five optional text signals, not a quality score. Short
+acknowledgments remain unscored. Optional model assessments include source
+quotes and can abstain when conversation context is missing.
+
+Cost estimates use standard short-context API list prices checked on
+2026-10-30. Unknown models and usage requiring unavailable cache rates show
+no estimate. Estimates exclude subscription plans, service-tier adjustments,
+regional premiums, and historical price changes.
+
 ## Supported sources
 
 | Source | How TMA1 reads it | What you get |
@@ -63,6 +72,7 @@ output tokens include reasoning. Elapsed span includes idle time.
 | Claude Code | OTel metrics/logs/traces, hooks, JSONL transcripts | Cost, tools, traces, sessions, anomalies, injected context |
 | Codex | OTel logs/metrics, hooks, JSONL sessions | Cost, tools, sessions, anomalies, injected context |
 | Copilot CLI | JSONL sessions from `~/.copilot/session-state/` | Sessions, tools, cost where available |
+| [OpenCode](docs/opencode.md) | Official v1 session export or idle-event plugin | Sessions, prompts, tools, normalized token usage |
 | Any GenAI app | OTel traces using GenAI semantic conventions | Traces, latency, cost aggregation |
 
 All data is stored locally under `~/.tma1/`.

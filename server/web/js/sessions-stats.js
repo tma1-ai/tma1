@@ -155,9 +155,7 @@ function sess_computeStats(hookEvents, messages, timeline, apiCalls, apiErrors) 
   stats.sessionStart = sessionStartTs === Infinity ? 0 : sessionStartTs;
   stats.sessionEnd = sessionEndTs || stats.sessionStart;
 
-  // Messages → context breakdown + model + cost estimate.
-  var estInputTokens = 0;
-  var estOutputTokens = 0;
+  // Transcript text sizes only drive the approximate context breakdown.
   for (var m = 0; m < messages.length; m++) {
     var msg = messages[m];
     var contentLen = (msg.content || '').length;
@@ -166,17 +164,10 @@ function sess_computeStats(hookEvents, messages, timeline, apiCalls, apiErrors) 
 
     if (msg.message_type === 'user') {
       stats.context.user += tokens;
-      estInputTokens += tokens;
     } else if (msg.message_type === 'system' || msg.message_type === 'developer') {
       stats.context.system += tokens;
-      estInputTokens += tokens;
-    } else if (msg.message_type === 'tool_result') {
-      estInputTokens += Math.round(tokens * 0.3);
-    } else if (msg.message_type === 'tool_use') {
-      estInputTokens += tokens;
     } else if (msg.message_type === 'assistant' || msg.message_type === 'thinking') {
       stats.context.reasoning += tokens;
-      estOutputTokens += tokens;
     }
   }
 
@@ -204,11 +195,9 @@ function sess_computeStats(hookEvents, messages, timeline, apiCalls, apiErrors) 
       stats.cacheHitRatio = totalCache / totalIn;
     }
   } else {
-    // Fallback to estimates.
-    stats.totalInputTokens = estInputTokens;
-    stats.totalOutputTokens = estOutputTokens;
-    var price = sess_lookupPrice(stats.primaryModel);
-    stats.cost = sess_usageCost(price, estInputTokens, estOutputTokens, 0, 0);
+    stats.totalInputTokens = null;
+    stats.totalOutputTokens = null;
+    stats.cost = null;
   }
 
   return stats;
@@ -248,7 +237,7 @@ function extractAllFilePaths(toolName, inputStr) {
 function sess_lookupPrice(model) {
   if (!model || !modelPricing || !modelPricing.length) return { input: null, output: null };
   for (var i = 0; i < modelPricing.length; i++) {
-    if (model.indexOf(modelPricing[i].p) !== -1) {
+    if (new RegExp(modelPricePattern(modelPricing[i].p)).test(model)) {
       return { input: modelPricing[i].i, output: modelPricing[i].o };
     }
   }
@@ -268,6 +257,7 @@ function fmtDurSec(sec) {
 }
 
 function fmtTokens(n) {
+  if (n == null) return '—';
   if (n < 1000) return n + '';
   if (n < 1000000) return (n / 1000).toFixed(1) + 'k';
   return (n / 1000000).toFixed(1) + 'M';

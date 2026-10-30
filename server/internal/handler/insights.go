@@ -15,13 +15,14 @@ import (
 )
 
 type insightRequest struct {
+	RubricVersion string `json:"rubric_version"`
 	Summary       string `json:"summary"`
 	Patterns      any    `json:"patterns"`
 	TopTip        string `json:"top_tip"`
 	Model         string `json:"model"`
 	SampleSize    int    `json:"sample_size"`
 	TotalPrompts  int    `json:"total_prompts"`
-	AvgScore      int    `json:"avg_score"`
+	AvgScore      *int   `json:"avg_score"`
 	SamplePrompts any    `json:"sample_prompts"`
 	TimeRange     string `json:"time_range"`
 }
@@ -42,10 +43,14 @@ func (s *Server) handleSaveInsight(w http.ResponseWriter, r *http.Request) {
 	sampleJSON, _ := json.Marshal(req.SamplePrompts)
 
 	sqlURL := fmt.Sprintf("http://localhost:%d/v1/sql", s.greptimeHTTPPort)
+	avgScore := "NULL"
+	if req.AvgScore != nil {
+		avgScore = strconv.Itoa(*req.AvgScore)
+	}
 	stmt := fmt.Sprintf(
 		"INSERT INTO tma1_prompt_insights "+
-			"(ts, insight_id, summary, patterns, top_tip, model, sample_size, total_prompts, avg_score, sample_prompts, time_range) "+
-			"VALUES (%d, '%s', '%s', '%s', '%s', '%s', %d, %d, %d, '%s', '%s')",
+			"(ts, insight_id, summary, patterns, top_tip, model, sample_size, total_prompts, avg_score, sample_prompts, time_range, rubric_version) "+
+			"VALUES (%d, '%s', '%s', '%s', '%s', '%s', %d, %d, %s, '%s', '%s', '%s')",
 		nowMs,
 		escapeSQLString(insightID),
 		escapeSQLString(req.Summary),
@@ -54,9 +59,10 @@ func (s *Server) handleSaveInsight(w http.ResponseWriter, r *http.Request) {
 		escapeSQLString(req.Model),
 		req.SampleSize,
 		req.TotalPrompts,
-		req.AvgScore,
+		avgScore,
 		escapeSQLString(string(sampleJSON)),
 		escapeSQLString(req.TimeRange),
+		escapeSQLString(req.RubricVersion),
 	)
 
 	form := url.Values{}
@@ -68,9 +74,9 @@ func (s *Server) handleSaveInsight(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer resp.Body.Close()
-	_, _ = io.ReadAll(resp.Body) // drain
+	body, readErr := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 
-	if resp.StatusCode != http.StatusOK {
+	if readErr != nil || resp.StatusCode != http.StatusOK || greptimeResponseError(body) != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "failed to save"})
 		return
 	}
@@ -87,7 +93,7 @@ func (s *Server) handleListInsights(w http.ResponseWriter, r *http.Request) {
 	}
 
 	stmt := fmt.Sprintf(
-		"SELECT insight_id, ts, summary, avg_score, sample_size, total_prompts, time_range "+
+		"SELECT insight_id, ts, summary, avg_score, sample_size, total_prompts, time_range, rubric_version "+
 			"FROM tma1_prompt_insights ORDER BY ts DESC LIMIT %d", limit)
 
 	s.proxySQL(w, stmt)
@@ -102,7 +108,7 @@ func (s *Server) handleGetInsight(w http.ResponseWriter, r *http.Request) {
 	}
 
 	stmt := fmt.Sprintf(
-		"SELECT insight_id, ts, summary, patterns, top_tip, model, sample_size, total_prompts, avg_score, sample_prompts, time_range "+
+		"SELECT insight_id, ts, summary, patterns, top_tip, model, sample_size, total_prompts, avg_score, sample_prompts, time_range, rubric_version "+
 			"FROM tma1_prompt_insights WHERE insight_id = '%s' ORDER BY ts DESC LIMIT 1",
 		escapeSQLString(insightID))
 

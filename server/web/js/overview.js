@@ -2,11 +2,13 @@ var overviewVersion = 0;
 var AGENT_LABELS = {
   claude_code: "Claude Code",
   codex: "Codex",
+  opencode: "OpenCode",
   copilot_cli: "Copilot CLI",
 };
 var AGENT_COLORS = {
   claude_code: "#de9876",
   codex: "#72b7a4",
+  opencode: "#c6a4ef",
   copilot_cli: "#a798d6",
 };
 
