@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.3.0-beta5
+
+- **GreptimeDB pinned to v1.3.1**, up from v1.3.0. The server and Unix
+  installer use the updated version by default.
+
 ## v0.3.0-beta4 — Cache-aware pricing
 
 - **Cache reads, cache writes and OpenAI Fast mode are priced.** Costs used
