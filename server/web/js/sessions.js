@@ -4,9 +4,25 @@
    sess_computeStats, sess_parseCCOTel, sess_parseCodexOTel, sess_collectConversationIds, sess_filterBySessionId, sess_lookupPrice, fmtDurSec, fmtTokens, fmtDurMs,
    renderSessionDetail, sess_scrollToEvent, sess_highlightAPICall */
 
+// Keywords are literal: LIKE metacharacters and the default `\` escape
+// are escaped, matching sqlutil.EscapeLike on the Go side.
 function sess_hookTermSQL(term) {
-  var e = escapeSQLString(term);
+  var e = escapeSQLString(term.replace(/[\\%_]/g, '\\$&'));
   return "(tool_name LIKE '%" + e + "%' OR tool_input LIKE '%" + e + "%' OR tool_result LIKE '%" + e + "%')";
+}
+
+// Session ids for the list. Activity is judged over every event in scope,
+// and each keyword gets its own aggregate: a keyword prefilter in WHERE
+// would drop the PreToolUse / UserPromptSubmit rows that mark a session
+// active whenever the keywords appear only in other events.
+function sess_listSessionIdsSQL(scopeWhere, terms) {
+  var having = "SUM(CASE WHEN event_type IN ('UserPromptSubmit','PreToolUse') THEN 1 ELSE 0 END) > 0";
+  for (var i = 0; i < terms.length; i++) {
+    having += " AND SUM(CASE WHEN " + sess_hookTermSQL(terms[i]) + " THEN 1 ELSE 0 END) > 0";
+  }
+  return "SELECT session_id FROM tma1_hook_events WHERE " + scopeWhere +
+    " GROUP BY session_id HAVING " + having +
+    " ORDER BY MAX(ts) DESC LIMIT 500";
 }
 
 var sessFilterTimer = null;
@@ -102,23 +118,7 @@ async function sess_loadList() {
   // avoids GreptimeDB planner memory issues — same approach as prompts.js pr_sourceSessionIDs.
   var activeWhere = supportedAgentWhere() + " AND ts > NOW() - INTERVAL '" + iv + "'";
   if (source) activeWhere += " AND agent_source = '" + escapeSQLString(source) + "'";
-  // Every term must match somewhere in the session, not necessarily in
-  // the same event.
-  var having = "SUM(CASE WHEN event_type IN ('UserPromptSubmit','PreToolUse') THEN 1 ELSE 0 END) > 0";
-  if (terms.length) {
-    activeWhere += " AND (" + terms.map(sess_hookTermSQL).join(' OR ') + ")";
-    if (terms.length > 1) {
-      having += terms.map(function(term) {
-        return " AND SUM(CASE WHEN " + sess_hookTermSQL(term) + " THEN 1 ELSE 0 END) > 0";
-      }).join('');
-    }
-  }
-  var idsRes = await query(
-    "SELECT session_id FROM tma1_hook_events WHERE " + activeWhere +
-    " GROUP BY session_id " +
-    " HAVING " + having +
-    " ORDER BY MAX(ts) DESC LIMIT 500"
-  );
+  var idsRes = await query(sess_listSessionIdsSQL(activeWhere, terms));
   var idRows = rowsToObjects(idsRes);
 
   var tbody = document.getElementById('sess-table-body');
