@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.3.0-beta6
+
+- **Session search takes several keywords.** The session list filter, the
+  Search tab, the session detail filter and the `search_sessions` MCP tool
+  split the query on whitespace and require every keyword. Double quotes
+  keep a phrase together: `"disk full"`. The session list and
+  `search_sessions` match keywords anywhere in a session; the Search tab and
+  the detail filter match them within one event or message.
+- **Sessions no longer drop out of the filtered list** when the keywords
+  appear only in tool results and not in the tool call itself.
+- **`%`, `_` and `\` in a keyword match literally** in the session list and
+  the Search tab.
+
 ## v0.3.0-beta5
 
 - **GreptimeDB pinned to v1.3.1**, up from v1.3.0. The server and Unix
