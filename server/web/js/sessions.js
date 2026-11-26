@@ -1,8 +1,29 @@
 /* Sessions view — orchestrator: KPI cards, session list, detail loading, search, tab change.
    Sub-modules: sessions-stats.js, sessions-detail.js, sessions-insights.js, sessions-waterfall.js, sessions-timeline.js */
-/* globals: query, rows, rowsToObjects, intervalSQL, fmtNum, fmtCost, escapeHTML, escapeJSString, escapeSQLString, tsToMs, t, loadPricing, modelPricing, AgentCanvas,
+/* globals: query, rows, rowsToObjects, intervalSQL, fmtNum, fmtCost, escapeHTML, escapeJSString, escapeSQLString, splitSearchTerms, tsToMs, t, loadPricing, modelPricing, AgentCanvas,
    sess_computeStats, sess_parseCCOTel, sess_parseCodexOTel, sess_collectConversationIds, sess_filterBySessionId, sess_lookupPrice, fmtDurSec, fmtTokens, fmtDurMs,
    renderSessionDetail, sess_scrollToEvent, sess_highlightAPICall */
+
+// Keywords are literal: LIKE metacharacters and the default `\` escape
+// are escaped, matching sqlutil.EscapeLike on the Go side.
+function sess_hookTermSQL(term) {
+  var e = escapeSQLString(term.replace(/[\\%_]/g, '\\$&'));
+  return "(tool_name LIKE '%" + e + "%' OR tool_input LIKE '%" + e + "%' OR tool_result LIKE '%" + e + "%')";
+}
+
+// Session ids for the list. Activity is judged over every event in scope,
+// and each keyword gets its own aggregate: a keyword prefilter in WHERE
+// would drop the PreToolUse / UserPromptSubmit rows that mark a session
+// active whenever the keywords appear only in other events.
+function sess_listSessionIdsSQL(scopeWhere, terms) {
+  var having = "SUM(CASE WHEN event_type IN ('UserPromptSubmit','PreToolUse') THEN 1 ELSE 0 END) > 0";
+  for (var i = 0; i < terms.length; i++) {
+    having += " AND SUM(CASE WHEN " + sess_hookTermSQL(terms[i]) + " THEN 1 ELSE 0 END) > 0";
+  }
+  return "SELECT session_id FROM tma1_hook_events WHERE " + scopeWhere +
+    " GROUP BY session_id HAVING " + having +
+    " ORDER BY MAX(ts) DESC LIMIT 500";
+}
 
 var sessFilterTimer = null;
 function sess_debouncedFilter() {
@@ -91,23 +112,13 @@ async function sess_loadCards() {
 async function sess_loadList() {
   var iv = intervalSQL();
   var source = document.getElementById('sess-source-filter').value;
-  var keyword = (document.getElementById('sess-keyword-filter').value || '').trim();
+  var terms = splitSearchTerms(document.getElementById('sess-keyword-filter').value);
 
   // Step 1: fetch active session IDs in the window. Two-step (instead of an IN-subquery)
   // avoids GreptimeDB planner memory issues — same approach as prompts.js pr_sourceSessionIDs.
   var activeWhere = supportedAgentWhere() + " AND ts > NOW() - INTERVAL '" + iv + "'";
   if (source) activeWhere += " AND agent_source = '" + escapeSQLString(source) + "'";
-  if (keyword) {
-    activeWhere += " AND (tool_name LIKE '%" + escapeSQLString(keyword) + "%'" +
-      " OR tool_input LIKE '%" + escapeSQLString(keyword) + "%'" +
-      " OR tool_result LIKE '%" + escapeSQLString(keyword) + "%')";
-  }
-  var idsRes = await query(
-    "SELECT session_id FROM tma1_hook_events WHERE " + activeWhere +
-    " GROUP BY session_id " +
-    " HAVING SUM(CASE WHEN event_type IN ('UserPromptSubmit','PreToolUse') THEN 1 ELSE 0 END) > 0" +
-    " ORDER BY MAX(ts) DESC LIMIT 500"
-  );
+  var idsRes = await query(sess_listSessionIdsSQL(activeWhere, terms));
   var idRows = rowsToObjects(idsRes);
 
   var tbody = document.getElementById('sess-table-body');
@@ -479,13 +490,15 @@ async function sess_loadDetail(sessionId, agentSource) {
 // ── Search ─────────────────────────────────────────────────────────────
 
 async function sess_search() {
-  var q = document.getElementById('sess-search-input').value.trim();
+  var terms = splitSearchTerms(document.getElementById('sess-search-input').value);
   var el = document.getElementById('sess-search-results');
-  if (!q) { el.innerHTML = ''; return; }
+  if (!terms.length) { el.innerHTML = ''; return; }
   var iv = intervalSQL();
+  var hookMatch = terms.map(sess_hookTermSQL).join(' AND ');
+  var msgMatch = terms.map(function(term) { return "matches_term(content, '" + escapeSQLString(term) + "')"; }).join(' AND ');
   var results = await Promise.all([
-    query("SELECT session_id, ts, 'hook' AS src, event_type AS msg_type, tool_name, agent_source, COALESCE(tool_input, '') AS content FROM tma1_hook_events WHERE (tool_name LIKE '%" + escapeSQLString(q) + "%' OR tool_input LIKE '%" + escapeSQLString(q) + "%' OR tool_result LIKE '%" + escapeSQLString(q) + "%') AND ts > NOW() - INTERVAL '" + iv + "' ORDER BY ts DESC LIMIT 25").catch(function() { return null; }),
-    query("SELECT session_id, ts, 'msg' AS src, message_type AS msg_type, '' AS tool_name, '' AS agent_source, COALESCE(content, '') AS content FROM tma1_messages WHERE matches_term(content, '" + escapeSQLString(q) + "') AND ts > NOW() - INTERVAL '" + iv + "' ORDER BY ts DESC LIMIT 25").catch(function() { return null; }),
+    query("SELECT session_id, ts, 'hook' AS src, event_type AS msg_type, tool_name, agent_source, COALESCE(tool_input, '') AS content FROM tma1_hook_events WHERE " + hookMatch + " AND ts > NOW() - INTERVAL '" + iv + "' ORDER BY ts DESC LIMIT 25").catch(function() { return null; }),
+    query("SELECT session_id, ts, 'msg' AS src, message_type AS msg_type, '' AS tool_name, '' AS agent_source, COALESCE(content, '') AS content FROM tma1_messages WHERE " + msgMatch + " AND ts > NOW() - INTERVAL '" + iv + "' ORDER BY ts DESC LIMIT 25").catch(function() { return null; }),
   ]);
   var data = [];
   if (results[0]) data = data.concat(rowsToObjects(results[0]));

@@ -63,6 +63,12 @@ search widens to a case-folded substring scan and tells you so with
 `match_mode: substring` — that is the mode that rescues a mistyped case,
 at the cost of noisier hits.
 
+Several space-separated words are ANDed: a session matches only when every
+word appears somewhere in its conversation, not necessarily in the same
+message. Wrap a phrase in double quotes (`"disk full"`) to require the
+words adjacent. Too many words narrows to nothing; drop the least specific
+one before concluding there is no such session.
+
 ## Related
 
 - Browsing by agent rather than keyword → `/tma1-peer`.

@@ -278,7 +278,7 @@ func (t SearchSessionsTool) Definition() Tool {
 			Properties: map[string]Property{
 				"query": {
 					Type:        "string",
-					Description: "Keyword or phrase to look for in conversation content.",
+					Description: "Space-separated keywords; a session matches when every keyword appears somewhere in its conversation. Wrap a phrase in double quotes to match its words adjacent.",
 				},
 				"agent_source": {
 					Type:        "string",

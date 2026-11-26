@@ -1,5 +1,5 @@
 /* Sessions — timeline item rendering, filtering, and search helpers. */
-/* globals: escapeHTML, escapeJSString, t, tsToMs, sessTimelineData, fmtDurMs,
+/* globals: escapeHTML, escapeJSString, splitSearchTerms, t, tsToMs, sessTimelineData, fmtDurMs,
             sess_toggleDurPopover */
 
 // ── Timeline filter ───────────────────────────────────────────────────
@@ -39,7 +39,7 @@ function sess_applyFilters() {
 // (new detail open or filter change).
 function sess_renderTimelineWindow(reset) {
   var filterEl = document.getElementById('sess-detail-filter');
-  var keyword = ((filterEl && filterEl.value) || '').toLowerCase().trim();
+  var keywords = splitSearchTerms(((filterEl && filterEl.value) || '').toLowerCase());
   sessFilteredData = sessTimelineData.filter(function(item) {
     if (sessActiveToolFilter) {
       var tn = null;
@@ -48,12 +48,13 @@ function sess_renderTimelineWindow(reset) {
       else if (item.source === 'message' && item.data.tool_name) tn = item.data.tool_name;
       if (tn !== sessActiveToolFilter) return false;
     }
-    if (keyword) {
+    if (keywords.length) {
       var text = '';
       if (item.source === 'tool_pair') text = (item.data.tool_name || '') + ' ' + (item.data.tool_input || '') + ' ' + (item.data.tool_result || '');
       else if (item.source === 'hook') text = (item.data.tool_name || '') + ' ' + (item.data.tool_input || '') + ' ' + (item.data.tool_result || '') + ' ' + (item.data.message || '');
       else text = (item.data.content || '') + ' ' + (item.data.tool_name || '');
-      if (text.toLowerCase().indexOf(keyword) === -1) return false;
+      text = text.toLowerCase();
+      if (!keywords.every(function(k) { return text.indexOf(k) !== -1; })) return false;
     }
     return true;
   });
