@@ -181,6 +181,28 @@ function escapeSQLString(s) {
   return s ? s.replace(/'/g, "''") : '';
 }
 
+// Splits a search box value into terms: whitespace separates terms and a
+// double-quoted run stays one phrase. Mirrors splitQuery in
+// server/internal/perception/search.go.
+function splitSearchTerms(q) {
+  var terms = [];
+  var cur = '';
+  var inQuote = false;
+  function flush() {
+    var term = cur.trim();
+    if (term) terms.push(term);
+    cur = '';
+  }
+  for (var i = 0; i < (q || '').length; i++) {
+    var c = q[i];
+    if (c === '"') { flush(); inQuote = !inQuote; }
+    else if (/\s/.test(c) && !inQuote) flush();
+    else cur += c;
+  }
+  flush();
+  return terms;
+}
+
 // ===================================================================
 // Dynamic model pricing (loaded from tma1_model_pricing table)
 // ===================================================================

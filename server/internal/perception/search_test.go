@@ -1,6 +1,7 @@
 package perception
 
 import (
+	"slices"
 	"strings"
 	"testing"
 )
@@ -27,7 +28,7 @@ func TestBuildSearchScopeSQL(t *testing.T) {
 
 func TestBuildSearchCandidatesSQLScoped(t *testing.T) {
 	sids := []string{"'a'", "'b'"}
-	got := buildSearchCandidatesSQL("peer", MatchModeTerm, sids, 120, 5)
+	got := buildSearchCandidatesSQL([]string{"peer"}, MatchModeTerm, sids, 120, 5)
 	for _, want := range []string{
 		"matches_term(content, 'peer')",
 		"AND session_id IN ('a','b')",
@@ -41,7 +42,7 @@ func TestBuildSearchCandidatesSQLScoped(t *testing.T) {
 
 	// The substring pass must stay inside the same scope — otherwise the
 	// widened search can surface other projects' sessions.
-	sub := buildSearchCandidatesSQL("peer", MatchModeSubstring, sids, 120, 5)
+	sub := buildSearchCandidatesSQL([]string{"peer"}, MatchModeSubstring, sids, 120, 5)
 	if !strings.Contains(sub, "AND session_id IN ('a','b')") {
 		t.Errorf("substring pass dropped the scope:\n%s", sub)
 	}
@@ -49,9 +50,36 @@ func TestBuildSearchCandidatesSQLScoped(t *testing.T) {
 		t.Errorf("substring pass missing case-folded LIKE clause:\n%s", sub)
 	}
 
-	unscoped := buildSearchCandidatesSQL("peer", MatchModeTerm, nil, 120, 5)
+	unscoped := buildSearchCandidatesSQL([]string{"peer"}, MatchModeTerm, nil, 120, 5)
 	if strings.Contains(unscoped, "session_id IN") {
 		t.Errorf("unscoped search should not emit an IN clause:\n%s", unscoped)
+	}
+}
+
+func TestBuildSearchCandidatesSQLMultiTerm(t *testing.T) {
+	got := buildSearchCandidatesSQL([]string{"flow", "disk full"}, MatchModeTerm, nil, 120, 5)
+	for _, want := range []string{
+		"(matches_term(content, 'flow') OR matches_term(content, 'disk full'))",
+		"HAVING SUM(CASE WHEN matches_term(content, 'flow') THEN 1 ELSE 0 END) > 0 AND SUM(CASE WHEN matches_term(content, 'disk full') THEN 1 ELSE 0 END) > 0",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("buildSearchCandidatesSQL() missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestSplitQuery(t *testing.T) {
+	cases := map[string][]string{
+		"flow  disk":             {"flow", "disk"},
+		`flow "disk full" error`: {"flow", "disk full", "error"},
+		`"unclosed phrase`:       {"unclosed phrase"},
+		`"" `:                    nil,
+		"关键字 检索":                 {"关键字", "检索"},
+	}
+	for in, want := range cases {
+		if got := splitQuery(in); !slices.Equal(got, want) {
+			t.Errorf("splitQuery(%q) = %q, want %q", in, got, want)
+		}
 	}
 }
 
@@ -68,12 +96,12 @@ func TestMatchClauseEscapes(t *testing.T) {
 
 func TestSnippetAround(t *testing.T) {
 	short := "a short message about peers"
-	if got := snippetAround(short, "peers"); got != short {
+	if got := snippetAround(short, []string{"peers"}); got != short {
 		t.Errorf("short content should pass through, got %q", got)
 	}
 
 	long := strings.Repeat("x", 400) + "NEEDLE" + strings.Repeat("y", 400)
-	got := snippetAround(long, "needle")
+	got := snippetAround(long, []string{"needle"})
 	if !strings.Contains(got, "NEEDLE") {
 		t.Errorf("snippet lost the match: %q", got)
 	}
@@ -87,20 +115,26 @@ func TestSnippetAround(t *testing.T) {
 	// A CJK snippet must get the same number of characters as an ASCII
 	// one, not a third of them.
 	cjkWide := strings.Repeat("观", 400) + "关键字" + strings.Repeat("测", 400)
-	wide := snippetAround(cjkWide, "关键字")
+	wide := snippetAround(cjkWide, []string{"关键字"})
 	if n := len([]rune(wide)); n < snippetRadius*2 {
 		t.Errorf("CJK snippet only %d runes; radius is measured in runes, not bytes", n)
 	}
 
 	// Term matching can hit on a tokenised form that isn't a literal
 	// substring; fall back to the head rather than returning nothing.
-	if got := snippetAround(long, "absent"); !strings.HasPrefix(got, "xxx") {
+	if got := snippetAround(long, []string{"absent"}); !strings.HasPrefix(got, "xxx") {
 		t.Errorf("no-match fallback should return the head, got %q", got)
+	}
+
+	// With several terms the window centres on whichever occurs first.
+	twoTerms := strings.Repeat("x", 400) + "FIRST" + strings.Repeat("y", 400) + "SECOND"
+	if got := snippetAround(twoTerms, []string{"second", "first"}); !strings.Contains(got, "FIRST") {
+		t.Errorf("snippet should centre on the earliest term: %q", got)
 	}
 
 	// Multi-byte content must not be cut mid-rune.
 	cjk := strings.Repeat("观测", 300) + "关键字" + strings.Repeat("会话", 300)
-	if got := snippetAround(cjk, "关键字"); !strings.Contains(got, "关键字") || !isValidUTF8(got) {
+	if got := snippetAround(cjk, []string{"关键字"}); !strings.Contains(got, "关键字") || !isValidUTF8(got) {
 		t.Errorf("multi-byte snippet broken: %q", got)
 	}
 }

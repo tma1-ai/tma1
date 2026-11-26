@@ -171,7 +171,7 @@ for "how did we fix this before" / "what did we decide about X".
 
 | Arg | Type | Default | Description |
 |-----|------|---------|-------------|
-| `query` | string | required | Keyword or phrase |
+| `query` | string | required | Space-separated keywords, all required (each may match a different message of the session); `"..."` keeps a phrase together |
 | `agent_source` | string | "" (every agent, including the caller) | Same values and aliases as `get_peer_sessions` |
 | `project` | string | derived from cwd | `"*"` searches every project |
 | `since_min` | integer | 10080 (7 days) | Lookback window in minutes |

@@ -7,6 +7,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/tma1-ai/tma1/server/internal/strutil"
 )
@@ -80,7 +82,8 @@ type Snippet struct {
 const snippetRadius = 120
 
 // SearchSessions finds sessions whose conversation content matches
-// `query`, scoped to a project / agent / time window.
+// every term of `query` (see splitQuery), scoped to a project / agent /
+// time window. Terms may match different messages of the same session.
 //
 // Order matters: the project + agent scope is resolved FIRST, then the
 // keyword search runs inside that scope. Searching first and filtering
@@ -89,7 +92,8 @@ const snippetRadius = 120
 // term→substring decision depend on other projects' data.
 func (b *Bundler) SearchSessions(ctx context.Context, opts SearchOptions) (*SearchResults, error) {
 	query := strings.TrimSpace(opts.Query)
-	if query == "" {
+	terms := splitQuery(query)
+	if len(terms) == 0 {
 		return nil, fmt.Errorf("query is required")
 	}
 	agent, err := b.resolveAgentAlias(opts.AgentSource)
@@ -128,13 +132,13 @@ func (b *Bundler) SearchSessions(ctx context.Context, opts SearchOptions) (*Sear
 
 	// Step 2 — search inside the scope, widening term→substring only
 	// when the scoped term pass comes back empty.
-	rows, err := b.searchCandidates(ctx, query, MatchModeTerm, sids, sinceMin, limit)
+	rows, err := b.searchCandidates(ctx, terms, MatchModeTerm, sids, sinceMin, limit)
 	if err != nil {
 		return nil, err
 	}
 	if len(rows) == 0 {
 		res.MatchMode = MatchModeSubstring
-		rows, err = b.searchCandidates(ctx, query, MatchModeSubstring, sids, sinceMin, limit)
+		rows, err = b.searchCandidates(ctx, terms, MatchModeSubstring, sids, sinceMin, limit)
 		if err != nil {
 			return nil, err
 		}
@@ -168,7 +172,7 @@ func (b *Bundler) SearchSessions(ctx context.Context, opts SearchOptions) (*Sear
 		wg.Add(1)
 		go func(h *SessionHit) {
 			defer wg.Done()
-			h.Snippets = b.fetchSnippets(ctx, h.SessionID, query, res.MatchMode, snippetLimit)
+			h.Snippets = b.fetchSnippets(ctx, h.SessionID, terms, res.MatchMode, snippetLimit)
 		}(&hits[i])
 	}
 	wg.Wait()
@@ -194,8 +198,8 @@ func (b *Bundler) searchScope(ctx context.Context, agent, project string, sinceM
 	return sids, nil
 }
 
-func (b *Bundler) searchCandidates(ctx context.Context, query, mode string, sids []string, sinceMin, limit int) ([][]any, error) {
-	_, rows, err := b.client.Query(ctx, buildSearchCandidatesSQL(query, mode, sids, sinceMin, limit))
+func (b *Bundler) searchCandidates(ctx context.Context, terms []string, mode string, sids []string, sinceMin, limit int) ([][]any, error) {
+	_, rows, err := b.client.Query(ctx, buildSearchCandidatesSQL(terms, mode, sids, sinceMin, limit))
 	if err != nil {
 		return nil, fmt.Errorf("search sessions (%s): %w", mode, err)
 	}
@@ -272,13 +276,13 @@ func (b *Bundler) attributeHits(ctx context.Context, hits []SessionHit) {
 	}
 }
 
-func (b *Bundler) fetchSnippets(ctx context.Context, sessionID, query, mode string, limit int) []Snippet {
+func (b *Bundler) fetchSnippets(ctx context.Context, sessionID string, terms []string, mode string, limit int) []Snippet {
 	sql := fmt.Sprintf(
 		`SELECT CAST(ts AS BIGINT) AS ts_ms, "role", message_type, content
 		 FROM tma1_messages
 		 WHERE session_id = '%s' AND %s AND %s
 		 ORDER BY ts DESC LIMIT %d`,
-		escapeSQL(sessionID), syntheticMessageFilter, matchClause(query, mode), limit,
+		escapeSQL(sessionID), syntheticMessageFilter, anyTermClause(terms, mode), limit,
 	)
 	_, rows, err := b.client.Query(ctx, sql)
 	if err != nil {
@@ -292,7 +296,7 @@ func (b *Bundler) fetchSnippets(ctx context.Context, sessionID, query, mode stri
 			Timestamp:   time.UnixMilli(int64At(r, 0)),
 			Role:        stringAt(r, 1),
 			MessageType: stringAt(r, 2),
-			Text:        snippetAround(stringAt(r, 3), query),
+			Text:        snippetAround(stringAt(r, 3), terms),
 		})
 	}
 	return out
@@ -317,12 +321,21 @@ func buildSearchScopeSQL(agent, project string, sinceMin int) string {
 }
 
 // buildSearchCandidatesSQL ranks matching sessions by their most recent
-// matching message. `sids` are already SQL-quoted; nil means "no scope
-// restriction".
-func buildSearchCandidatesSQL(query, mode string, sids []string, sinceMin, limit int) string {
+// message matching any term; HAVING keeps only sessions where every term
+// matched at least once. `sids` are already SQL-quoted; nil means "no
+// scope restriction".
+func buildSearchCandidatesSQL(terms []string, mode string, sids []string, sinceMin, limit int) string {
 	scope := ""
 	if len(sids) > 0 {
 		scope = fmt.Sprintf("AND session_id IN (%s) ", strings.Join(sids, ","))
+	}
+	having := ""
+	if len(terms) > 1 {
+		conds := make([]string, len(terms))
+		for i, t := range terms {
+			conds[i] = fmt.Sprintf("SUM(CASE WHEN %s THEN 1 ELSE 0 END) > 0", matchClause(t, mode))
+		}
+		having = "HAVING " + strings.Join(conds, " AND ")
 	}
 	return fmt.Sprintf(
 		`SELECT session_id,
@@ -334,10 +347,47 @@ func buildSearchCandidatesSQL(query, mode string, sids []string, sinceMin, limit
 		   AND %s
 		   %s
 		 GROUP BY session_id
+		 %s
 		 ORDER BY last_ms DESC
 		 LIMIT %d`,
-		sinceMin, syntheticMessageFilter, matchClause(query, mode), scope, limit,
+		sinceMin, syntheticMessageFilter, anyTermClause(terms, mode), scope, having, limit,
 	)
+}
+
+// splitQuery breaks a search query into terms: whitespace separates
+// terms, and a double-quoted run stays one phrase ("disk full" only
+// matches the two words adjacent). An unclosed quote runs to the end.
+func splitQuery(q string) []string {
+	var terms []string
+	var cur strings.Builder
+	inQuote := false
+	flush := func() {
+		if t := strings.TrimSpace(cur.String()); t != "" {
+			terms = append(terms, t)
+		}
+		cur.Reset()
+	}
+	for _, r := range q {
+		switch {
+		case r == '"':
+			flush()
+			inQuote = !inQuote
+		case unicode.IsSpace(r) && !inQuote:
+			flush()
+		default:
+			cur.WriteRune(r)
+		}
+	}
+	flush()
+	return terms
+}
+
+func anyTermClause(terms []string, mode string) string {
+	conds := make([]string, len(terms))
+	for i, t := range terms {
+		conds[i] = matchClause(t, mode)
+	}
+	return "(" + strings.Join(conds, " OR ") + ")"
 }
 
 func matchClause(query, mode string) string {
@@ -349,20 +399,19 @@ func matchClause(query, mode string) string {
 	return fmt.Sprintf("matches_term(content, '%s')", escapeSQL(query))
 }
 
-// snippetAround centres a window on the first occurrence of query.
+// snippetAround centres a window on the earliest occurrence of any term.
 // Term matching can hit on a tokenised form that isn't a literal
 // substring, in which case we fall back to the head of the message.
 //
 // The window is measured in runes, not bytes: a byte radius gives a CJK
 // reader a third of the context an English one gets.
-func snippetAround(content, query string) string {
+func snippetAround(content string, terms []string) string {
 	runes := []rune(content)
-	qLen := len([]rune(query))
+	idx, qLen := firstTermIndexFold(content, terms)
 	width := snippetRadius*2 + qLen
 	if len(runes) <= width {
 		return content
 	}
-	idx := runeIndexFold(runes, query)
 	if idx < 0 {
 		return string(runes[:width]) + "…"
 	}
@@ -378,14 +427,21 @@ func snippetAround(content, query string) string {
 	return out
 }
 
-// runeIndexFold returns the rune offset of the first case-insensitive
-// occurrence of query, or -1.
-func runeIndexFold(runes []rune, query string) int {
-	byteIdx := strings.Index(strings.ToLower(string(runes)), strings.ToLower(query))
-	if byteIdx < 0 {
-		return -1
+// firstTermIndexFold returns the rune offset and rune length of the
+// earliest case-insensitive term occurrence, or -1 when none occurs.
+func firstTermIndexFold(content string, terms []string) (idx, length int) {
+	lower := strings.ToLower(content)
+	idx = -1
+	for _, t := range terms {
+		b := strings.Index(lower, strings.ToLower(t))
+		if b < 0 {
+			continue
+		}
+		if r := utf8.RuneCountInString(lower[:b]); idx < 0 || r < idx {
+			idx, length = r, utf8.RuneCountInString(t)
+		}
 	}
-	return len([]rune(strings.ToLower(string(runes))[:byteIdx]))
+	return idx, length
 }
 
 // TranscriptOptions parameterises GetSessionTranscript.
